@@ -44,7 +44,7 @@ export class ToolApprovalManager {
   }
 }
 
-/** 只接受完整匹配的单条命令；自动模式由文件工具实现，不启动 Shell。 */
+/** 只接受完整匹配的单条命令；项目自审模式由文件工具实现，不启动 Shell。 */
 export function safeLocationCommand(command: string): boolean {
   return /^(?:pwd|Get-Location)\s*$/i.test(command.trim())
 }
@@ -151,7 +151,7 @@ export function readOnlyCommand(command: string): boolean {
   return readOnlyStatements(command)?.every(readOnlyStatement) ?? false
 }
 
-/** 默认或受限模式中的敏感路径；完全访问模式不再逐项确认。 */
+/** 每次询问或项目自审模式中的敏感路径；完全访问模式不再逐项确认。 */
 export function highRiskFileMutation(target: string): boolean {
   const normalized = target.replace(/\\/g, '/').toLowerCase()
   return /^(?:[a-z]:\/(?:windows|program files(?: \(x86\))?|programdata)(?:\/|$)|\/(?:etc|boot|system|library|bin|sbin)(?:\/|$)|\/usr\/(?:bin|sbin|lib)(?:\/|$))/.test(normalized)

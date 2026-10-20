@@ -28,14 +28,15 @@ function Sparkline({ samples }: { samples: OutputSpeed['samples'] }): React.JSX.
 /** 输入框右上角（外侧）的输出速度提示：纯文本展示，绝对定位不占布局空间。 */
 export function SpeedIndicator({ speed }: { speed: OutputSpeed }): React.JSX.Element {
   const current = speed.recentTokensPerSecond || speed.averageTokensPerSecond
+  const rateText = current > 0 ? aboutRate(current) : '测速中…'
   return <Tooltip.Provider delayDuration={180}>
     <Tooltip.Root>
-      <Tooltip.Trigger asChild><span className="composer-speed" aria-label="输出速度">{duration(speed.elapsedMs)} · {aboutRate(current)}</span></Tooltip.Trigger>
+      <Tooltip.Trigger asChild><span className="composer-speed" aria-label="输出速度">{duration(speed.elapsedMs)} · {rateText}</span></Tooltip.Trigger>
       <Tooltip.Portal><Tooltip.Content className="composer-status-tooltip speed-tooltip" side="top" align="end" sideOffset={8} collisionPadding={12}>
         <div className="speed-tooltip-heading">
           <div className="speed-tooltip-current">
             <span className="speed-tooltip-label">最近速度</span>
-            <span className="speed-tooltip-value">约{Math.max(1, Math.round(current))}<small> tok/s</small></span>
+            <span className="speed-tooltip-value">{current > 0 ? `约${Math.max(1, Math.round(current))}<small> tok/s</small>` : '测速中…'}</span>
           </div>
           <Sparkline samples={speed.samples} />
         </div>

@@ -10,6 +10,7 @@ import { PERMISSION_MODES, type PermissionMode } from '../../shared/models'
 import { MAX_COMBINED_PROMPT_LENGTH } from '../../shared/prompts'
 import { OpenrouterClient } from './openrouter-client'
 import { requiredString } from './model-validation'
+import path from 'node:path'
 
 export async function modelResult<T>(action: () => Promise<T>): Promise<ModelResult<T>> {
   try { return { ok: true, value: await action() } }
@@ -17,7 +18,7 @@ export async function modelResult<T>(action: () => Promise<T>): Promise<ModelRes
 }
 
 export class ModelService {
-  private pending = new Map<string, { conversationId?: string; controller: AbortController }>()
+  private pending = new Map<string, { conversationId?: string; project?: string; controller: AbortController }>()
   private permissionPrompts = new Map<string, AbortController>()
   constructor(private readonly store: ModelSettingsStore, private readonly client: PiAgentService | ModelClient, private readonly ollama = new OllamaClient(), private readonly openrouter = new OpenrouterClient()) {}
   async connectOpenrouter(value?: unknown): Promise<ModelSettings> {
@@ -39,6 +40,12 @@ export class ModelService {
     return conversationId === undefined
       ? this.pending.size > 0 || this.permissionPrompts.size > 0
       : [...this.pending.values()].some(request => request.conversationId === conversationId) || this.permissionPrompts.has(conversationId)
+  }
+
+  /** 判断指定项目是否有会话正在执行；其他项目的执行不影响该项目。 */
+  isProjectBusy(project: string): boolean {
+    const target = path.resolve(project)
+    return [...this.pending.values()].some(request => request.project && path.resolve(request.project) === target)
   }
   async confirmFullPermission(id: unknown): Promise<boolean> {
     const conversationId = profileId(id)
@@ -99,7 +106,7 @@ export class ModelService {
       ? [...this.pending.values()].some(request => request.conversationId === undefined)
       : this.isBusy(conversationId))) throw new ModelError('已有模型请求运行，请等待完成或取消')
     const controller = new AbortController()
-    this.pending.set(operationId, { conversationId, controller })
+    this.pending.set(operationId, { conversationId, project: agentOptions?.project ?? undefined, controller })
     let timer: ReturnType<typeof setTimeout> | undefined
     let timedOut = false
     try {

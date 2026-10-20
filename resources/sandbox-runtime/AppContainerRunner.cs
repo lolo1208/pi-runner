@@ -17,6 +17,8 @@ class AppContainerRunner {
   [StructLayout(LayoutKind.Sequential)] struct Limits { public long processTime,jobTime; public uint flags; public UIntPtr minimum,maximum; public uint active; public UIntPtr affinity; public uint priority,scheduling; }
   [StructLayout(LayoutKind.Sequential)] struct IoCounters { public ulong r,w,o,rb,wb,ob; }
   [StructLayout(LayoutKind.Sequential)] struct JobLimits { public Limits limits; public IoCounters io; public UIntPtr pm,jm,ppm,pjm; }
+  [StructLayout(LayoutKind.Sequential)] struct FileTime { public uint Low,High; }
+  [StructLayout(LayoutKind.Sequential)] struct FileInfo { public uint Attributes; public FileTime Creation,Access,Write; public uint Volume,SizeHigh,SizeLow,Links,IndexHigh,IndexLow; }
   [DllImport("userenv.dll",CharSet=CharSet.Unicode)] static extern int DeriveAppContainerSidFromAppContainerName(string name,out IntPtr sid);
   [DllImport("userenv.dll",CharSet=CharSet.Unicode)] static extern int CreateAppContainerProfile(string name,string display,string description,IntPtr caps,uint count,out IntPtr sid);
   [DllImport("userenv.dll",CharSet=CharSet.Unicode)] static extern int DeleteAppContainerProfile(string name);
@@ -41,6 +43,7 @@ class AppContainerRunner {
   [DllImport("kernel32.dll")] static extern bool GetExitCodeProcess(IntPtr process,out uint code);
   [DllImport("kernel32.dll")] static extern bool TerminateProcess(IntPtr process,uint code);
   [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+  [DllImport("kernel32.dll",SetLastError=true)] static extern bool GetFileInformationByHandle(IntPtr handle,out FileInfo info);
   static void Require(bool ok,string action) { if(!ok) throw new Win32Exception(Marshal.GetLastWin32Error(),action); }
   static string Canonical(IntPtr handle) { var result=new StringBuilder(32768); uint n=GetFinalPathNameByHandleW(handle,result,(uint)result.Capacity,0); Require(n>0 && n<result.Capacity,"无法确认目录边界"); string p=result.ToString(); return p.StartsWith("\\\\?\\UNC\\") ? "\\\\"+p.Substring(8) : p.StartsWith("\\\\?\\") ? p.Substring(4) : p; }
   static bool Within(string p,string root) { return p.Equals(root,StringComparison.OrdinalIgnoreCase)||p.StartsWith(root.TrimEnd('\\')+"\\",StringComparison.OrdinalIgnoreCase); }
@@ -50,9 +53,12 @@ class AppContainerRunner {
     Require(h!=new IntPtr(-1),"无法设置项目隔离权限："+entry);
     try {
       Require(Within(Canonical(h),root),"文件路径已越过项目边界");
+      FileInfo info; Require(GetFileInformationByHandle(h,out info),"无法确认文件权限边界："+entry);
+      if((info.Attributes&(uint)FileAttributes.ReparsePoint)!=0) throw new IOException("授权路径已变为链接："+entry);
+      bool directory=(info.Attributes&(uint)FileAttributes.Directory)!=0;
+      if(!directory && info.Links>1) throw new IOException("不能向硬链接文件授予临时权限，以免影响项目外的同一文件："+entry);
       uint needed; GetKernelObjectSecurity(h,4,null,0,out needed); var bytes=new byte[needed]; Require(GetKernelObjectSecurity(h,4,bytes,needed,out needed),"无法读取项目权限");
       var descriptor=new RawSecurityDescriptor(bytes,0);
-      bool directory=(File.GetAttributes(entry)&FileAttributes.Directory)!=0;
       var acl=descriptor.DiscretionaryAcl;
       if(acl==null) throw new InvalidOperationException("项目权限缺少访问控制列表，无法建立严格隔离");
       var inheritance=directory ? AceFlags.ContainerInherit|AceFlags.ObjectInherit : AceFlags.None;
@@ -64,12 +70,28 @@ class AppContainerRunner {
       Require(SetKernelObjectSecurity(h,4,bytes),"无法写入项目隔离权限");
     } finally { CloseHandle(h); }
   }
+  static void ValidateTree(string root) {
+    // 修改首个 ACL 前检查硬链接；硬链接共享权限，路径边界不足以隔离它。
+    var pending=new Stack<string>(); pending.Push(root);
+    while(pending.Count>0) {
+      string p=pending.Pop(); var attrs=File.GetAttributes(p); if((attrs&FileAttributes.ReparsePoint)!=0) { if(p==root) throw new IOException("隔离根目录不能是链接："+root); continue; }
+      var h=CreateFileW(p,0x80,7,IntPtr.Zero,3,0x02200000,IntPtr.Zero);
+      Require(h!=new IntPtr(-1),"无法检查隔离文件："+p);
+      try {
+        Require(Within(Canonical(h),root),"检查路径已越过项目边界");
+        FileInfo info; Require(GetFileInformationByHandle(h,out info),"无法检查隔离文件身份："+p);
+        if((info.Attributes&(uint)FileAttributes.ReparsePoint)!=0) throw new IOException("隔离路径检查期间发生重定向："+p);
+        if((info.Attributes&(uint)FileAttributes.Directory)==0 && info.Links>1) throw new IOException("AppContainer 无法安全授权硬链接文件，请使用原生隔离或独立文件副本："+p);
+      } finally { CloseHandle(h); }
+      if((attrs&FileAttributes.Directory)!=0) foreach(string child in Directory.EnumerateFileSystemEntries(p)) pending.Push(child);
+    }
+  }
   static void GrantTree(string root,SecurityIdentifier sid,List<string> protectedPaths) {
     var pending=new Stack<string>(); pending.Push(root);
     while(pending.Count>0) {
       string p=pending.Pop(); var attrs=File.GetAttributes(p); if((attrs&FileAttributes.ReparsePoint)!=0) continue;
       bool deny=false,readOnly=false;
-      foreach(var target in protectedPaths) if(Within(p,target)) { if(Path.GetFileName(target)==".git") readOnly=true; else deny=true; }
+      foreach(var target in protectedPaths) if(Within(p,target)) { if(Path.GetFileName(target).Equals(".git",StringComparison.OrdinalIgnoreCase)) readOnly=true; else deny=true; }
       Grant(p,root,sid,readOnly,deny);
       if((attrs&FileAttributes.Directory)!=0) foreach(string child in Directory.EnumerateFileSystemEntries(p)) pending.Push(child);
     }
@@ -84,9 +106,13 @@ class AppContainerRunner {
     }
   }
   static void RemoveGrant(string entry,string root,SecurityIdentifier sid) {
-    var h=CreateFileW(entry,0x60080,7,IntPtr.Zero,3,0x02200000,IntPtr.Zero); if(h==new IntPtr(-1)) return;
+    var h=CreateFileW(entry,0x60080,7,IntPtr.Zero,3,0x02200000,IntPtr.Zero);
+    Require(h!=new IntPtr(-1),"无法打开待清理权限的路径："+entry);
     try {
-      Require(Within(Canonical(h),root),"清理路径已越过项目边界"); uint needed; GetKernelObjectSecurity(h,4,null,0,out needed); var bytes=new byte[needed]; Require(GetKernelObjectSecurity(h,4,bytes,needed,out needed),"无法读取临时隔离权限");
+      Require(Within(Canonical(h),root),"清理路径已越过项目边界");
+      FileInfo info; Require(GetFileInformationByHandle(h,out info),"无法确认清理文件身份");
+      if((info.Attributes&(uint)FileAttributes.ReparsePoint)!=0) throw new IOException("权限清理路径已变为链接："+entry);
+      uint needed; GetKernelObjectSecurity(h,4,null,0,out needed); var bytes=new byte[needed]; Require(GetKernelObjectSecurity(h,4,bytes,needed,out needed),"无法读取临时隔离权限");
       var descriptor=new RawSecurityDescriptor(bytes,0); var acl=descriptor.DiscretionaryAcl; bool changed=false;
       if(acl==null) return;
       for(int i=acl.Count-1;i>=0;i--) { var ace=acl[i] as KnownAce; if(ace!=null && ace.SecurityIdentifier.Equals(sid)) { acl.RemoveAce(i); changed=true; } }
@@ -99,6 +125,7 @@ class AppContainerRunner {
     finally { for(uint i=0;i<gc;i++) LocalFree(Marshal.ReadIntPtr(groups,(int)i*IntPtr.Size)); LocalFree(groups); LocalFree(sids); }
   }
   static int Execute(string moniker,string project,string scratch,string encoded,List<string> protectedPaths) {
+    ValidateTree(project); ValidateTree(scratch);
     IntPtr sid; int profileResult=CreateAppContainerProfile(moniker,moniker,"Pi Runner 临时命令隔离",IntPtr.Zero,0,out sid);
     bool created=profileResult==0;
     if(profileResult==unchecked((int)0x800700b7)) Marshal.ThrowExceptionForHR(DeriveAppContainerSidFromAppContainerName(moniker,out sid)); else Marshal.ThrowExceptionForHR(profileResult);

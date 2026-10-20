@@ -1,6 +1,6 @@
 import { Button } from '@/components/ui/button'
 import { Modal } from '@/components/ui/modal'
-import { ChevronRight, MessageCircleQuestion, LoaderCircle, MessageCircle, SlidersHorizontal, MessageCirclePlus, Trash2 } from 'lucide-react'
+import { ChevronRight, MessageCircleQuestion, LoaderCircle, MessageCircle, SquarePen, SlidersHorizontal, MessageCirclePlus, Trash2 } from 'lucide-react'
 import { useLayoutEffect, useRef, useState } from 'react'
 import { UNLINKED_PROJECT_LABEL, type Task } from '../app-types'
 import { formatTaskTime } from '../task-time'
@@ -86,10 +86,11 @@ export function TaskProjectHeading({ root, tasks, waitingTaskIds, projectBusy, c
 export function TaskProjectRow({ task, currentTaskId, busyTaskIds, waitingTaskIds, now = Date.now(), creationDisabled = false, onSelectTask, onEditTask, onRemoveTask, onRequestTaskRemoval }: Pick<TaskProjectGroupProps, 'currentTaskId' | 'busyTaskIds' | 'waitingTaskIds' | 'now' | 'creationDisabled' | 'onSelectTask' | 'onEditTask' | 'onRemoveTask' | 'onRequestTaskRemoval'> & { task: Task }): React.JSX.Element {
   const busy = busyTaskIds.includes(task.id)
   const waiting = waitingTaskIds.includes(task.id)
+  const editing = !busy && !waiting && !task.unreadCompletion && Boolean(task.draft?.trim() || task.draftImages?.length || task.draftSkillIds?.length)
   const time = formatTaskTime(task.updatedAt, now)
   return <div className={`task-row ${task.id === currentTaskId ? 'selected' : ''} ${busy ? 'running' : ''}`} key={task.id}>
   <Button className={`task-item project-task-item ${task.id === currentTaskId ? 'selected' : ''} ${busy ? 'running' : ''}`} aria-current={task.id === currentTaskId ? 'true' : undefined} onClick={() => onSelectTask(task)}>
-    <span className="task-title"><MessageCircle className="task-icon" size={13} aria-hidden="true" /><TaskTitle title={task.title} /></span>
+    <span className="task-title">{editing ? <span className="inline-flex shrink-0" title="有未提交的输入"><SquarePen className="task-icon" size={13} aria-hidden="true" /></span> : <MessageCircle className="task-icon" size={13} aria-hidden="true" />}<TaskTitle title={task.title} />{editing && <span className="sr-only" role="status" aria-label="正在编辑" />}</span>
     {waiting ? <span className="task-input-status" role="status" aria-label="等待输入" title="等待你的选择、回答或确认"><MessageCircleQuestion size={14} aria-hidden="true" /></span> : busy ? <span className="task-running-status" role="status" aria-label="正在回复"><LoaderCircle className="task-spinner" size={14} aria-hidden="true" /></span> : task.unreadCompletion ? <span className="task-completed-status" role="status" aria-label="已完成，未读" title="已完成，未读"><span className="task-unread-dot" aria-hidden="true" /></span> : time && <time className="task-time" dateTime={new Date(task.updatedAt!).toISOString()} title={new Date(task.updatedAt!).toLocaleString('zh-CN')}>{time}</time>}
   </Button>
   <Button className="task-edit-button conversation-action-button" aria-label={`编辑会话 ${task.title}`} title="编辑会话信息" disabled={creationDisabled} onClick={() => onEditTask(task)}><SlidersHorizontal size={14} aria-hidden="true" /></Button>

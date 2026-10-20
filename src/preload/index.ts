@@ -2,6 +2,16 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { IPC_CHANNELS, type PiRunnerApi } from '../shared/api'
 
 const api: PiRunnerApi = {
+  onFlushConversations: callback => {
+    const listener = (_event: Electron.IpcRendererEvent, token: string): void => {
+      void Promise.resolve().then(callback).then(
+        () => ipcRenderer.send(IPC_CHANNELS.conversationsFlushed, token, true),
+        () => ipcRenderer.send(IPC_CHANNELS.conversationsFlushed, token, false)
+      )
+    }
+    ipcRenderer.on(IPC_CHANNELS.conversationsFlush, listener)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.conversationsFlush, listener)
+  },
   readCodePreview: (project, path, ranges, snapshotId) => ipcRenderer.invoke(IPC_CHANNELS.codePreview, project, path, ranges, snapshotId),
   getSkills: () => ipcRenderer.invoke(IPC_CHANNELS.skillsList),
   installSkill: source => ipcRenderer.invoke(IPC_CHANNELS.skillsInstall, source),

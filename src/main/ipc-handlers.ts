@@ -136,7 +136,7 @@ export function registerIpcHandlers(dependencies: IpcHandlerDependencies): void 
   })
   handle(IPC_CHANNELS.notification, notification => {
     const value = notification as AppNotification | undefined
-    if (!value || !['success', 'failure', 'input'].includes(value.kind) || typeof value.title !== 'string' || typeof value.body !== 'string' || (value.conversationId !== undefined && typeof value.conversationId !== 'string')) throw new ModelError('通知内容格式无效')
+    if (!value || !['success', 'failure', 'input'].includes(value.kind) || typeof value.title !== 'string' || typeof value.body !== 'string' || (value.userInput !== undefined && typeof value.userInput !== 'string') || (value.conversationId !== undefined && typeof value.conversationId !== 'string')) throw new ModelError('通知内容格式无效')
     const conversationId = typeof value.conversationId === 'string' ? value.conversationId : undefined
     showNotification(value, () => {
       const window = dependencies.getMainWindow()
@@ -263,7 +263,7 @@ export function registerIpcHandlers(dependencies: IpcHandlerDependencies): void 
   handle(IPC_CHANNELS.projectRemove, async value => {
     const root = parseString(value)
     if (!path.isAbsolute(root)) throw new Error('项目路径必须是绝对路径')
-    if (dependencies.getModelService().isBusy()) throw new ModelError('请先停止代理任务，再移除项目')
+    if (dependencies.getModelService().isProjectBusy(root)) throw new ModelError('该项目下仍有会话正在执行，请先停止后再移除项目')
     const canonicalRoot = await ShadowGitManager.removeProjectStorage(root, dependencies.dataDirectory)
     clearProjectIgnoreCache(canonicalRoot)
     if (dependencies.getSnapshotManager()?.getRoot() === canonicalRoot) dependencies.setSnapshotManager(undefined)

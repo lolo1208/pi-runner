@@ -164,7 +164,7 @@
   align-items: center;
   gap: 2px;
   transition: transform .1s ease-out;
-  will-change: transform;
+  /* 不用 will-change：常驻合成层会把 3px 高的胶囊按低分辨率光栅化，点击后留下毛边。 */
 }
 /* 提高优先级：覆盖全局 button:not([data-slot]) 的背景、边框和内边距 */
 button.chat-round-dot {
@@ -230,6 +230,18 @@ button.chat-round-dot:focus-visible { outline: 1px solid var(--accent); outline-
 .chat-virtual-row { display: flow-root; padding: 16px 0; }
 .chat-virtual-row.user { padding: calc(10rem / 14) 0; }
 .chat-virtual-messages .chat-virtual-row > .chat-message { margin-top: 0; margin-bottom: 0; }
+/* 导航到位后用实色主题色突出目标气泡，再柔和恢复，不改变布局。 */
+.chat-arrival-highlight > .chat-message.user {
+  animation: chat-bubble-arrival 1.8s ease-out both paused;
+  animation-delay: var(--chat-arrival-delay, 0ms);
+}
+@keyframes chat-bubble-arrival {
+  0%, 100% { background-color: var(--bubble-bg); color: var(--bubble-ink); }
+  8%, 38% { background-color: var(--accent); color: var(--accent-foreground); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-arrival-highlight > .chat-message.user { animation: none; background-color: var(--accent); color: var(--accent-foreground); }
+}
 
 .chat-welcome {
   text-align: center;
@@ -432,12 +444,9 @@ button.chat-round-dot:focus-visible { outline: 1px solid var(--accent); outline-
 .composer-limits { gap: 8px; min-width: 0; white-space: normal; flex-wrap: wrap; justify-content: flex-end; }
 .composer-limits span + span { border-left: 1px solid var(--border); padding-left: 8px; }
 .composer-context { flex-shrink: 0; font-variant-numeric: tabular-nums; }
-/* 速度提示：纯文本，绝对定位在输入框右上角外侧，不撑开布局。 */
+/* 速度提示：纯文本，位于输入框下方状态行各类统计的最左侧。 */
 .composer-speed {
-  position: absolute;
-  top: -27px;
-  right: 6px;
-  padding: 2px 4px;
+  flex-shrink: 0;
   color: var(--muted);
   font-size: calc(12rem / 14);
   line-height: 1.4;

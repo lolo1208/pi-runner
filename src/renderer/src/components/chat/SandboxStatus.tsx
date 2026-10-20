@@ -1,30 +1,20 @@
-import { useEffect, useRef, useState } from 'react'
 import type { SandboxState } from '../../../../shared/sandbox'
 import { SANDBOX_CHECKS, SANDBOX_MESSAGES } from '../../../../shared/sandbox'
 import { Button } from '../ui/button'
 
 const progress: Record<string, string> = Object.fromEntries(Object.entries(SANDBOX_CHECKS).map(([id, step]) => [id, step.progress]))
 
-/** 只提示本次完成的检测；切换权限模式不会重新展示已有结果。 */
-export function SandboxStatus({ state, onInspect, visible = true }: { state: SandboxState | null; onInspect(): void; visible?: boolean }): React.JSX.Element | null {
-  const [showPassed, setShowPassed] = useState(false)
-  const previous = useRef(state)
-  useEffect(() => {
-    const completed = visible && state?.phase === 'ready' && previous.current?.phase === 'running' && previous.current.operationId === state.operationId && !state.reused
-    previous.current = state
-    if (state?.phase !== 'ready') { setShowPassed(false); return }
-    if (!completed) return
-    setShowPassed(true)
-    const timer = setTimeout(() => setShowPassed(false), 4000)
-    return () => clearTimeout(timer)
-  }, [state?.phase, state?.operationId])
-  useEffect(() => { if (!visible) setShowPassed(false) }, [visible])
-
-  if (!visible || !state || state.phase === 'ready' && !showPassed) return null
+/** 仅在任务检查过程中或存在失败、能力限制时显示，日常浏览保持安静。 */
+export function SandboxStatus({ state, onInspect, visible = true, taskRunning = false }: { state: SandboxState | null; onInspect(): void; visible?: boolean; taskRunning?: boolean }): React.JSX.Element | null {
+  const limited = state?.phase === 'ready' && state.developerNetwork === false
+  const attention = state?.phase === 'ready' && (limited || Boolean(state.warning))
   const step = state?.steps.find(item => item.status === 'running')
+  const failed = state?.phase === 'failed' || attention
+  const checking = taskRunning && (state?.phase === 'running' || Boolean(step))
+  if (!visible || !state || (!failed && !checking)) return null
   return <div className="sandbox-entry">
-    {state?.phase === 'failed'
-      ? <Button variant="ghost" size="sm" onClick={onInspect}>{SANDBOX_MESSAGES.inspect}</Button>
-      : <span role="status" aria-live="polite">{state?.phase === 'ready' ? SANDBOX_MESSAGES.passed : progress[step?.id ?? ''] ?? SANDBOX_MESSAGES.progress}</span>}
+    {failed
+      ? <Button variant="ghost" size="sm" onClick={onInspect}>{limited ? '文件隔离可用，查看开发能力限制' : attention ? '隔离可用，查看待处理问题' : SANDBOX_MESSAGES.inspect}</Button>
+      : <span role="status" aria-live="polite">{step ? progress[step.id] ?? state.message : SANDBOX_MESSAGES.progress}</span>}
   </div>
 }

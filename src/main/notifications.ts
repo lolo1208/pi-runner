@@ -5,10 +5,11 @@ import type { AppNotification, NotificationKind } from '../shared/api'
 // 两类气泡都按通知类型区分图标与颜色，避免用户需要打开应用才能判断发生了什么。
 
 const BUBBLE_WIDTH = 380
-const BUBBLE_HEIGHT = 108
+const BUBBLE_MIN_HEIGHT = 64
+const BUBBLE_HEIGHT = 144
 const BUBBLE_MARGIN = 16
 const BUBBLE_GAP = 10
-const BUBBLE_DISMISS_MS = 6000
+const BUBBLE_DISMISS_MS = 10000
 const MAX_BUBBLES = 4
 
 const BUBBLE_WINDOW_STYLE = { frame: false, transparent: true, resizable: false, movable: false, minimizable: false, maximizable: false, fullscreenable: false, skipTaskbar: true, alwaysOnTop: true, show: false, hasShadow: false } as const
@@ -27,24 +28,32 @@ function escapeHtml(value: string): string {
 
 function bubbleHtml(notification: AppNotification): string {
   const { color, svg } = KIND_ICONS[notification.kind]
+  const status = notification.kind === 'success' ? '已完成' : notification.kind === 'failure' ? '执行失败' : notification.body
+  const body = notification.userInput
+    ? `<span class="status">[${escapeHtml(status)}]</span> ${escapeHtml(notification.userInput)}`
+    : escapeHtml(notification.body)
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8" />
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:" />
 <style>
 html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
 body { box-sizing: border-box; padding: 6px; font-family: "Microsoft YaHei UI", "Segoe UI", system-ui, -apple-system, sans-serif; -webkit-user-select: none; user-select: none; }
-.bubble { box-sizing: border-box; display: flex; align-items: flex-start; gap: 12px; height: 100%; padding: 14px 16px; border: 1px solid rgba(15, 23, 42, 0.08); border-radius: 12px; background: rgba(255, 255, 255, 0.98); box-shadow: 0 10px 30px rgba(15, 23, 42, 0.24); }
+.bubble { box-sizing: border-box; display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; border: 1px solid rgba(15, 23, 42, 0.08); border-radius: 12px; background: rgba(255, 255, 255, 0.98); box-shadow: 0 10px 30px rgba(15, 23, 42, 0.24); }
 .icon { flex-shrink: 0; width: 26px; height: 26px; color: ${color}; }
 .icon svg { width: 100%; height: 100%; }
 .content { flex: 1; min-width: 0; }
 .title { margin: 0; color: #1b1b1b; font-size: 13px; font-weight: 600; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .body { margin: 4px 0 0; color: #6b7280; font-size: 12px; line-height: 1.5; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.user-input { margin: 6px 0 0; color: #374151; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.status { color: #6b7280; font-size: 12px; white-space: nowrap; }
 @media (prefers-color-scheme: dark) {
   .bubble { border-color: rgba(255, 255, 255, 0.1); background: rgba(30, 32, 36, 0.98); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55); }
   .title { color: #f3f4f6; }
   .body { color: #9ca3af; }
+  .status { color: #9ca3af; }
+  .user-input { color: #d1d5db; }
 }
 </style></head>
-<body><div class="bubble"><span class="icon">${svg}</span><div class="content"><p class="title">${escapeHtml(notification.title)}</p><p class="body">${escapeHtml(notification.body)}</p></div></div></body></html>`
+<body><div class="bubble"><span class="icon">${svg}</span><div class="content"><p class="title">${escapeHtml(notification.title)}</p><p class="body${notification.userInput ? ' user-input' : ''}">${body}</p></div></div></body></html>`
 }
 
 function layoutBubbles(): void {
@@ -76,7 +85,8 @@ export function closeAllNotifications(): void {
 }
 
 function showBubble(notification: AppNotification, activate: () => void): void {
-  const window = new BrowserWindow({ ...BUBBLE_WINDOW_STYLE, width: BUBBLE_WIDTH, height: BUBBLE_HEIGHT, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, devTools: false } })
+  // Windows 会把不可缩放窗口的初始高度作为默认最小高度，须显式允许按内容收缩。
+  const window = new BrowserWindow({ ...BUBBLE_WINDOW_STYLE, width: BUBBLE_WIDTH, height: BUBBLE_HEIGHT, minHeight: BUBBLE_MIN_HEIGHT, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, devTools: false } })
   window.setAlwaysOnTop(true, 'screen-saver')
   if (process.platform === 'darwin') window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
@@ -88,7 +98,10 @@ function showBubble(notification: AppNotification, activate: () => void): void {
     // 按内容实际高度自适应窗口，避免固定高度下方留出大片空白。
     void window.webContents.executeJavaScript('Math.ceil(document.querySelector(".bubble").getBoundingClientRect().height) + 12', true)
       .then(height => {
-        if (!window.isDestroyed()) window.setSize(BUBBLE_WIDTH, Math.min(Math.max(Math.round(height), 64), BUBBLE_HEIGHT))
+        if (!window.isDestroyed()) {
+          window.setMinimumSize(BUBBLE_WIDTH, BUBBLE_MIN_HEIGHT)
+          window.setSize(BUBBLE_WIDTH, Math.min(Math.max(Math.round(height), BUBBLE_MIN_HEIGHT), BUBBLE_HEIGHT))
+        }
       })
       .catch(() => {})
       .finally(() => { if (!window.isDestroyed()) { window.showInactive(); layoutBubbles() } })
@@ -112,7 +125,8 @@ export function showNotification(notification: AppNotification, activate: () => 
   const safe: AppNotification = {
     kind: notification.kind,
     title: String(notification.title ?? '').slice(0, 120) || 'Pi Runner · 行动派',
-    body: String(notification.body ?? '').slice(0, 240)
+    body: String(notification.body ?? '').slice(0, 240),
+    userInput: String(notification.userInput ?? '').replace(/\s+/g, ' ').trim()
   }
   if (process.platform === 'win32') showBubble(safe, activate)
   else showSystemNotification(safe, activate)

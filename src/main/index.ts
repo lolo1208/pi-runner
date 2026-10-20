@@ -1,4 +1,5 @@
-import { app, BrowserWindow, Menu, net, safeStorage, Tray } from 'electron'
+import { app, BrowserWindow, dialog, Menu, net, safeStorage, Tray } from 'electron'
+import { flushRendererConversations } from './flush-conversations'
 import path from 'node:path'
 import { pathToFileURL, fileURLToPath } from 'node:url'
 import { IPC_CHANNELS } from '../shared/api'
@@ -17,6 +18,7 @@ import { SleepBlocker } from './sleep-blocker'
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let isQuitting = false
+let flushingBeforeQuit = false
 let servicesReady = false
 let snapshotManager: ShadowGitManager | undefined
 let modelSettings: ModelSettingsStore
@@ -102,7 +104,12 @@ function createWindow(): void {
     if (isMainFrame && !isInPlace) { modelService.cancelAll(); sleepBlocker.stop() }
   })
   mainWindow.on('close', event => {
-    if (isDevelopment || isQuitting) return
+    if (isQuitting) return
+    if (isDevelopment) {
+      event.preventDefault()
+      void saveBeforeClosing(() => { prepareToQuit(); mainWindow?.close() })
+      return
+    }
     hideToTray()
     event.preventDefault()
   })
@@ -157,4 +164,21 @@ if (hasSingleInstanceLock) void app.whenReady().then(() => {
   app.on('activate', showMainWindow)
 })
 app.on('window-all-closed', () => { if (isDevelopment || process.platform !== 'darwin') app.quit() })
-app.on('before-quit', prepareToQuit)
+async function saveBeforeClosing(close: () => void): Promise<void> {
+  if (flushingBeforeQuit) return
+  flushingBeforeQuit = true
+  try {
+    const contents = mainWindow?.webContents
+    if (contents && !contents.isDestroyed()) await flushRendererConversations(contents)
+    close()
+  } catch (error) {
+    showMainWindow()
+    dialog.showErrorBox('会话尚未保存，已取消退出', error instanceof Error ? error.message : '保存失败，请重试退出。')
+  } finally { flushingBeforeQuit = false }
+}
+
+app.on('before-quit', event => {
+  if (isQuitting) return
+  event.preventDefault()
+  void saveBeforeClosing(() => { prepareToQuit(); app.quit() })
+})

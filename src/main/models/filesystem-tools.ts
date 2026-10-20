@@ -70,7 +70,7 @@ async function copyOrdinary(source: string, destination: string, check: PathGuar
 export function filesystemToolDefinitions(check: PathGuard): ToolDefinition[] {
   const tools: ToolDefinition[] = [{
     name: 'mkdir', label: '创建目录', executionMode: 'sequential',
-    description: '创建目录及缺少的父目录，已有目录无需重复创建。受限自动模式下，项目内操作自动允许；优先使用此工具，不要用终端命令创建目录。',
+    description: '创建目录及缺少的父目录，已有目录无需重复创建。项目自审模式下，项目内操作自动允许；优先使用此工具，不要用终端命令创建目录。',
     parameters: schema({ path: targetPath }, ['path']),
     execute: async (_id, args, signal) => {
       const target = (args as { path: string }).path
@@ -82,7 +82,7 @@ export function filesystemToolDefinitions(check: PathGuard): ToolDefinition[] {
     }
   }, {
     name: 'rmdir', label: '删除目录', executionMode: 'sequential',
-    description: '删除确切路径的目录；非空目录必须显式设置 recursive=true，删除整个目录及其内容。不会删除项目根目录、内部数据、Git 元数据、链接或特殊文件。受限自动模式下，项目内操作自动允许；删除目录优先使用此工具，不要用终端命令。',
+    description: '删除确切路径的目录；非空目录必须显式设置 recursive=true，删除整个目录及其内容。不会删除项目根目录、内部数据、Git 元数据、链接或特殊文件。项目自审模式下，项目内操作自动允许；删除目录优先使用此工具，不要用终端命令。',
     parameters: schema({ path: targetPath, recursive: { type: 'boolean', description: '是否删除目录及其全部内容，默认 false' } }, ['path']),
     execute: async (_id, args, signal) => {
       const { path: target, recursive } = args as { path: string; recursive?: boolean }
@@ -105,7 +105,7 @@ export function filesystemToolDefinitions(check: PathGuard): ToolDefinition[] {
   }]
   for (const name of ['move', 'copy'] as const) tools.push({
     name, label: name === 'move' ? '移动或重命名' : '复制文件或目录', executionMode: 'sequential',
-    description: `${name === 'move' ? '移动或重命名' : '复制'}普通文件或整个目录，path 是源路径，destination 是确切的新路径。目标必须不存在，不会覆盖或合并已有内容。受限自动模式下，项目内操作自动允许；优先使用此工具，不要使用终端命令。`,
+    description: `${name === 'move' ? '移动或重命名' : '复制'}普通文件或整个目录，path 是源路径，destination 是确切的新路径。目标必须不存在，不会覆盖或合并已有内容。项目自审模式下，项目内操作自动允许；优先使用此工具，不要使用终端命令。`,
     parameters: schema({ path: targetPath, destination: targetPath }, ['path', 'destination']),
     execute: async (_id, args, signal) => {
       const { path: source, destination } = args as { path: string; destination: string }

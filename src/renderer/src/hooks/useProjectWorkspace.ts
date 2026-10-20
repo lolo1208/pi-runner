@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useConversationPersistence } from './useConversationPersistence'
 import type { ChangedFile, Checkpoint, FileDiff } from '../../../shared/api'
 import type { Task } from '../app-types'
 import { defaultConversationPermission } from '../../../shared/conversations'
@@ -110,12 +111,7 @@ export function useProjectWorkspace() {
     }).catch(() => setError('代理快照已保存，文件差异读取失败，请重新选择项目后重试'))
   }), [])
 
-  useEffect(() => {
-    if (!loaded) return
-    void window.piRunner.saveConversations({ version: 1, tasks, selectedId }).catch(() => {
-      setError('会话未能保存到本地，请检查磁盘空间和访问权限。')
-    })
-  }, [loaded, tasks, selectedId])
+  useConversationPersistence(loaded, tasks, selectedId, setError)
 
   const currentTask = tasks.find(item => item.id === selectedId) ?? tasks[0]
   const snapshotKey = currentTask?.project ?? project ?? 'unlinked'
@@ -240,6 +236,8 @@ export function useProjectWorkspace() {
   }
 
   const removeProject = (root: string): void => {
+    // 仅当被移除项目自身仍有会话正在执行时禁止；其他项目的执行不影响。
+    if (busyTasks.some(id => tasks.some(task => task.id === id && task.project === root))) return
     void runAction(async () => {
       await window.piRunner.removeProject(root)
       setReadyProjects(current => new Set([...current].filter(item => item !== root)))

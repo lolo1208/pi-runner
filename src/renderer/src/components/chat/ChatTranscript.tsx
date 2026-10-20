@@ -12,6 +12,8 @@ import { RoundActivity } from './RoundActivity'
 import { ChatMarkdown } from './ChatMarkdown'
 import { roundChangesKey, useRoundChanges } from '../../hooks/useRoundChanges'
 import { TranscriptProvider, TranscriptScope, TranscriptState } from './TranscriptState'
+import { navigateTranscript } from './transcript-navigation'
+import { highlightTranscript } from './transcript-highlight'
 
 const NO_SNAPSHOTS: AgentSnapshot[] = []
 // 给虚拟列表留出少量时间完成估算高度校正，期间保持同一文字锚点。
@@ -54,6 +56,7 @@ interface ChatTranscriptProps {
   project?: string | null
   active?: boolean
   scrollToLatestRequest?: number
+  notificationNavigationRequest?: number
   snapshots?: AgentSnapshot[]
   messages: ChatMessage[]
   pendingMessage: ChatMessage | null
@@ -86,11 +89,12 @@ const MessageList = forwardRef<HTMLDivElement, ComponentProps<'div'>>(function M
 })
 const listComponents = { List: MessageList }
 
-export function ChatTranscript(props: ChatTranscriptProps): React.JSX.Element {
+export const ChatTranscript = memo(function ChatTranscript(props: ChatTranscriptProps): React.JSX.Element {
   const { messages, snapshots = NO_SNAPSHOTS, pendingMessage, streamedText = '', isBusy, execution, active = true } = props
   const [store] = useState(() => new TranscriptState())
   const position = useRef<ReadingPosition>({ offset: 0, follow: true })
   const lastLatestRequest = useRef(props.scrollToLatestRequest ?? 0)
+  const lastNotificationRequest = useRef(0)
   const previousMessages = useRef(messages)
   const previousGroups = useRef<TranscriptRow[]>([])
   const [revision, setRevision] = useState(0)
@@ -159,7 +163,7 @@ export function ChatTranscript(props: ChatTranscriptProps): React.JSX.Element {
   }, [messages, rows, store])
 
   return <TranscriptProvider key={revision} store={store} active={active}>
-    {active && (rows.length ? <VirtualTranscript {...props} rows={rows} position={position} lastLatestRequest={lastLatestRequest} changes={changes} onRange={setRange} onVisible={setVisible} />
+    {active && (rows.length ? <VirtualTranscript {...props} rows={rows} position={position} lastLatestRequest={lastLatestRequest} lastNotificationRequest={lastNotificationRequest} changes={changes} onRange={setRange} onVisible={setVisible} />
       : <div className="chat-scroll"><div className="chat-welcome">
         <div className="welcome-brand">
           <div className="welcome-mark"><img src="./icons/app-icon.png" alt="" draggable={false} /></div>
@@ -170,12 +174,13 @@ export function ChatTranscript(props: ChatTranscriptProps): React.JSX.Element {
         {!props.hasProfile && <Button disabled={props.settingsDisabled} onClick={props.onOpenSettings}><Settings2 size={16} />配置模型</Button>}
       </div></div>)}
   </TranscriptProvider>
-}
+})
 
-function VirtualTranscript({ rows, position, lastLatestRequest, changes, onRange, onVisible, project, streamedText = '', agentStatus, isBusy, execution, settingsDisabled, scrollToLatestRequest = 0 }: ChatTranscriptProps & {
+function VirtualTranscript({ rows, position, lastLatestRequest, lastNotificationRequest, changes, onRange, onVisible, project, streamedText = '', agentStatus, isBusy, execution, settingsDisabled, scrollToLatestRequest = 0, notificationNavigationRequest = 0 }: ChatTranscriptProps & {
   rows: TranscriptRow[]
   position: MutableRefObject<ReadingPosition>
   lastLatestRequest: MutableRefObject<number>
+  lastNotificationRequest: MutableRefObject<number>
   changes: ReturnType<typeof useRoundChanges>
   onRange: (range: ListRange) => void
   onVisible: (visible: string[]) => void
@@ -192,6 +197,28 @@ function VirtualTranscript({ rows, position, lastLatestRequest, changes, onRange
   const userInputUntil = useRef(0)
   const dragging = useRef(false)
   const correctedScrollTop = useRef<number | null>(null)
+  const navigation = useRef<(() => void) | null>(null)
+  const startedNotificationRequest = useRef(0)
+  const highlight = useRef<(() => void) | null>(null)
+  const highlightRow = useCallback((key: string, onDone?: () => void): void => {
+    highlight.current?.()
+    const el = scroll.current
+    if (el) highlight.current = highlightTranscript(el, key, () => {
+      highlight.current = null
+      onDone?.()
+    })
+  }, [])
+  useEffect(() => () => {
+    highlight.current?.()
+  }, [])
+  const stopNavigation = useCallback((): void => {
+    if (!navigation.current) return
+    navigation.current?.()
+    navigation.current = null
+    layoutAnchor.current = null
+    resizingAnchor.current = null
+  }, [])
+  useEffect(() => stopNavigation, [stopNavigation])
   // 点击导航点后钉住的行位置：跳转后的程序滚动不再改写强调色，用户真实滚动后解除。
   const pinnedRoundRef = useRef<number | null>(null)
   const frame = useRef<number | null>(null)
@@ -274,7 +301,7 @@ function VirtualTranscript({ rows, position, lastLatestRequest, changes, onRange
     const bounds = el.getBoundingClientRect()
     if (bounds.height <= 0) return
     const nextGeometry = `${bounds.width}:${getComputedStyle(el).fontSize}:${getComputedStyle(document.documentElement).fontSize}`
-    if (geometry.current && geometry.current !== nextGeometry && initialized.current && !followLatest.current) {
+    if (geometry.current && geometry.current !== nextGeometry && initialized.current && !followLatest.current && !navigation.current) {
       const saved = position.current
       const index = rows.findIndex(row => row.key === saved.key)
       if (index >= 0) list.current?.scrollToIndex({ index, align: 'start', offset: -saved.offset })
@@ -294,7 +321,7 @@ function VirtualTranscript({ rows, position, lastLatestRequest, changes, onRange
     // 用户滚动期间，只补偿已确认的内容增高；虚拟列表自己的占位校正不能再次补偿。
     // 静止时仍维护锚点，让会话重开、异步测量完成后保持原来的阅读位置。
     const idle = !dragging.current && performance.now() > userInputUntil.current
-    const preserving = initialized.current && !followLatest.current && (resizingAnchor.current || idle && el.scrollTop === measuredScrollTop.current)
+    const preserving = !navigation.current && initialized.current && !followLatest.current && (resizingAnchor.current || idle && el.scrollTop === measuredScrollTop.current)
     if (preserving) {
       const saved = savedLayout
       if (saved && canAnchorReading(saved.element)) {
@@ -359,6 +386,25 @@ function VirtualTranscript({ rows, position, lastLatestRequest, changes, onRange
     if (frame.current !== null) return
     frame.current = requestAnimationFrame(() => { frame.current = null; measureRef.current() })
   }, [])
+  // 胶囊与通知共用到位回调，等目标挂载并稳定后再播放高亮。
+  const jumpToRow = useCallback((index: number, onArrival?: () => void): void => {
+    stopNavigation()
+    layoutAnchor.current = null
+    resizingAnchor.current = null
+    followLatest.current = false
+    pinnedRoundRef.current = index
+    setActiveRowIndex(index)
+    const el = scroll.current
+    const key = rows[index].key
+    if (el) navigation.current = navigateTranscript(el, key, rowPositions, () => {
+      navigation.current = null
+      layoutAnchor.current = null
+      resizingAnchor.current = null
+      initialized.current = true
+      measureRef.current()
+      highlightRow(key, onArrival)
+    }, window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false)
+  }, [stopNavigation, rows, rowPositions, highlightRow])
   const setScroller = useCallback((el: HTMLElement | Window | null): void => {
     scroll.current = el instanceof HTMLElement ? el : null
   }, [])
@@ -374,7 +420,7 @@ function VirtualTranscript({ rows, position, lastLatestRequest, changes, onRange
         const next = item.offsetHeight
         if (next !== height) { changed = true; observed.set(item, next) }
       }
-      if (changed && initialized.current && !followLatest.current
+      if (changed && initialized.current && !followLatest.current && !navigation.current
         && (el.scrollTop === measuredScrollTop.current || !dragging.current && performance.now() > userInputUntil.current)) {
         const saved = resizingAnchor.current ?? layoutAnchor.current
         if (saved && canAnchorReading(saved.element)) resizingAnchor.current = { ...saved, until: performance.now() + RESIZE_SETTLE_MS }
@@ -395,6 +441,7 @@ function VirtualTranscript({ rows, position, lastLatestRequest, changes, onRange
     // 初次提交时 Virtuoso 可能尚未创建行容器，必须从已存在的滚动容器观察。
     mutations?.observe(el, { subtree: true, childList: true, characterData: true })
     const userInput = (event?: Event): void => {
+      stopNavigation()
       resizingAnchor.current = null
       pinnedRoundRef.current = null
       // 按键、滚轮和按下鼠标不等于已经滚动，不能提前丢掉仍然有效的阅读锚点。
@@ -423,22 +470,36 @@ function VirtualTranscript({ rows, position, lastLatestRequest, changes, onRange
       if (frame.current !== null) cancelAnimationFrame(frame.current)
       frame.current = null
     }
-  }, [scheduleMeasure])
+  }, [scheduleMeasure, stopNavigation])
   // DOM 移除前记录阅读锚点；effect 清理时消息已经不可测量。
   useLayoutEffect(() => () => measureRef.current(), [])
 
   useLayoutEffect(() => {
     if (lastLatestRequest.current !== scrollToLatestRequest) {
       lastLatestRequest.current = scrollToLatestRequest
+      stopNavigation()
       followLatest.current = true
       list.current?.scrollToIndex({ index: 'LAST', align: 'end', behavior: 'auto' })
     }
     scheduleMeasure()
-  }, [scrollToLatestRequest, lastLatestRequest, rows, scheduleMeasure])
+  }, [scrollToLatestRequest, lastLatestRequest, rows, scheduleMeasure, stopNavigation])
+
+  useEffect(() => {
+    if (!notificationNavigationRequest || lastNotificationRequest.current === notificationNavigationRequest
+      || startedNotificationRequest.current === notificationNavigationRequest) return
+    // 后台会话恢复可能晚于通知点击；等用户气泡出现后再消费请求。
+    let index = rows.length - 1
+    while (index >= 0 && rows[index].messages[0]?.role !== 'user') index--
+    if (index < 0 || !scroll.current) return
+    startedNotificationRequest.current = notificationNavigationRequest
+    // 列表可能因正式历史恢复而重建，只有到位并播放高亮后才消费通知请求。
+    jumpToRow(index, () => { lastNotificationRequest.current = notificationNavigationRequest })
+  }, [notificationNavigationRequest, lastNotificationRequest, rows, jumpToRow])
 
   const handleScroll = useCallback((): void => {
     const el = scroll.current
     if (!el) return
+    if (navigation.current) { lastScrollTop.current = el.scrollTop; scheduleMeasure(); return }
     if (correctedScrollTop.current !== null && Math.abs(el.scrollTop - correctedScrollTop.current) < 1) {
       correctedScrollTop.current = null
       lastScrollTop.current = el.scrollTop
@@ -469,12 +530,7 @@ function VirtualTranscript({ rows, position, lastLatestRequest, changes, onRange
       onPointerDown={() => { railFreezeRef.current = true }}>
         <div ref={railTrackRef} className="chat-round-rail-track" style={{ transform: `translateY(${railShift}px)` }}>
         {rounds.map((round, number) => <RoundDotButton key={round.key} roundKey={round.key} round={round} number={number + 1} active={round.key === activeRoundKey}
-          onJump={index => {
-            followLatest.current = false
-            pinnedRoundRef.current = index
-            setActiveRowIndex(index)
-            list.current?.scrollToIndex({ index, align: 'start', offset: -12 })
-          }} />)}
+          onJump={jumpToRow} />)}
       </div>
     </nav>}
     <Virtuoso ref={list} className="chat-scroll chat-virtual-scroll" data={rows} components={listComponents}

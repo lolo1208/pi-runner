@@ -1,7 +1,9 @@
 import { Tooltip } from 'radix-ui'
+import { useMemo } from 'react'
 import { Monitor } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import type { ChatAttachment, ChatMessage, ModelProfileView, ModelRateLimit, ModelReply, ModelUsage } from '../../../../shared/models'
+import type { ChatAttachment, ChatMessage, ModelProfileView, ModelRateLimit, ModelReply, ModelUsage, OutputSpeed } from '../../../../shared/models'
+import { SpeedIndicator } from './SpeedIndicator'
 import { DEFAULT_COMPRESSION_THRESHOLD, estimateContextTokens } from '../../../../shared/context'
 export { estimateTextTokens } from '../../../../shared/context'
 import { SubscriptionLimits } from './SubscriptionLimits'
@@ -17,6 +19,7 @@ interface Props {
   attachments?: ChatAttachment[]
   compressionThreshold?: number
   usage?: ModelUsage
+  outputSpeed?: OutputSpeed
   latestReply?: ModelReply
   rateLimits?: ModelRateLimit[]
   subscriptionUsage?: import('../../../../shared/models').ChatgptUsage
@@ -27,17 +30,24 @@ interface Props {
 const compact = (value: number): string => value >= 1000 ? `${Number((value / 1000).toFixed(1))}K` : String(value)
 const number = (value: number): string => value.toLocaleString('en-US')
 
-export function ComposerStatus({ project, profile, contextLimit, messages, prompt, instruction = '', attachments, usage, latestReply, rateLimits, subscriptionUsage, openrouterUsage, compressionThreshold = DEFAULT_COMPRESSION_THRESHOLD, onOpenProject }: Props): React.JSX.Element {
+export function ComposerStatus({ project, profile, contextLimit, messages, prompt, instruction = '', attachments, usage, outputSpeed, latestReply, rateLimits, subscriptionUsage, openrouterUsage, compressionThreshold = DEFAULT_COMPRESSION_THRESHOLD, onOpenProject }: Props): React.JSX.Element {
   const measured = usage && usage.inputTokens + usage.outputTokens > 0 ? usage : undefined
-  const lastAssistantIndex = messages.map(message => message.role).lastIndexOf('assistant')
-  const trailing = measured && lastAssistantIndex >= 0 ? messages.slice(lastAssistantIndex + 1) : []
-  const used = (measured ? measured.inputTokens + measured.outputTokens : estimateContextTokens(messages, instruction))
-    + estimateContextTokens(trailing)
-    + (prompt || attachments?.length ? estimateContextTokens([{ role: 'user', content: prompt, images: attachments }]) : 0)
+  const history = useMemo(() => {
+    if (!measured) return { tokens: estimateContextTokens(messages, instruction), trailing: false }
+    const lastAssistantIndex = messages.map(message => message.role).lastIndexOf('assistant')
+    const trailing = lastAssistantIndex >= 0 ? messages.slice(lastAssistantIndex + 1) : []
+    return { tokens: measured.inputTokens + measured.outputTokens + estimateContextTokens(trailing), trailing: trailing.length > 0 }
+  }, [messages, instruction, measured?.inputTokens, measured?.outputTokens])
+  // 附件解码与正文输入分开缓存，避免每次按键都解码大文本或统计图片。
+  const attachmentTokens = useMemo(() => attachments?.length
+    ? estimateContextTokens([{ role: 'user', content: '', images: attachments }]) - 4 : 0, [attachments])
+  const draftTokens = useMemo(() => (prompt || attachments?.length
+    ? estimateContextTokens([{ role: 'user', content: prompt }]) : 0), [prompt, attachments?.length])
+  const used = history.tokens + draftTokens + attachmentTokens
   const limit = profile?.contextTokens ?? contextLimit
   const percent = limit ? Math.round(used / limit * 100) : null
   const projectName = project?.split(/[\\/]/).filter(Boolean).at(-1) ?? project
-  const estimated = !measured || trailing.length > 0 || Boolean(prompt) || Boolean(attachments?.length)
+  const estimated = !measured || history.trailing || Boolean(prompt) || Boolean(attachments?.length)
   const warning = percent !== null && percent >= compressionThreshold
   const meterWidth = percent === null ? 0 : Math.min(percent, 100)
 
@@ -46,6 +56,7 @@ export function ComposerStatus({ project, profile, contextLimit, messages, promp
       {project ? <Button type="button" variant="ghost" className="composer-project" title={project} aria-label={`打开项目目录：${projectName}`} onClick={onOpenProject}><Monitor size={13} aria-hidden="true" /><span>{projectName}</span></Button>
         : <span className="composer-project"><Monitor size={13} aria-hidden="true" /><span>未关联项目</span></span>}
       <div className="composer-status-details">
+        {outputSpeed && outputSpeed.outputTokens > 0 && <SpeedIndicator speed={outputSpeed} />}
         {profile?.provider === 'chatgpt' && <SubscriptionLimits usage={subscriptionUsage} latestReply={latestReply} />}
         {profile?.provider === 'openrouter' && <OpenrouterLimits model={profile.model} usage={openrouterUsage} latestReply={latestReply} />}
         {profile?.provider === 'openai' && <Tooltip.Root>

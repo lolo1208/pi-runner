@@ -1,3 +1,4 @@
+import { memoWithStableCallbacks } from '../../lib/memo-with-callbacks'
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -6,7 +7,6 @@ import { ArrowUp, Check, LoaderCircle, Square } from 'lucide-react'
 import { ComposerAddMenu, ComposerSkillTags, useLocalSkills } from './ComposerAddMenu'
 import { useSlashSkillPicker } from './SlashSkillPicker'
 import { MessageQueue, type MessageQueueProps } from './MessageQueue'
-import { SpeedIndicator } from './SpeedIndicator'
 import { IntentModePicker } from './IntentModePicker'
 import { PermissionModePicker } from './PermissionModePicker'
 import type { PermissionMode, IntentMode } from '../../../../shared/models'
@@ -36,7 +36,6 @@ interface ChatComposerProps extends MessageQueueProps {
   skillIds?: string[]
   onSkillsChange?: (ids: string[]) => void
   isBusy: boolean
-  outputSpeed?: import('../../../../shared/models').OutputSpeed
   stopping?: boolean
   hasMessages: boolean
   settingsDisabled?: boolean
@@ -48,7 +47,7 @@ interface ChatComposerProps extends MessageQueueProps {
   onCancel: () => void
 }
 
-export function ChatComposer({ active = true, queue = [], editingId, queuePaused, onResumeQueue, onEditQueued, onDeleteQueued, onReorderQueued, onCancelEdit, intentMode = 'execute', onIntentChange, permissionMode = 'default', onPermissionChange, profile, profiles, providers, onSelectModel, onThinkingChange, prompt, images, skillIds = [], onSkillsChange = () => {}, isBusy, stopping = false, hasMessages, settingsDisabled, outputSpeed, sendWithCtrlEnter, onPromptChange, onImagesChange, onOpenSettings, onSend, onCancel }: ChatComposerProps): React.JSX.Element {
+function ChatComposerView({ active = true, queue = [], editingId, queuePaused, onResumeQueue, onEditQueued, onDeleteQueued, onReorderQueued, onCancelEdit, intentMode = 'execute', onIntentChange, permissionMode = 'default', onPermissionChange, profile, profiles, providers, onSelectModel, onThinkingChange, prompt, images, skillIds = [], onSkillsChange = () => {}, isBusy, stopping = false, hasMessages, settingsDisabled, sendWithCtrlEnter, onPromptChange, onImagesChange, onOpenSettings, onSend, onCancel }: ChatComposerProps): React.JSX.Element {
   const localSkills = useLocalSkills()
   const promptId = useId()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -60,6 +59,7 @@ export function ChatComposer({ active = true, queue = [], editingId, queuePaused
   const isMac = /Mac|iPhone|iPad/.test(navigator.platform) || navigator.userAgent.includes('Macintosh')
   const sendShortcut = isMac ? '⌘ + Enter' : 'Ctrl + Enter'
 
+  const resizeRef = useRef<() => void>(() => {})
   useLayoutEffect(() => {
     const textarea = textareaRef.current
     if (!textarea) return
@@ -71,14 +71,16 @@ export function ChatComposer({ active = true, queue = [], editingId, queuePaused
       textarea.style.height = `${Math.min(height, lineHeight * 8)}px`
       textarea.style.overflowY = height > lineHeight * 8 ? 'auto' : 'hidden'
     }
+    resizeRef.current = resize
     resize()
     let width = textarea.clientWidth
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => {
       if (textarea.clientWidth !== width) { width = textarea.clientWidth; resize() }
     })
     observer?.observe(textarea)
-    return () => observer?.disconnect()
-  }, [prompt, images.length])
+    return () => { observer?.disconnect(); resizeRef.current = () => {} }
+  }, [])
+  useLayoutEffect(() => { if (active) resizeRef.current() }, [prompt, images.length, active])
 
   useEffect(() => { if (editingId && active) textareaRef.current?.focus() }, [editingId, active])
 
@@ -116,7 +118,6 @@ export function ChatComposer({ active = true, queue = [], editingId, queuePaused
     if (!event.dataTransfer.files.length) return
     event.preventDefault(); void addImages(Array.from(event.dataTransfer.files))
   }}>
-    {active && outputSpeed && outputSpeed.outputTokens > 0 && <SpeedIndicator speed={outputSpeed} />}
     <MessageQueue queue={queue} editingId={editingId} queuePaused={queuePaused} onResumeQueue={onResumeQueue} onEditQueued={reading ? undefined : onEditQueued} onDeleteQueued={reading ? undefined : onDeleteQueued} onReorderQueued={onReorderQueued} />
     {editingId && <div className="queue-edit-status"><span>{queuePaused ? '正在编辑队列消息，保存后队列保持暂停' : '正在编辑队列消息，保存后继续执行'}</span><Button type="button" variant="ghost" size="sm" disabled={reading} onClick={onCancelEdit}>取消编辑</Button></div>}
     {active && images.length > 0 && <ChatImages images={images} disabled={reading} onRemove={id => onImagesChange(images.filter(image => image.id !== id))} />}
@@ -160,3 +161,5 @@ export function ChatComposer({ active = true, queue = [], editingId, queuePaused
     </div>}
   </form>
 }
+
+export const ChatComposer = memoWithStableCallbacks(ChatComposerView)

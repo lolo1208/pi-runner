@@ -8,23 +8,27 @@ import { ModelError } from './model-validation'
 import { createSandboxCheckWorkspace } from './sandbox-check-workspace'
 
 const literal = (value: string): string => "'" + value.replace(/'/g, "''") + "'"
-/** 在独立测试工作区真正启动隔离进程，快速检查读写和两个外部边界。 */
-export async function checkCachedSandboxIsolation(sandbox: TerminalSandbox, _project: string, dataDirectory: string, signal: AbortSignal): Promise<void> {
+// PowerShell 会包装 .NET 异常；只有明确的权限异常才证明边界生效。
+const denied = (marker: string): string => `$denied=$_.Exception; while ($denied -and -not ($denied -is [UnauthorizedAccessException]) -and -not ($denied -is [Security.SecurityException])) { $denied=$denied.InnerException }; if (-not $denied) { throw }; Write-Output '${marker}'`
+/** 从真实项目启动隔离进程，校验项目读写与两个外部边界，不信任磁盘上的通过标记。 */
+export async function checkCachedSandboxIsolation(sandbox: TerminalSandbox, project: string, dataDirectory: string, signal: AbortSignal): Promise<void> {
   const workspace = await createSandboxCheckWorkspace()
-  const { project: folder, outside } = workspace
+  const { outside } = workspace
   const outsideFile = path.join(outside, 'outside.txt'), privateFile = path.join(dataDirectory, `isolation-check-${randomUUID()}.txt`)
-  const token = randomUUID(), file = path.join(folder, 'test.txt')
+  const token = randomUUID(), file = path.join(project, `.pi-runner-check-${randomUUID()}.txt`)
+  let created = false
   try {
-    await sandbox.prepare(folder, signal)
+    await sandbox.prepare(project, signal)
+    await writeFile(file, 'probe', { flag: 'wx' }); created = true
     await mkdir(dataDirectory, { recursive: true })
     await writeFile(outsideFile, token); await writeFile(privateFile, token)
-    const blocked = (command: string): string => `try { ${command}; exit 23 } catch { }`
+    const blocked = (command: string): string => `try { ${command}; exit 23 } catch { ${denied('ACCESS_BLOCKED')} }`
     const command = `[IO.File]::WriteAllText(${literal(file)},'ok'); if ([IO.File]::ReadAllText(${literal(file)}) -ne 'ok') { exit 24 }; [IO.File]::Delete(${literal(file)}); ${blocked(`[IO.File]::ReadAllText(${literal(outsideFile)}) | Out-Null`)}; ${blocked(`[IO.File]::WriteAllText(${literal(outsideFile)},'unexpected')`)}; ${blocked(`[IO.File]::ReadAllText(${literal(privateFile)}) | Out-Null`)}; Write-Output '${token}'`
     let output = ''
-    const result = await sandbox.exec(command, folder, { signal, timeout: 20, onData: data => { output = (output + data.toString('utf8')).slice(-8000) } })
+    const result = await sandbox.exec(command, project, { signal, timeout: 20, onData: data => { output = (output + data.toString('utf8')).slice(-8000) } })
     if (result.exitCode !== 0 || !output.includes(token) || await readFile(outsideFile, 'utf8') !== token) throw new ModelError('已有隔离环境未通过快速边界校验，请重新检测')
   } finally {
-    await Promise.all([workspace.cleanup(), rm(privateFile, { force: true })])
+    await Promise.all([workspace.cleanup(), rm(privateFile, { force: true }), ...(created ? [rm(file, { force: true })] : [])])
   }
 }
 /** 所有探针只接触本次创建的测试文件；拒绝必须有来自隔离进程的明确标记。 */
@@ -44,7 +48,7 @@ export async function checkSandboxIsolation(sandbox: TerminalSandbox, _project: 
       const result = await sandbox.exec(command, projectProbe, { signal, timeout: 25, onData: data => { output = (output + data.toString('utf8')).slice(-16000) } })
       if (result.exitCode !== 0 || !output.includes(marker)) throw new ModelError(`隔离测试未通过：${output.trim().slice(-1800) || '隔离进程未返回有效测试结果'}`)
     }
-    const blocked = (command: string): Promise<void> => run(`try { ${command}; Write-Output 'UNEXPECTED_ACCESS'; exit 23 } catch { Write-Output 'ACCESS_BLOCKED' }`, 'ACCESS_BLOCKED')
+    const blocked = (command: string): Promise<void> => run(`try { ${command}; Write-Output 'UNEXPECTED_ACCESS'; exit 23 } catch { ${denied('ACCESS_BLOCKED')} }`, 'ACCESS_BLOCKED')
     await check('project', SANDBOX_CHECKS.project.label, async () => {
       const folder = path.join(projectProbe, 'files'), file = path.join(folder, 'example.txt')
       await run(`[IO.Directory]::CreateDirectory(${literal(folder)}) | Out-Null; [IO.File]::WriteAllText(${literal(file)},'first'); [IO.File]::WriteAllText(${literal(file)},'second'); if ([IO.File]::ReadAllText(${literal(file)}) -ne 'second') { throw '内容不一致' }; [IO.Directory]::Delete(${literal(folder)},$true); Write-Output 'PROJECT_OK'`, 'PROJECT_OK')
@@ -64,21 +68,28 @@ export async function checkSandboxIsolation(sandbox: TerminalSandbox, _project: 
     })
     await check('children', SANDBOX_CHECKS.children.label, async () => {
       const shell = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe')
-      const script = `try { [IO.File]::WriteAllText(${literal(outsideFile)},'unexpected'); exit 23 } catch { Write-Output 'CHILD_BLOCKED'; exit 0 }`
+      const script = `$ErrorActionPreference='Stop'; try { [IO.File]::WriteAllText(${literal(outsideFile)},'unexpected'); exit 23 } catch { ${denied('CHILD_BLOCKED')}; exit 0 }`
       await run(`& ${literal(shell)} -NoProfile -NonInteractive -EncodedCommand '${Buffer.from(script, 'utf16le').toString('base64')}'`, 'CHILD_BLOCKED')
       if (await readFile(outsideFile, 'utf8') !== token) throw new ModelError('子进程隔离无效，已禁用自动终端执行')
-    })
-    await check('network', SANDBOX_CHECKS.network.label, async () => {
-      let requests = 0
-      const server = createServer((_request, response) => { requests++; response.setHeader('Content-Type', 'text/plain'); response.end(token) })
-      await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve) })
-      try {
-        const address = server.address() as { port: number }
-        await run(`$body=(Invoke-WebRequest 'http://127.0.0.1:${address.port}' -UseBasicParsing -TimeoutSec 5).Content; if ($body -ne '${token}') { throw '网络响应不一致' }; Write-Output 'NETWORK_OK'`, 'NETWORK_OK')
-        if (requests !== 1) throw new ModelError('开发命令网络能力未通过验证')
-      } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())) }
     })
   } finally {
     await Promise.all([workspace.cleanup(), rm(privateFile, { force: true })])
   }
+}
+
+/** 开发能力单独验证，不把 MXC 的可用性当作 AppContainer 文件隔离的前提。 */
+export async function checkSandboxDeveloperNetwork(sandbox: TerminalSandbox, project: string, signal: AbortSignal): Promise<void> {
+  const token = randomUUID()
+  let requests = 0
+  const server = createServer((_request, response) => { requests++; response.setHeader('Content-Type', 'text/plain'); response.end(token) })
+  await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve) })
+  try {
+    const address = server.address() as { port: number }
+    // 使用无代理的本地请求，避免宿主代理设置影响回环能力判断。
+    const command = `$client=New-Object Net.WebClient; $client.Proxy=$null; try { $body=$client.DownloadString('http://127.0.0.1:${address.port}'); if ($body -ne '${token}') { throw '网络响应不一致' }; Write-Output '${token}' } finally { $client.Dispose() }`
+    let output = ''
+    // 显式设置网络权限；普通 PowerShell 脚本不会被开发命令分类器识别。
+    const result = await sandbox.exec(command, project, { signal, timeout: 15, onData: data => { output = (output + data.toString('utf8')).slice(-8000) } })
+    if (result.exitCode !== 0 || !output.includes(token) || requests !== 1) throw new ModelError(`MXC 开发工具网络能力未通过验证：${output.trim() || `退出码 ${result.exitCode}`}`)
+  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())) }
 }

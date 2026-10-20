@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { createReadStream } from 'node:fs'
-import { mkdir, mkdtemp, readFile, realpath, rm } from 'node:fs/promises'
+import { lstat, mkdir, readFile, realpath, rename, stat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import type { BashOperations } from '@earendil-works/pi-coding-agent'
@@ -10,6 +10,14 @@ import { checkGitWorkingDirectory, parseGitInspection } from './git-working-dire
 import { prepareSandboxConfiguration } from './sandbox-configuration'
 import { developerCommand } from './developer-command-policy'
 import { developerToolReads, rustToolInvocation } from './developer-tool-access'
+import { createSandboxTemporaryDirectory, removeSandboxTemporaryDirectory } from './sandbox-temporary-directory'
+
+interface NativeContext { home: string; scratch: string; profile: string; scratchIdentity: string }
+async function directoryIdentity(directory: string): Promise<string> {
+  const info = await stat(directory, { bigint: true })
+  if (!info.isDirectory()) throw new ModelError(`沙箱目录已被替换为普通文件：${directory}`)
+  return `${info.dev}:${info.ino}:${info.birthtimeNs}`
+}
 
 export interface TerminalSandbox extends BashOperations {
   prepare(project: string, signal?: AbortSignal): Promise<void>
@@ -52,6 +60,7 @@ export class NativeTerminalSandbox implements TerminalSandbox {
   private backend: 'mxc' | 'elevated' = 'mxc'
   setBackend(backend: 'mxc' | 'elevated'): void { this.backend = backend; this.reset() }
   reset(): void { this.contexts.clear(); this.runtimeChecked = undefined }
+  resetProject(project: string): void { this.contexts.delete(project) }
   async checkBackend(backend: 'mxc' | 'elevated'): Promise<void> {
     // 固定运行时的兼容后端要求 :root 读取；不能用全盘读取冒充项目隔离。
     // 官方约束：windows-sandbox-rs/src/resolved_permissions.rs 的 validate_elevated_filesystem_policy。
@@ -93,10 +102,26 @@ export class NativeTerminalSandbox implements TerminalSandbox {
       if (hash.digest('hex') !== checksum) throw new ModelError('安全执行配置程序缺失或校验失败，请重新安装应用')
     }
   }
-  private contexts = new Map<string, { home: string; scratch: string; profile: string }>()
+  private contexts = new Map<string, NativeContext>()
   private runtimeChecked?: Promise<void>
   constructor(private readonly options: { runtimeDirectory: string; dataDirectory: string; protectedDirectories: string[] }) {}
   private get executable(): string { return path.join(this.options.runtimeDirectory, 'bin', 'codex.exe') }
+  async repair(project: string, signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted()
+    this.resetProject(project)
+    const root = await realpath(this.options.dataDirectory)
+    const directory = path.join(root, createHash('sha256').update(project).digest('hex'))
+    await mkdir(directory, { recursive: true })
+    if (await realpath(directory) !== directory) throw new ModelError(`沙箱配置目录发生重定向：${directory}`)
+    const home = path.join(directory, 'runtime-home')
+    const info = await lstat(home).catch(error => { if (error.code === 'ENOENT') return undefined; throw error })
+    if (info) {
+      if (info.isSymbolicLink() || await realpath(home) !== home) throw new ModelError(`沙箱运行配置目录发生重定向：${home}`)
+      // 保留旧配置供排查，只重建本项目的应用运行配置。
+      await rename(home, path.join(directory, `runtime-home-backup-${Date.now()}`))
+    }
+    await mkdir(home)
+  }
   async checkRuntime(): Promise<void> {
     if (process.platform !== 'win32' || process.arch !== 'x64') throw new ModelError('当前平台尚未提供经过验证的终端系统沙箱')
     this.runtimeChecked ??= (async () => {
@@ -108,31 +133,40 @@ export class NativeTerminalSandbox implements TerminalSandbox {
       if (checksum !== runtimeChecksum || checksum !== manifest.files?.['bin/codex.exe']) throw new Error('运行时文件校验失败')
     })()
     try { await this.runtimeChecked }
-    catch { this.runtimeChecked = undefined; throw new ModelError('终端系统沙箱运行时缺失或校验失败，请恢复应用内置运行时') }
+    catch (error) { this.runtimeChecked = undefined; throw new ModelError(`终端系统沙箱运行时缺失或校验失败：${this.executable}；${error instanceof Error ? error.message : String(error)}。请恢复应用内置运行时`) }
   }
   async prepare(project: string, signal?: AbortSignal, developer = false): Promise<void> {
     signal?.throwIfAborted()
     await this.checkBackend(this.backend)
     await this.checkRuntime()
     const canonical = await realpath(project)
-    if (canonical !== project) throw new ModelError('项目路径发生变化，不能启动终端系统沙箱')
+    if (canonical !== project || path.parse(project).root === project) throw new ModelError('项目路径发生变化或是整个盘符，不能启动终端系统沙箱')
+    const protectedDirectories = await Promise.all([...this.options.protectedDirectories, this.options.runtimeDirectory, this.options.dataDirectory].map(directory => realpath(directory).catch(error => { if (error.code === 'ENOENT') return path.resolve(directory); throw error })))
+    for (const root of protectedDirectories) {
+      const relative = path.relative(root, project)
+      if (!relative || relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative)) throw new ModelError(`项目位于应用保护目录内，不能配置写入权限：${root}`)
+    }
     if (this.contexts.has(project)) return
     if (this.backend === 'elevated') await this.checkLegacyRuntime()
-    const directory = path.join(this.options.dataDirectory, createHash('sha256').update(project).digest('hex'))
+    await mkdir(this.options.dataDirectory, { recursive: true })
+    const directory = path.join(await realpath(this.options.dataDirectory), createHash('sha256').update(project).digest('hex'))
+    await mkdir(directory, { recursive: true })
+    if (await realpath(directory) !== directory) throw new ModelError(`沙箱配置目录发生重定向：${directory}`)
     const home = this.backend === 'elevated' ? this.legacyHome : path.join(directory, 'runtime-home')
     await mkdir(home, { recursive: true })
+    if (await realpath(home) !== home) throw new ModelError(`沙箱运行配置目录发生重定向：${home}`)
     // 原生 deny 是递归边界，临时写入区不能放在被拒绝的应用数据目录之下。
-    const scratch = await realpath(await mkdtemp(path.join(os.tmpdir(), 'pi-runner-command-')))
-    await prepareSandboxConfiguration(scratch)
-    const protectedDirectories = await Promise.all([...this.options.protectedDirectories, this.options.runtimeDirectory].map(async directory => { try { return await realpath(directory) } catch { return path.resolve(directory) } }))
-    const context = { home, scratch, profile: sandboxProfile(project, scratch, protectedDirectories, await developerToolReads(project, protectedDirectories)) }
+    const scratch = await createSandboxTemporaryDirectory('pi-runner-command-', [...this.options.protectedDirectories, this.options.runtimeDirectory, this.options.dataDirectory])
     try {
+      await prepareSandboxConfiguration(scratch)
+      const context: NativeContext = { home, scratch, scratchIdentity: await directoryIdentity(scratch), profile: sandboxProfile(project, scratch, protectedDirectories, await developerToolReads(project, protectedDirectories)) }
       if (!developer) await checkGitWorkingDirectory({ exec: (command, cwd, options) => this.run(command, cwd, context, options) }, project, signal)
+      signal?.throwIfAborted()
+      this.contexts.set(project, context)
     } catch (error) {
-      await rm(scratch, { recursive: true, force: true })
+      await removeSandboxTemporaryDirectory(scratch, 'pi-runner-command-')
       throw error
     }
-    this.contexts.set(project, context)
   }
   async exec(command: string, cwd: string, options: Parameters<BashOperations['exec']>[2]): Promise<{ exitCode: number }> {
     options.signal?.throwIfAborted()
@@ -150,12 +184,18 @@ export class NativeTerminalSandbox implements TerminalSandbox {
     const rust = await rustToolInvocation(command, cwd, options.signal)
     return this.run(rust?.command ?? command, cwd, context, options, rust?.env)
   }
-  private async run(command: string, cwd: string, context: { home: string; scratch: string; profile: string }, options: Parameters<BashOperations['exec']>[2], runtimeEnv: NodeJS.ProcessEnv = {}): Promise<{ exitCode: number }> {
+  async execDevelopmentProbe(command: string, cwd: string, options: Parameters<BashOperations['exec']>[2]): Promise<{ exitCode: number }> {
+    await this.prepare(cwd, options.signal, true)
+    return this.run(command, cwd, this.contexts.get(cwd)!, options, {}, true)
+  }
+  private async run(command: string, cwd: string, context: NativeContext, options: Parameters<BashOperations['exec']>[2], runtimeEnv: NodeJS.ProcessEnv = {}, developmentProbe = false): Promise<{ exitCode: number }> {
+    options.signal?.throwIfAborted()
+    if (await realpath(context.scratch) !== context.scratch || await directoryIdentity(context.scratch) !== context.scratchIdentity) throw new ModelError(`命令临时目录已被替换或重定向，停止执行：${context.scratch}`)
     const systemRoot = process.env.SystemRoot ?? process.env.SYSTEMROOT ?? 'C:\\Windows'
     const powershell = path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
     const literalCwd = cwd.replace(/'/g, "''")
     const script = `$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; [Console]::OutputEncoding=[System.Text.Encoding]::UTF8; try { New-PSDrive -Name Project -PSProvider FileSystem -Root '${literalCwd}' | Out-Null; Set-Location -LiteralPath 'Project:\\'; [Environment]::CurrentDirectory='${literalCwd}'; & {\n${command}\n}; if (-not $?) { exit 1 }; if ($LASTEXITCODE) { exit $LASTEXITCODE } } catch { [Console]::Error.WriteLine($_.Exception.Message + '\n' + $_.InvocationInfo.PositionMessage); exit 1 }`
-    const development = await developerCommand(command, options.signal)
+    const development = developmentProbe || await developerCommand(command, options.signal)
     const profile = development ? context.profile.replace('network={enabled=false}', 'network={enabled=true}') : context.profile
     const args = ['sandbox', '--permission-profile', 'pi-runner', '-C', cwd, '-c', profile, '-c', `windows.sandbox="${this.backend}"`, '-c', 'features.prefer_mxc=false', '-c', 'shell_environment_policy.inherit="all"', '--', powershell, '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-OutputFormat', 'Text', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')]
     return new Promise((resolve, reject) => {

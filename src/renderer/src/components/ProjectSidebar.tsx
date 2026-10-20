@@ -23,7 +23,6 @@ interface ProjectSidebarProps {
   collapsedProjects: string[]
   pendingProjectRemoval: string | null
   isBusy: boolean
-  isChatBusy: boolean
   onStartTask: () => void
   onToggleSearch: () => void
   onQueryChange: (query: string) => void
@@ -39,7 +38,7 @@ interface ProjectSidebarProps {
   onOpenSettings: () => void
 }
 
-export function ProjectSidebar({ groups, busyProjectRoots, projectNames, hasMatchingTasks, currentTaskId, busyTaskIds, waitingTaskIds, query, searchOpen, collapsedProjects, pendingProjectRemoval, isBusy, isChatBusy, onStartTask, onToggleSearch, onQueryChange, onCloseSearch, onToggleProject, onPendingProjectRemovalChange, onEditProject, onRemoveProject, onSelectTask, onEditTask, onRemoveTask, onCreateProjectTask, onOpenSettings }: ProjectSidebarProps): React.JSX.Element {
+export function ProjectSidebar({ groups, busyProjectRoots, projectNames, hasMatchingTasks, currentTaskId, busyTaskIds, waitingTaskIds, query, searchOpen, collapsedProjects, pendingProjectRemoval, isBusy, onStartTask, onToggleSearch, onQueryChange, onCloseSearch, onToggleProject, onPendingProjectRemovalChange, onEditProject, onRemoveProject, onSelectTask, onEditTask, onRemoveTask, onCreateProjectTask, onOpenSettings }: ProjectSidebarProps): React.JSX.Element {
   const [now, setNow] = useState(Date.now)
   const [deletingTask, setDeletingTask] = useState<Task | null>(null)
   const [expandedTaskProjects, setExpandedTaskProjects] = useState<Set<string>>(() => new Set())
@@ -69,6 +68,9 @@ export function ProjectSidebar({ groups, busyProjectRoots, projectNames, hasMatc
     return result
   }, [groups, collapsedProjects, expandedTaskProjects])
   const deletionDisabled = isBusy || Boolean(deletingTask && busyTaskIds.includes(deletingTask.id))
+  /** 只有目标项目自身仍有会话执行或等待输入时才禁止移除；其他项目的执行不影响。 */
+  const projectRemovalDisabled = (root: string): boolean =>
+    isBusy || (groups.get(root) ?? []).some(task => busyTaskIds.includes(task.id) || waitingTaskIds.includes(task.id))
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 30_000)
     return () => window.clearInterval(timer)
@@ -96,7 +98,7 @@ export function ProjectSidebar({ groups, busyProjectRoots, projectNames, hasMatc
           root={row.root} tasks={row.tasks} currentTaskId={currentTaskId} busyTaskIds={busyTaskIds} waitingTaskIds={waitingTaskIds}
           projectBusy={busyProjectRoots.has(row.root)} now={now} creationDisabled={isBusy} collapsed={collapsedProjects.includes(row.root)}
           canRemoveProjects={row.root !== UNLINKED_PROJECT_LABEL} projectName={projectNames.get(row.root) ?? row.root}
-          removalDisabled={isBusy || isChatBusy} isRemovalPending={false} hideRemovalDialog
+          removalDisabled={projectRemovalDisabled(row.root)} isRemovalPending={false} hideRemovalDialog
           onToggleCollapsed={() => onToggleProject(row.root)} onRemovalPendingChange={open => onPendingProjectRemovalChange(open ? row.root : null)}
           onEditProject={() => onEditProject(row.root)} onRemoveProject={() => onRemoveProject(row.root)}
           onSelectTask={onSelectTask} onEditTask={onEditTask} onRemoveTask={onRemoveTask} onCreateTask={() => onCreateProjectTask(row.root)}
@@ -106,8 +108,8 @@ export function ProjectSidebar({ groups, busyProjectRoots, projectNames, hasMatc
     <Modal open={Boolean(deletingTask)} onOpenChange={open => { if (!open) setDeletingTask(null) }} title="删除此对话？" description={`将删除“${deletingTask?.title ?? ''}”的全部消息和草稿，删除后无法恢复。项目文件会保留。`} closeDisabled={deletionDisabled}>
       <div className="modal-actions"><Button variant="outline" autoFocus onClick={() => setDeletingTask(null)}>取消</Button><Button variant="destructive" disabled={deletionDisabled} onClick={() => { if (deletingTask) { onRemoveTask(deletingTask); setDeletingTask(null) } }}>确认删除</Button></div>
     </Modal>
-    <Modal open={Boolean(pendingProjectRemoval)} onOpenChange={open => { if (!open) onPendingProjectRemovalChange(null) }} title="移除此项目？" description="同时移除此项目的对话，并删除 Pi Runner 快照数据。项目文件会保留。" closeDisabled={isBusy || isChatBusy}>
-      <div className="modal-actions"><Button variant="outline" autoFocus disabled={isBusy || isChatBusy} onClick={() => onPendingProjectRemovalChange(null)}>取消</Button><Button variant="destructive" disabled={isBusy || isChatBusy} onClick={() => { if (pendingProjectRemoval) onRemoveProject(pendingProjectRemoval) }}>确认移除</Button></div>
+    <Modal open={Boolean(pendingProjectRemoval)} onOpenChange={open => { if (!open) onPendingProjectRemovalChange(null) }} title="移除此项目？" description="同时移除此项目的对话，并删除 Pi Runner 快照数据。项目文件会保留。" closeDisabled={pendingProjectRemoval ? projectRemovalDisabled(pendingProjectRemoval) : isBusy}>
+      <div className="modal-actions"><Button variant="outline" autoFocus disabled={isBusy} onClick={() => onPendingProjectRemovalChange(null)}>取消</Button><Button variant="destructive" disabled={pendingProjectRemoval ? projectRemovalDisabled(pendingProjectRemoval) : isBusy} onClick={() => { if (pendingProjectRemoval) onRemoveProject(pendingProjectRemoval) }}>确认移除</Button></div>
     </Modal>
     <div className="sidebar-bottom"><Button onClick={onOpenSettings}><Settings size={16} />设置<small>v0.1</small></Button></div>
   </aside>

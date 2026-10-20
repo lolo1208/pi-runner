@@ -8,7 +8,7 @@ export function sameSandboxProject(left: string, right: string): boolean {
 export function mergeSandboxState(current: SandboxState | null, incoming: SandboxState): SandboxState {
   if (!current || !sameSandboxProject(current.project, incoming.project)) return incoming
   if (incoming.updatedAt < current.updatedAt) return current
-  if (incoming.phase === 'unconfigured' && current.phase !== 'unconfigured') return current
+  if (incoming.phase === 'unconfigured' && current.phase !== 'unconfigured' && !incoming.operationId) return current
   if (current.operationId === incoming.operationId && (current.phase === 'ready' || current.phase === 'failed') && incoming.phase === 'running') return current
   return incoming
 }

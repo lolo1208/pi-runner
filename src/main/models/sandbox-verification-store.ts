@@ -4,7 +4,7 @@ import path from 'node:path'
 import type { SandboxBackend } from '../../shared/sandbox'
 import { ModelError } from './model-validation'
 
-interface VerificationRecord { backend: SandboxBackend; identity?: string; fingerprint?: string; verifiedAt: string }
+interface VerificationRecord { backend: SandboxBackend; identity?: string; fingerprint?: string; verifiedAt: string; developerNetwork?: boolean; warning?: string }
 interface VerificationCache { version: 3; backend?: SandboxBackend; projects: Record<string, VerificationRecord> }
 const verifiedBackends = ['mxc', 'appcontainer', 'seatbelt']
 
@@ -59,12 +59,12 @@ export class SandboxVerificationStore {
         if (previous !== project) delete cache.projects[previous]
       })
     }
-    const configured = cache.backend === 'elevated' ? 'appcontainer' : cache.backend
-    return { record, backend: record?.backend ?? (compatible(configured) ? configured : undefined) }
+    // 新项目独立探测，不继承其他项目曾经选中的后端。
+    return { record, backend: record?.backend }
   }
-  async save(project: string, backend: SandboxBackend, signal?: AbortSignal): Promise<void> {
+  async save(project: string, backend: SandboxBackend, signal?: AbortSignal, capabilities: { developerNetwork?: boolean; warning?: string; fingerprint?: string } = {}): Promise<void> {
     const identity = await this.identity(project)
-    await this.update(cache => { signal?.throwIfAborted(); cache.backend = backend; cache.projects[project] = { backend, identity, verifiedAt: new Date().toISOString() } })
+    await this.update(cache => { signal?.throwIfAborted(); delete cache.backend; cache.projects[project] = { backend, identity, verifiedAt: new Date().toISOString(), ...capabilities } })
   }
   revoke(project: string): Promise<void> {
     return this.update(cache => { if (!cache.projects[project]) return false; delete cache.projects[project] })
@@ -76,7 +76,10 @@ export class SandboxVerificationStore {
     await this.update(cache => {
       const entry = cache.projects[previous]
       if (!entry || previous === project) return false
-      cache.projects[project] = { ...entry, identity }; delete cache.projects[previous]
+      // 只有同一目录的移动才允许迁移配置，不能给另一个目录签发旧证明。
+      if (entry.identity === identity) cache.projects[project] = { ...entry }
+      else delete cache.projects[project]
+      delete cache.projects[previous]
     })
   }
 }

@@ -209,7 +209,7 @@ export function AboutSettingsSection(): React.JSX.Element {
         <div className="about-feature-icon"><Sliders size={18} /></div>
         <div className="about-feature-content">
           <h4>细粒度安全审批</h4>
-          <p>支持受限自动与每次询问多级模式，关键文件改动与执行操作透明可控。</p>
+          <p>支持每次询问、项目自审与完全访问三种权限模式。项目自审由应用审查项目内操作，终端命令受沙箱边界约束。</p>
         </div>
       </div>
       <div className="about-feature-item">

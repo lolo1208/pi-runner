@@ -5,7 +5,7 @@ export interface FileDiff { path: string; before: string; after: string; binary:
 export type FileAction = 'copy-file' | 'copy-path' | 'open-directory' | 'open-file'
 /** 通知类型：任务成功、任务失败、等待用户输入；界面按类型使用不同图标。 */
 export type NotificationKind = 'success' | 'failure' | 'input'
-export interface AppNotification { kind: NotificationKind; title: string; body: string; /** 点击通知后需要选中的会话。 */ conversationId?: string }
+export interface AppNotification { kind: NotificationKind; title: string; body: string; /** Windows 气泡中显示的最新一轮用户输入。 */ userInput?: string; /** 点击通知后需要选中的会话。 */ conversationId?: string }
 import type { ConversationState } from './conversations'
 export interface PiRunnerApi {
   showNotification(notification: AppNotification): Promise<void>
@@ -45,6 +45,8 @@ export interface PiRunnerApi {
   getChatgptUsage(): Promise<ModelResult<import('./models').ChatgptUsage>>
   loadConversations(): Promise<ConversationState>
   saveConversations(state: ConversationState): Promise<void>
+  /** 退出前收集草稿并等待待保存的会话全部落盘；失败时阻止正常退出。 */
+  onFlushConversations(callback: () => Promise<void>): () => void
   selectProject(): Promise<string | null>
   pickProjectDirectory(): Promise<string | null>
   openProject(path: string): Promise<string>
@@ -93,6 +95,7 @@ export const IPC_CHANNELS = {
   chatgptStatus: 'models:chatgpt-status', chatgptStart: 'models:chatgpt-start', chatgptOpen: 'models:chatgpt-open', chatgptCopy: 'models:chatgpt-copy',
   chatgptSubmit: 'models:chatgpt-submit', chatgptCancel: 'models:chatgpt-cancel', chatgptLogout: 'models:chatgpt-logout', chatgptModels: 'models:chatgpt-models', chatgptInfo: 'models:chatgpt-info', chatgptUsage: 'models:chatgpt-usage',
   conversationsLoad: 'conversations:load', conversationsSave: 'conversations:save',
+  conversationsFlush: 'conversations:flush', conversationsFlushed: 'conversations:flushed',
   selectProject: 'project:select', checkpoint: 'snapshot:create',
   checkpoints: 'snapshot:list',
   changes: 'snapshot:changes', diff: 'snapshot:diff', restore: 'snapshot:restore', matches: 'snapshot:matches',
