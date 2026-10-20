@@ -2,6 +2,7 @@ import { lstat, mkdir, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import path from 'node:path'
 import { simpleGit, type SimpleGit } from 'simple-git'
+import { invalidateProjectFileCapture } from './project-file-capture'
 
 export interface SnapshotStorage {
   root: string
@@ -160,6 +161,7 @@ export async function removeSnapshotStorage(project: string, dataRoot: string): 
 
   const target = projectStoragePath(root, base)
   await serializeStorage(target, async () => {
+    invalidateProjectFileCapture(path.join(target, 'staging'))
     await removeStorageDirectory(target, 'Pi Runner 项目数据目录不能是符号链接或联接点')
     await removeLegacyProjectStorage(target, base)
   })

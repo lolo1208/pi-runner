@@ -1,6 +1,5 @@
 import { app, BrowserWindow, Menu, net, safeStorage, Tray } from 'electron'
 import path from 'node:path'
-import { existsSync, renameSync, rmSync } from 'node:fs'
 import { pathToFileURL, fileURLToPath } from 'node:url'
 import { IPC_CHANNELS } from '../shared/api'
 import { ShadowGitManager } from './snapshot/shadow-git-manager'
@@ -13,6 +12,7 @@ import { ChatgptCredentials } from './models/chatgpt-credentials'
 import { ChatgptService } from './models/chatgpt-service'
 import { OpenrouterClient } from './models/openrouter-client'
 import { SandboxService } from './models/sandbox-service'
+import { SleepBlocker } from './sleep-blocker'
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -24,42 +24,10 @@ let modelService: ModelService
 let chatgptService: ChatgptService
 let piRunnerDirectory: string
 let sandboxService: SandboxService
+const sleepBlocker = new SleepBlocker()
 const mainDirectory = path.dirname(fileURLToPath(import.meta.url))
 const rendererFile = path.join(mainDirectory, '../renderer/index.html')
 const appDataDirectory = app.getPath('appData')
-
-// 迁移旧版目录：仅当目标不存在且源存在时整体重命名；失败不阻塞启动。
-function migrateLegacyDirectory(source: string, target: string): void {
-  if (!existsSync(source) || existsSync(target)) return
-  try {
-    renameSync(source, target)
-    console.log(`已迁移目录：${source} -> ${target}`)
-  } catch (error) {
-    console.warn(`目录迁移失败，继续使用 ${target}：`, error)
-    try { rmSync(target, { force: true, recursive: true }) } catch { /* 忽略清理失败 */ }
-  }
-}
-
-// 迁移旧版数据目录 ~/.pi-agenda 到 ~/.pi-runner。
-function migrateLegacyDataDirectory(target: string): void {
-  migrateLegacyDirectory(path.join(app.getPath('home'), '.pi-agenda'), target)
-}
-
-// 清理旧版单实例锁目录：旧 instance 目录只承载过锁，从未存过数据，直接删除。
-function removeLegacyInstanceDirectory(): void {
-  const legacy = path.join(appDataDirectory, 'pi-agenda-instance')
-  if (!existsSync(legacy)) return
-  try {
-    rmSync(legacy, { force: true, recursive: true })
-    console.log(`已清理旧版目录：${legacy}`)
-  } catch (error) {
-    console.warn(`旧版目录清理失败，忽略：`, error)
-  }
-}
-
-// 暂时保留旧版目录迁移：pi-agenda-dev → pi-runner-dev，并清理 pi-agenda-instance。
-migrateLegacyDirectory(path.join(appDataDirectory, 'pi-agenda-dev'), path.join(appDataDirectory, 'pi-runner-dev'))
-removeLegacyInstanceDirectory()
 const iconDirectory = app.isPackaged ? path.join(process.resourcesPath, 'icons') : path.join(app.getAppPath(), 'resources', 'icons')
 const windowIcon = path.join(iconDirectory, process.platform === 'win32' ? 'icon.ico' : 'icon.png')
 // userData 目录：安装版固定为 pi-runner，开发模式使用独立的 pi-runner-dev，避免与已安装的正式版争用缓存导致 0x5 拒绝访问。
@@ -95,22 +63,28 @@ function prepareToQuit(): void {
   if (isQuitting) return
   isQuitting = true
   closeAllNotifications()
+  sleepBlocker.stop()
   tray?.destroy()
   tray = null
   modelService?.cancelAll()
   sandboxService?.stop()
   void chatgptService?.cancel()
 }
+// 托盘在应用启动时就创建并常驻，与窗口显示/隐藏无关。
+function createTray(): Tray {
+  if (tray) return tray
+  const created = new Tray(windowIcon)
+  created.setToolTip('Pi Runner · 行动派')
+  created.setContextMenu(Menu.buildFromTemplate([
+    { label: '打开', click: showMainWindow },
+    { label: '退出', click: () => app.quit() }
+  ]))
+  created.on('double-click', showMainWindow)
+  tray = created
+  return created
+}
 function hideToTray(): void {
-  if (!tray) {
-    tray = new Tray(windowIcon)
-    tray.setToolTip('Pi Runner · 行动派')
-    tray.setContextMenu(Menu.buildFromTemplate([
-      { label: '打开', click: showMainWindow },
-      { label: '退出', click: () => app.quit() }
-    ]))
-    tray.on('double-click', showMainWindow)
-  }
+  createTray()
   mainWindow?.setSkipTaskbar(true)
   mainWindow?.hide()
 }
@@ -122,9 +96,10 @@ function createWindow(): void {
   mainWindow.webContents.on('will-navigate', event => event.preventDefault())
   mainWindow.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
   mainWindow.webContents.session.setPermissionCheckHandler(() => false)
-  mainWindow.webContents.on('render-process-gone', () => modelService.cancelAll())
+  mainWindow.webContents.on('render-process-gone', () => { modelService.cancelAll(); sleepBlocker.stop() })
+  // 渲染进程导航（如刷新）后会重新同步休眠开关状态。
   mainWindow.webContents.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
-    if (isMainFrame && !isInPlace) modelService.cancelAll()
+    if (isMainFrame && !isInPlace) { modelService.cancelAll(); sleepBlocker.stop() }
   })
   mainWindow.on('close', event => {
     if (isDevelopment || isQuitting) return
@@ -145,10 +120,11 @@ function createWindow(): void {
   void mainWindow.loadURL(rendererUrl)
 }
 if (hasSingleInstanceLock) void app.whenReady().then(() => {
+  // Tray 必须在 app ready 之后创建；这里在初始化服务前立即建好，启动即显示托盘图标。
+  createTray()
   if (process.platform === 'win32') app.setAppUserModelId('dev.pirunner.desktop')
   if (process.platform === 'darwin') app.dock?.setIcon(path.join(iconDirectory, 'icon.png'))
   piRunnerDirectory = path.join(app.getPath('home'), '.pi-runner')
-  migrateLegacyDataDirectory(piRunnerDirectory)
   const cipher = {
     isAvailable: () => safeStorage.isEncryptionAvailable() && (process.platform !== 'linux' || safeStorage.getSelectedStorageBackend() !== 'basic_text'),
     encrypt: (value: string) => safeStorage.encryptString(value),
@@ -172,6 +148,7 @@ if (hasSingleInstanceLock) void app.whenReady().then(() => {
     getChatgptService: () => chatgptService,
     getSandboxService: () => sandboxService,
     setSnapshotManager: manager => { snapshotManager = manager },
+    getSleepBlocker: () => sleepBlocker,
     dataDirectory: piRunnerDirectory,
     rendererUrl,
   })

@@ -84,7 +84,15 @@ function showBubble(notification: AppNotification, activate: () => void): void {
   bubbles.push(window)
   layoutBubbles()
   void window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(bubbleHtml(notification))}`)
-  window.once('ready-to-show', () => { window.showInactive(); layoutBubbles() })
+  window.once('ready-to-show', () => {
+    // 按内容实际高度自适应窗口，避免固定高度下方留出大片空白。
+    void window.webContents.executeJavaScript('Math.ceil(document.querySelector(".bubble").getBoundingClientRect().height) + 12', true)
+      .then(height => {
+        if (!window.isDestroyed()) window.setSize(BUBBLE_WIDTH, Math.min(Math.max(Math.round(height), 64), BUBBLE_HEIGHT))
+      })
+      .catch(() => {})
+      .finally(() => { if (!window.isDestroyed()) { window.showInactive(); layoutBubbles() } })
+  })
   const timer = setTimeout(() => closeBubble(window), BUBBLE_DISMISS_MS)
   // 点击气泡时窗口获得焦点：关闭气泡并把主窗口带到前台。
   window.on('focus', () => { closeAllBubbles(); activate() })

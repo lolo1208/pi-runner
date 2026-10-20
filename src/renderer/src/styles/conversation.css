@@ -133,13 +133,100 @@
   flex: 1;
   min-height: 0;
   margin-right: 3px;
-  padding: 0 28px;
+  padding: 0 clamp(40px, 4.5vw, 96px);
   overflow: auto;
 }
 
 /* 间距放在可测量的行内，避免外边距折叠使虚拟列表的高度计算失真。 */
 .chat-virtual-scroll { padding: 0; }
-.chat-messages.chat-virtual-messages { max-width: 976px; padding-right: 28px; padding-left: 28px; }
+.chat-messages.chat-virtual-messages { padding-right: clamp(40px, 4.5vw, 96px); padding-left: clamp(40px, 4.5vw, 96px); }
+
+/* 左侧对话轮次导航点：每轮对话一个小点，悬停显示摘要，点击跳转到该轮用户气泡 */
+.chat-transcript-shell { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.chat-transcript-shell .chat-scroll { flex: 1; }
+.chat-round-rail {
+  position: absolute;
+  left: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  max-height: 100%;
+  overflow: hidden;
+  padding: 2px;
+}
+.chat-round-rail-track {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  transition: transform .1s ease-out;
+  will-change: transform;
+}
+/* 提高优先级：覆盖全局 button:not([data-slot]) 的背景、边框和内边距 */
+button.chat-round-dot {
+  position: relative;
+  width: 22px;
+  height: 10px;
+  margin: -2px -4px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+button.chat-round-dot:hover { background: none; }
+button.chat-round-dot:disabled { background: none; cursor: pointer; opacity: 1; }
+.round-dot-mark {
+  width: 8px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--muted);
+  opacity: .28;
+  transform-origin: left center;
+  transition: transform .12s ease, opacity .12s ease, background-color .12s ease;
+}
+button.chat-round-dot:hover .round-dot-mark,
+button.chat-round-dot:focus-visible .round-dot-mark { transform: scaleX(1.5); opacity: 1; background: var(--text); }
+button.chat-round-dot.active .round-dot-mark { background: var(--accent); opacity: 1; }
+button.chat-round-dot.active:hover .round-dot-mark { background: var(--accent); }
+button.chat-round-dot:focus-visible { outline: 1px solid var(--accent); outline-offset: 0; }
+.round-tip {
+  position: fixed;
+  transform: translateY(-50%);
+  width: min(320px, 40vw);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 6px 24px rgb(0 0 0 / .14);
+  z-index: 1000;
+  pointer-events: none;
+  text-align: left;
+  animation: round-tip-in .12s ease-out;
+}
+@keyframes round-tip-in {
+  from { opacity: 0; transform: translateY(calc(-50% + 4px)); }
+  to { opacity: 1; transform: translateY(-50%); }
+}
+.round-tip-number { color: var(--muted); font-size: calc(11rem / 14); }
+.round-tip-user { font-size: calc(12rem / 14); font-weight: 500; line-height: 1.6; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.round-tip-reply { color: var(--muted); font-size: calc(12rem / 14); line-height: 1.6; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; }
+
+
 .chat-virtual-row { display: flow-root; padding: 16px 0; }
 .chat-virtual-row.user { padding: calc(10rem / 14) 0; }
 .chat-virtual-messages .chat-virtual-row > .chat-message { margin-top: 0; margin-bottom: 0; }
@@ -150,7 +237,6 @@
   justify-content: center;
   align-items: center;
   gap: 14px;
-  max-width: 780px;
   min-height: 100%;
   margin: auto;
   padding: 48px 16px;
@@ -188,8 +274,7 @@
 }
 
 .chat-messages {
-  max-width: 920px;
-  margin: auto;
+  width: 100%;
 }
 
 .chat-message {
@@ -305,19 +390,13 @@
   width: 100%;
   /* 补偿 .chat-scroll 的 margin-right 与滚动条宽度（JS 写入 --chat-scrollbar），使居中轴与消息区一致 */
   margin-right: 3px;
-  padding: 14px calc(28px + var(--chat-scrollbar, 0px)) 14px 28px;
+  /* 左右留白随可见区域宽度动态调整，与消息区一致 */
+  padding: 14px calc(clamp(40px, 4.5vw, 96px) + var(--chat-scrollbar, 0px)) 14px clamp(40px, 4.5vw, 96px);
 }
 
-/* 子元素用与 .chat-messages 相同的 920px 居中，使输入框与消息内容严格对齐 */
+/* 不再限制输入框最大宽度，随窗口全宽 */
 .composer-wrap > * {
-  max-width: 920px;
-  margin-left: auto;
-  margin-right: auto;
-}
-
-/* 输入框自身有 12px 内边距 + 1px 边框，加宽 26px 使框内文字与消息文字左右对齐 */
-.composer-wrap > .composer {
-  max-width: calc(920px + 26px);
+  width: 100%;
 }
 
 .composer-status {
@@ -353,6 +432,33 @@
 .composer-limits { gap: 8px; min-width: 0; white-space: normal; flex-wrap: wrap; justify-content: flex-end; }
 .composer-limits span + span { border-left: 1px solid var(--border); padding-left: 8px; }
 .composer-context { flex-shrink: 0; font-variant-numeric: tabular-nums; }
+/* 速度提示：纯文本，绝对定位在输入框右上角外侧，不撑开布局。 */
+.composer-speed {
+  position: absolute;
+  top: -27px;
+  right: 6px;
+  padding: 2px 4px;
+  color: var(--muted);
+  font-size: calc(12rem / 14);
+  line-height: 1.4;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  cursor: default;
+}
+.speed-tooltip { width: 300px; font-variant-numeric: tabular-nums; }
+.speed-tooltip-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
+.speed-tooltip-current { display: flex; flex-direction: column; gap: 2px; }
+.speed-tooltip-label { color: #b9bec3; font-size: calc(11.5rem / 14); letter-spacing: .02em; }
+.speed-tooltip-value { font-size: calc(20rem / 14); font-weight: 600; line-height: 1.15; }
+.speed-tooltip-value small { font-size: calc(11.5rem / 14); font-weight: 400; color: #b9bec3; }
+.speed-tooltip-sparkline { flex-shrink: 0; stroke: #d6dade; fill: none; }
+.speed-tooltip-sparkline circle { fill: #d6dade; stroke: none; }
+.speed-tooltip-figures { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
+.speed-tooltip-figures > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.speed-tooltip-figures span { color: #b9bec3; font-size: calc(11rem / 14); }
+.speed-tooltip-figures b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.speed-tooltip-footer { display: flex; justify-content: space-between; gap: 10px; margin-top: 10px; padding-top: 9px; border-top: 1px solid #ffffff21; color: #b9bec3; }
+.speed-tooltip-footer span:last-child { color: #f1f3f4; }
 .composer-context.context-warning { color: var(--error); }
 .context-ring-track, .context-ring-value { fill: none; stroke-width: 2; }
 .context-ring-track { stroke: var(--border); }
@@ -418,6 +524,7 @@
 }
 
 .composer {
+  position: relative;
   border: 1px solid var(--border);
   background: var(--surface);
   border-radius: 13px;
@@ -899,7 +1006,8 @@
 .round-changes-summary .round-changes-title:disabled { color: var(--text); cursor: default; }
 .round-changes-summary .round-changes-title:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .round-changes-summary .tool-approval-diffstat { display: inline-flex; flex-shrink: 0; gap: 8px; font-family: var(--font-mono, monospace); font-size: calc(12rem / 14); line-height: 1; }
-.round-changes-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.round-changes-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; max-width: 100%; }
+.round-changes-point { display: inline-flex; align-items: center; min-height: calc(32rem / 14); }
 .round-changes-current { display: inline-flex; align-items: center; gap: 5px; align-self: center; font-size: calc(12rem / 14); color: var(--muted); }
 .round-changes-current > svg { color: var(--diff-add); }
 .round-changes-actions .ui-button { display: inline-flex; align-items: center; gap: 6px; min-height: calc(32rem / 14); padding: 0 10px; border: 0; border-radius: 8px; background: none; color: var(--muted); font-size: calc(13rem / 14); font-weight: 400; box-shadow: none; }

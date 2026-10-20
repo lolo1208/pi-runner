@@ -9,6 +9,8 @@ export interface AppNotification { kind: NotificationKind; title: string; body: 
 import type { ConversationState } from './conversations'
 export interface PiRunnerApi {
   showNotification(notification: AppNotification): Promise<void>
+  /** 关闭当前显示的全部通知气泡（Windows 自定义气泡）。 */
+  closeNotifications(): Promise<void>
   onNotificationActivate(callback: (conversationId: string) => void): () => void
   readCodePreview(project: string, path: string, ranges: import('./code-preview').CodeLineRange[], snapshotId?: string): Promise<import('./code-preview').CodePreview>
   getSkills(): Promise<ModelResult<import('./skills').LocalSkill[]>>
@@ -50,6 +52,7 @@ export interface PiRunnerApi {
   openProjectDirectory(path: string): Promise<void>
   removeProject(path: string): Promise<void>
   createCheckpoint(label: string): Promise<Checkpoint>
+  listCheckpoints(project?: string): Promise<Checkpoint[]>
   /** 界面展示用改动列表，已过滤项目 .gitignore 排除项；快照与回滚仍使用完整范围。 */
   getChanges(base: string, current: string, project?: string): Promise<ChangedFile[]>
   getDiff(base: string, current: string, path: string, project?: string): Promise<FileDiff>
@@ -72,6 +75,8 @@ export interface PiRunnerApi {
   toggleMaximizeWindow(): Promise<boolean>
   closeWindow(): Promise<void>
   onWindowMaximizedChange(callback: (maximized: boolean) => void): () => void
+  /** 有会话执行时阻止系统休眠（不阻止自动锁屏）；active 为 false 时恢复默认电源行为。 */
+  setSleepBlocker(active: boolean): Promise<void>
 }
 export const IPC_CHANNELS = {
   codePreview: 'files:code-preview',
@@ -79,7 +84,7 @@ export const IPC_CHANNELS = {
   skillsList: 'models:skills-list', skillsInstall: 'models:skills-install', skillsEnable: 'models:skills-enable', skillsDelete: 'models:skills-delete', skillsRefresh: 'models:skills-refresh', skillsDirectory: 'models:skills-directory', skillsOpenDirectory: 'models:skills-open-directory',
   fileAction: 'files:action',
   copyText: 'clipboard:copy-text',
-  notification: 'app:notification', notificationActivate: 'app:notification-activate',
+  notification: 'app:notification', notificationActivate: 'app:notification-activate', closeNotifications: 'app:close-notifications',
   saveAttachment: 'files:save-attachment',
   sandboxStatus: 'models:sandbox-status', sandboxEnsure: 'models:sandbox-ensure', sandboxStart: 'models:sandbox-start', sandboxStop: 'models:sandbox-stop', sandboxState: 'sandbox:state',
   planInteraction: 'models:plan-interaction',
@@ -89,6 +94,7 @@ export const IPC_CHANNELS = {
   chatgptSubmit: 'models:chatgpt-submit', chatgptCancel: 'models:chatgpt-cancel', chatgptLogout: 'models:chatgpt-logout', chatgptModels: 'models:chatgpt-models', chatgptInfo: 'models:chatgpt-info', chatgptUsage: 'models:chatgpt-usage',
   conversationsLoad: 'conversations:load', conversationsSave: 'conversations:save',
   selectProject: 'project:select', checkpoint: 'snapshot:create',
+  checkpoints: 'snapshot:list',
   changes: 'snapshot:changes', diff: 'snapshot:diff', restore: 'snapshot:restore', matches: 'snapshot:matches',
   rollback: 'snapshot:rollback', agentEvent: 'models:agent-event', agentHistory: 'models:agent-history',
   modelSettings: 'models:list', modelSave: 'models:save',
@@ -96,6 +102,7 @@ export const IPC_CHANNELS = {
   ollamaConnect: 'models:ollama-connect', ollamaInfo: 'models:ollama-info',
   openrouterConnect: 'models:openrouter-connect',
   openrouterUsage: 'models:openrouter-usage',
+  sleepBlocker: 'app:sleep-blocker',
   windowMinimize: 'window:minimize', windowToggleMaximize: 'window:toggle-maximize', windowClose: 'window:close', windowMaximized: 'window:maximized',
   projectOpen: 'project:open', projectRebind: 'project:rebind', projectRemove: 'project:remove', projectDirectory: 'project:directory', projectPick: 'project:pick'
 } as const

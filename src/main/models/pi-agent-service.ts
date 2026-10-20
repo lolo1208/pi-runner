@@ -3,14 +3,14 @@ import path from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import { createAgentSession, createExtensionRuntime, estimateTokens as estimatePiTokens, SessionManager, SettingsManager, type AgentSession, type ResourceLoader, type ToolDefinition } from '@earendil-works/pi-coding-agent'
 import type { AssistantMessage, Usage } from '@earendil-works/pi-ai'
-import type { ChatExecution, ChatMessage, ModelProfile, ModelReply, ModelRateLimit, AgentRequestOptions, AgentEvent } from '../../shared/models'
+import type { ChatExecution, ChatMessage, ModelProfile, ModelReply, ModelRateLimit, AgentRequestOptions, AgentEvent, OutputSpeed } from '../../shared/models'
 import { systemOutputTokens } from '../../shared/output-tokens'
 import { estimateContextTokens, estimateTextTokens, normalizeCompressionThreshold, type ContextOptions } from '../../shared/context'
-import type { Checkpoint } from '../../shared/api'
-import { ShadowGitManager } from '../snapshot/shadow-git-manager'
+import { ShadowGitManager, type PendingCheckpoint } from '../snapshot/shadow-git-manager'
 import { PiAttachments } from './pi-attachments'
 import { createPiProvider } from './pi-provider'
 import { piProjectTools } from './pi-tools'
+import { emptyReplyMessage } from './model-empty-reply'
 import { ModelError, profileId } from './model-validation'
 import { safeModelErrorDetail } from './model-request-error'
 import { useFileResponses } from './model-attachments'
@@ -231,11 +231,46 @@ export class PiAgentService {
     const pendingCodeSnapshots: Promise<void>[] = []
     const attachments = new PiAttachments(manager)
     const responses = useFileResponses(profile, [...this.transcript(manager), ...messages])
-    let rateLimits: ModelRateLimit[] = [], before: Checkpoint | undefined, after: Checkpoint | undefined
+    let rateLimits: ModelRateLimit[] = [], before: PendingCheckpoint | undefined
     let beforePromise: Promise<void> | undefined
     const publish = (event: Omit<AgentEvent, 'requestId' | 'conversationId'>): void => {
       try { this.dependencies.emit({ ...event, requestId, conversationId: options?.conversationId ?? requestId }) }
       catch { console.warn('会话事件发送失败，任务继续执行') }
+    }
+    // 流式输出速度统计：按秒级窗口采样，节流后随事件下发，供输入框角落的速度指示器使用。
+    const speed = { outputTokens: 0, windowTokens: 0, windowStarted: 0, firstDelta: 0, peak: 0, recent: 0, samples: [] as OutputSpeed['samples'], lastPublish: 0 }
+    const publishSpeed = (force = false): void => {
+      const now = performance.now()
+      if (!force && now - speed.lastPublish < 250) return
+      speed.lastPublish = now
+      const elapsedMs = speed.firstDelta ? now - speed.firstDelta : 0
+      publish({ type: 'speed', speed: {
+        outputTokens: speed.outputTokens,
+        recentTokensPerSecond: Math.round(speed.recent),
+        averageTokensPerSecond: elapsedMs > 0 ? Math.round(speed.outputTokens / (elapsedMs / 1000)) : 0,
+        peakTokensPerSecond: Math.round(speed.peak),
+        firstResponseMs: speed.firstDelta ? Math.round(speed.firstDelta - started) : null,
+        elapsedMs: Math.round(elapsedMs),
+        samples: [...speed.samples]
+      } })
+    }
+    const trackOutputDelta = (text: string): void => {
+      if (!text) return
+      const tokens = estimateTextTokens(text)
+      if (!tokens) return
+      const now = performance.now()
+      if (!speed.firstDelta) speed.firstDelta = now
+      if (!speed.windowStarted) { speed.windowStarted = now; speed.windowTokens = 0 }
+      speed.outputTokens += tokens; speed.windowTokens += tokens
+      const elapsed = now - speed.windowStarted
+      if (elapsed >= 1000) {
+        const rate = speed.windowTokens / (elapsed / 1000)
+        speed.recent = rate; speed.peak = Math.max(speed.peak, rate)
+        speed.samples.push({ at: Date.now(), tokensPerSecond: Math.round(rate) })
+        if (speed.samples.length > 60) speed.samples.shift()
+        speed.windowStarted = now; speed.windowTokens = 0
+        publishSpeed(true)
+      } else publishSpeed()
     }
     const activeTools = new Map<string, string>()
     const waitingTools = new Map<string, string>()
@@ -279,7 +314,7 @@ export class PiAgentService {
     }
     const projectTools = isTest || !options ? [] : piProjectTools(snapshot?.getRoot() ?? cwd, () => snapshot ? beforePromise ??= (async () => {
       status('正在保存修改前快照…')
-      try { before = await snapshot.createCheckpoint('代理修改前') }
+      try { before = await snapshot.prepareCheckpoint() }
       finally { refreshStatus() }
     })() : Promise.resolve(), {
       mode, project: snapshot?.getRoot(), protectedDirectories: [this.dependencies.dataDirectory, path.join(os.homedir(), '.pi-runner-execution'), ...(this.dependencies.sandboxRuntimeDirectory ? [this.dependencies.sandboxRuntimeDirectory] : []), ...(this.dependencies.protectedDirectories ?? [])],
@@ -400,7 +435,8 @@ export class PiAgentService {
             modelStatus = call?.type === 'toolCall' && toolActions[call.name] ? `正在准备${toolActions[call.name]}...` : '正在准备工具调用…'
           }
           refreshStatus()
-          if (update.type === 'text_delta') publish({ type: 'text', text: update.delta })
+          if (update.type === 'text_delta') { publish({ type: 'text', text: update.delta }); trackOutputDelta(update.delta) }
+          if (update.type === 'thinking_delta') trackOutputDelta(update.delta)
         }
         if (event.type === 'message_start' && event.message.role === 'assistant') { completedResponse = false; callStarted = performance.now(); modelStatus = '正在等待模型回复…'; status(modelStatus, true) }
         if (event.type === 'message_end' && ['user', 'assistant'].includes(event.message.role)) publish({ type: 'transcript', messages: this.transcript(manager) })
@@ -491,10 +527,12 @@ export class PiAgentService {
       if (!final || final.stopReason === 'error' || final.stopReason === 'aborted') throw new ModelError(safeModelErrorDetail(final?.errorMessage ?? (final?.stopReason === 'aborted' ? '模型响应已中断，请重试' : '模型请求失败：未返回有效响应或具体错误原因，请重试'), apiKey))
       let text = session.getLastAssistantText() ?? ''
       if (!text.trim()) {
+        // 本地模型带上 Ollama 的真实结束原因与 num_ctx/num_predict，便于区分截断、额度用尽与空响应。
+        const ollamaCall = provider.ollamaCall?.()
         if (final.stopReason === 'length') throw new ModelError(systemOutputTokens(profile.provider)
           ? '模型在生成正文前已达到本次输出额度（包含思考与正文，受模型能力及剩余上下文限制）。额度由系统自动管理，请降低推理强度、拆分任务或切换模型后重试'
-          : `模型在生成正文前已达到本次输出上限（${profile.maxTokens} Token，包含思考与正文）。请在模型设置中提高输出 Token 上限，或降低推理强度后重试`)
-        throw new ModelError('模型已结束响应，但未返回正文。请重试，或切换模型及服务节点；本次未报告达到输出 Token 上限')
+          : `模型在生成正文前已达到本次输出上限（${ollamaCall?.numPredict ?? profile.maxTokens} Token，包含思考与正文）。请在模型设置中提高输出 Token 上限，或降低推理强度后重试`)
+        throw new ModelError(emptyReplyMessage(final, ollamaCall))
       }
       if (usedSkills.size) {
         const plain = (value: string): string => value.replace(/\s+/g, ' ').trim().slice(0, 200).replace(/[\\`*_{}\[\]<>#|]/g, '\\$&')
@@ -523,10 +561,12 @@ export class PiAgentService {
       if (before && snapshot) {
         try {
           status('正在保存本轮改动…')
-          after = await snapshot.createCheckpoint('代理修改后')
-          const round = { project: snapshot.getRoot(), before, after, messageIndex: this.transcript(manager).length - 1 }
-          manager.appendCustomEntry('pi-runner-snapshot', round)
-          publish({ type: 'snapshot', snapshot: round })
+          const checkpoints = await snapshot.completeCheckpoint(before)
+          if (checkpoints) {
+            const round = { project: snapshot.getRoot(), ...checkpoints, messageIndex: this.transcript(manager).length - 1 }
+            manager.appendCustomEntry('pi-runner-snapshot', round)
+            publish({ type: 'snapshot', snapshot: round })
+          }
         } catch { const warning = '修改后快照保存失败，请手动捕获当前改动'; warn(warning); status(warning) }
       }
       await Promise.all(pendingCodeSnapshots)

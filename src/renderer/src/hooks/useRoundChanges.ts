@@ -8,6 +8,7 @@ export interface RoundChangesData {
   files?: ChangedFile[]
   error?: string
   fileState?: RoundFileState
+  beforeFileState?: RoundFileState
 }
 
 export const roundChangesKey = (round: AgentSnapshot): string => JSON.stringify([round.project, round.before.hash, round.after.hash])
@@ -79,7 +80,7 @@ export function useRoundChanges(rounds: AgentSnapshot[], visible: string[], acti
               const key = roundChangesKey(round)
               if (!eligible.has(key)) continue
               checked.current.set(key, { version, at: Date.now() })
-              publish(key, { ...cache.current.get(key)!, fileState: states[round.after.hash] })
+              publish(key, { ...cache.current.get(key)!, beforeFileState: states[round.before.hash], fileState: states[round.after.hash] })
             }
           }
         } catch {
@@ -91,7 +92,8 @@ export function useRoundChanges(rounds: AgentSnapshot[], visible: string[], acti
               const previous = cache.current.get(key)
               if (!previous) continue
               checked.current.set(key, { version, at: Date.now() })
-              publish(key, { ...previous, fileState: previous.fileState === 'matches' || previous.fileState === 'different' ? previous.fileState : 'error' })
+              const fallback = (state?: RoundFileState): RoundFileState => state === 'matches' || state === 'different' ? state : 'error'
+              publish(key, { ...previous, beforeFileState: fallback(previous.beforeFileState), fileState: fallback(previous.fileState) })
             }
           }
         }
@@ -131,11 +133,8 @@ export function useRoundChanges(rounds: AgentSnapshot[], visible: string[], acti
     }
     const focus = (): void => {
       if (!input.current.active) return
-      for (const round of input.current.rounds) {
-        const key = roundChangesKey(round)
-        const last = checked.current.get(key)
-        if (last && Date.now() - last.at >= 60000) checked.current.delete(key)
-      }
+      // 外部编辑后切回窗口即可核对，连续焦点通知由调度器合并。
+      checkVersion.current++
       schedule(250)
     }
     window.addEventListener(PROJECT_FILES_RESTORED, invalidate)

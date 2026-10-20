@@ -5,7 +5,7 @@ import { anthropicMessagesApi } from '@earendil-works/pi-ai/api/anthropic-messag
 import { ModelRuntime } from '@earendil-works/pi-coding-agent'
 import type { ModelProfile, ModelRateLimit } from '../../shared/models'
 import type { PiAttachments } from './pi-attachments'
-import { ollamaFetch } from './pi-ollama'
+import { ollamaContextTokens, ollamaFetch, type OllamaCallInfo } from './pi-ollama'
 import { requestPiStream } from './pi-stream'
 import type { ChatgptService } from './chatgpt-service'
 import { ModelError } from './model-validation'
@@ -25,10 +25,13 @@ export async function createPiProvider(profile: ModelProfile, apiKey: string, at
     if (!apiKey) { headers.delete('authorization'); headers.delete('x-api-key') }
     return fetchRequest(url, { ...init, headers, redirect: 'error' })
   }
+  // 本地窗口与下发的 num_ctx 保持一致，避免应用按 32K 估算而 Ollama 只给了默认的 4K。
+  let ollamaCall: OllamaCallInfo | undefined
+  const contextWindow = profile.provider === 'ollama' ? ollamaContextTokens(profile) : profile.contextTokens ?? Math.max(32768, profile.maxTokens * 2)
   runtime.registerProvider(provider, {
     api, baseUrl: profile.baseUrl, apiKey: apiKey || 'pi-runner-local',
     models: [{ id: profile.model, name: profile.name, input: ['text', 'image'], reasoning: profile.provider === 'openrouter' ? profile.supportedParameters?.includes('reasoning') === true : profile.thinking === true,
-      contextWindow: profile.contextTokens ?? Math.max(32768, profile.maxTokens * 2), maxTokens: profile.maxTokens,
+      contextWindow, maxTokens: profile.maxTokens,
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       ...(api === 'openai-completions' ? { compat: { maxTokensField: profile.tokenParameter, supportsDeveloperRole: profile.provider === 'openai', supportsStore: false, supportsReasoningEffort: profile.provider === 'openai' || profile.provider === 'openrouter', ...(profile.provider === 'openrouter' ? { thinkingFormat: 'openrouter' as const } : {}) } } : {}) }],
     streamSimple: (model: Model<Api>, context: TranscriptContext, options?: SimpleStreamOptions) => {
@@ -40,7 +43,7 @@ export async function createPiProvider(profile: ModelProfile, apiKey: string, at
       ...(profile.temperature !== null ? { temperature: profile.temperature } : {}),
       timeoutMs: profile.timeoutSeconds * 1000, maxRetries: 0,
       fetch: async (url, init) => {
-        const response = await (profile.provider === 'ollama' ? ollamaFetch(profile, securedFetch) : securedFetch)(url, init)
+        const response = await (profile.provider === 'ollama' ? ollamaFetch(profile, securedFetch, info => { ollamaCall = info }) : securedFetch)(url, init)
         if (!response.ok) responseError = await modelResponseError(response, apiKey)
         return response
       },
@@ -73,5 +76,6 @@ export async function createPiProvider(profile: ModelProfile, apiKey: string, at
     }), apiKey, () => controller.abort(), onModelRequestActive, () => responseError)
     }
   })
-  return { runtime, model: runtime.getModel(provider, profile.model)!, thinkingLevel: profile.thinking === true || profile.ollamaThinkingLevel != null ? 'medium' as const : 'off' as const }
+  return { runtime, model: runtime.getModel(provider, profile.model)!, thinkingLevel: profile.thinking === true || profile.ollamaThinkingLevel != null ? 'medium' as const : 'off' as const,
+    ollamaCall: (): OllamaCallInfo | undefined => ollamaCall }
 }

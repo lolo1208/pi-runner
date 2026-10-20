@@ -14,6 +14,7 @@ const api: PiRunnerApi = {
   performFileAction: (project, path, action) => ipcRenderer.invoke(IPC_CHANNELS.fileAction, project, path, action),
   copyText: text => ipcRenderer.invoke(IPC_CHANNELS.copyText, text),
   showNotification: notification => ipcRenderer.invoke(IPC_CHANNELS.notification, notification),
+  closeNotifications: () => ipcRenderer.invoke(IPC_CHANNELS.closeNotifications),
   onNotificationActivate: callback => {
     const listener = (_event: Electron.IpcRendererEvent, conversationId: string): void => callback(conversationId)
     ipcRenderer.on(IPC_CHANNELS.notificationActivate, listener)
@@ -52,6 +53,7 @@ const api: PiRunnerApi = {
   openProjectDirectory: path => ipcRenderer.invoke(IPC_CHANNELS.projectDirectory, path),
   removeProject: path => ipcRenderer.invoke(IPC_CHANNELS.projectRemove, path),
   createCheckpoint: label => ipcRenderer.invoke(IPC_CHANNELS.checkpoint, label),
+  listCheckpoints: project => ipcRenderer.invoke(IPC_CHANNELS.checkpoints, project),
   getChanges: (base, current, project) => ipcRenderer.invoke(IPC_CHANNELS.changes, base, current, project),
   getDiff: (base, current, path, project) => ipcRenderer.invoke(IPC_CHANNELS.diff, base, current, path, project),
   rollbackCheckpoint: (base, current, project) => ipcRenderer.invoke(IPC_CHANNELS.rollback, base, current, project),
@@ -76,6 +78,7 @@ const api: PiRunnerApi = {
   minimizeWindow: () => ipcRenderer.invoke(IPC_CHANNELS.windowMinimize),
   toggleMaximizeWindow: () => ipcRenderer.invoke(IPC_CHANNELS.windowToggleMaximize),
   closeWindow: () => ipcRenderer.invoke(IPC_CHANNELS.windowClose),
+  setSleepBlocker: active => ipcRenderer.invoke(IPC_CHANNELS.sleepBlocker, active),
   onWindowMaximizedChange: callback => {
     const listener = (_event: Electron.IpcRendererEvent, maximized: boolean): void => callback(maximized)
     ipcRenderer.on(IPC_CHANNELS.windowMaximized, listener)

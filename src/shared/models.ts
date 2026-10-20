@@ -143,7 +143,7 @@ export interface AgentSnapshot { project: string; before: import('./api').Checkp
 export interface AgentEvent {
   requestId: string
   conversationId: string
-  type: 'text' | 'status' | 'transcript' | 'snapshot' | 'approval' | 'approval-end' | 'plan-interaction' | 'plan-interaction-end' | 'intent-mode'
+  type: 'text' | 'status' | 'transcript' | 'snapshot' | 'speed' | 'approval' | 'approval-end' | 'plan-interaction' | 'plan-interaction-end' | 'intent-mode'
   interaction?: PlanInteraction
   interactionId?: string
   intentMode?: IntentMode
@@ -153,6 +153,24 @@ export interface AgentEvent {
   resetText?: boolean
   messages?: ChatMessage[]
   snapshot?: AgentSnapshot
+  speed?: OutputSpeed
+}
+/** 流式回复期间的输出速度统计，节流后随 AgentEvent 下发。 */
+export interface OutputSpeed {
+  /** 本轮累计输出 Token 数（含思考）。 */
+  outputTokens: number
+  /** 最近一个统计窗口的输出速度。 */
+  recentTokensPerSecond: number
+  /** 首个 Token 起的平均输出速度。 */
+  averageTokensPerSecond: number
+  /** 本轮速度峰值。 */
+  peakTokensPerSecond: number
+  /** 从请求发出到首个输出 Token 的耗时；尚无输出时为 null。 */
+  firstResponseMs: number | null
+  /** 首个输出 Token 起的累计时长。 */
+  elapsedMs: number
+  /** 每秒窗口的采样，用于速度曲线。 */
+  samples: { at: number; tokensPerSecond: number }[]
 }
 export type ModelResult<T> = { ok: true; value: T } | { ok: false; error: string }
 export interface ProviderPreset { id: ProviderId; label: string; protocol: ModelProtocol; baseUrl: string }

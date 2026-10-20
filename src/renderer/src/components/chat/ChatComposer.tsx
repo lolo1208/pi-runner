@@ -6,6 +6,7 @@ import { ArrowUp, Check, LoaderCircle, Square } from 'lucide-react'
 import { ComposerAddMenu, ComposerSkillTags, useLocalSkills } from './ComposerAddMenu'
 import { useSlashSkillPicker } from './SlashSkillPicker'
 import { MessageQueue, type MessageQueueProps } from './MessageQueue'
+import { SpeedIndicator } from './SpeedIndicator'
 import { IntentModePicker } from './IntentModePicker'
 import { PermissionModePicker } from './PermissionModePicker'
 import type { PermissionMode, IntentMode } from '../../../../shared/models'
@@ -35,6 +36,7 @@ interface ChatComposerProps extends MessageQueueProps {
   skillIds?: string[]
   onSkillsChange?: (ids: string[]) => void
   isBusy: boolean
+  outputSpeed?: import('../../../../shared/models').OutputSpeed
   stopping?: boolean
   hasMessages: boolean
   settingsDisabled?: boolean
@@ -46,7 +48,7 @@ interface ChatComposerProps extends MessageQueueProps {
   onCancel: () => void
 }
 
-export function ChatComposer({ active = true, queue = [], editingId, queuePaused, onResumeQueue, onEditQueued, onDeleteQueued, onReorderQueued, onCancelEdit, intentMode = 'execute', onIntentChange, permissionMode = 'default', onPermissionChange, profile, profiles, providers, onSelectModel, onThinkingChange, prompt, images, skillIds = [], onSkillsChange = () => {}, isBusy, stopping = false, hasMessages, settingsDisabled, sendWithCtrlEnter, onPromptChange, onImagesChange, onOpenSettings, onSend, onCancel }: ChatComposerProps): React.JSX.Element {
+export function ChatComposer({ active = true, queue = [], editingId, queuePaused, onResumeQueue, onEditQueued, onDeleteQueued, onReorderQueued, onCancelEdit, intentMode = 'execute', onIntentChange, permissionMode = 'default', onPermissionChange, profile, profiles, providers, onSelectModel, onThinkingChange, prompt, images, skillIds = [], onSkillsChange = () => {}, isBusy, stopping = false, hasMessages, settingsDisabled, outputSpeed, sendWithCtrlEnter, onPromptChange, onImagesChange, onOpenSettings, onSend, onCancel }: ChatComposerProps): React.JSX.Element {
   const localSkills = useLocalSkills()
   const promptId = useId()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -114,6 +116,7 @@ export function ChatComposer({ active = true, queue = [], editingId, queuePaused
     if (!event.dataTransfer.files.length) return
     event.preventDefault(); void addImages(Array.from(event.dataTransfer.files))
   }}>
+    {active && outputSpeed && outputSpeed.outputTokens > 0 && <SpeedIndicator speed={outputSpeed} />}
     <MessageQueue queue={queue} editingId={editingId} queuePaused={queuePaused} onResumeQueue={onResumeQueue} onEditQueued={reading ? undefined : onEditQueued} onDeleteQueued={reading ? undefined : onDeleteQueued} onReorderQueued={onReorderQueued} />
     {editingId && <div className="queue-edit-status"><span>{queuePaused ? '正在编辑队列消息，保存后队列保持暂停' : '正在编辑队列消息，保存后继续执行'}</span><Button type="button" variant="ghost" size="sm" disabled={reading} onClick={onCancelEdit}>取消编辑</Button></div>}
     {active && images.length > 0 && <ChatImages images={images} disabled={reading} onRemove={id => onImagesChange(images.filter(image => image.id !== id))} />}

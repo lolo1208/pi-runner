@@ -36,9 +36,9 @@ OpenRouter 的价格来自官方目录，随连接或刷新更新并保存到本
 | OpenRouter | 固定官方 `/api/v1/chat/completions` | 共用加密 API Key；使用 `max_tokens`，按目录适配温度与最大输出，推理档位仅展示目录明确提供的值 |
 | Anthropic | Messages | `max_tokens`、Temperature、图片与 PDF |
 | DeepSeek、vLLM、自定义 | 配置的 OpenAI 兼容接口；自定义可选 Anthropic 协议 | 保留 Base URL、模型 ID 和独立生成参数 |
-| Ollama | 原生 `/api/chat` | 保留 `options.num_ctx`、`options.num_predict`、Temperature 和 `think`，转换 NDJSON 流供 pi 使用 |
+| Ollama | 原生 `/api/chat` | 保留 `options.num_ctx`、`options.num_predict`、Temperature 和 `think`，始终显式下发 `num_ctx`，转换 NDJSON 流供 pi 使用 |
 
-上下文上限用于 pi 的压缩预算；不会作为所有供应商都接受的 HTTP 参数发送。只有 Ollama 的上下文设置还会下发到服务。未配置且未发现上下文上限时，代理按至少 32,768 Token 的本地预算计算，并为输出预留空间；这不代表服务端模型的真实能力。
+上下文上限用于 pi 的压缩预算；不会作为所有供应商都接受的 HTTP 参数发送。只有 Ollama 的上下文设置还会下发到服务，且本地请求总会带上 `num_ctx`：未配置时使用 16,384 Token 兜底，应用侧窗口按同一数值计算。省略 `num_ctx` 时 Ollama 会用远小于应用预算的服务端默认值截断输入且不报错，表现为模型突然返回空正文。其余供应商未配置且未发现上下文上限时，代理按至少 32,768 Token 的本地预算计算，并为输出预留空间；这不代表服务端模型的真实能力。本地模型建议显式填写上下文上限：模型声明的最大上下文（如 256K）会带来可与显存不适配的 KV 缓存分配。
 
 Base URL 填 API 根地址，不包含具体请求路径。远程地址要求 HTTPS；HTTP 仅允许本机回环地址。请求不自动跟随重定向。Temperature 留空时不强行发送。
 

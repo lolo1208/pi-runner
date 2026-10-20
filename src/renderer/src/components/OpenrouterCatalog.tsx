@@ -91,16 +91,7 @@ export function OpenrouterCatalog({ settings, query, busy, getThinkingLabel, onC
     <section aria-label="未启用模型">
       <h5 className="openrouter-section-heading">未启用 <span>{[...groups.values()].reduce((count, models) => count + models.length, 0)}</span></h5>
       {[...groups].sort(([a], [b]) => compareManufacturers(a, b)).map(([vendor, models]) => <ManufacturerGroup vendor={vendor} models={models} search={search} key={`${vendor}:${Boolean(search)}`}>
-        <ul className="provider-model-list">{models.map(model => {
-          const profile = modelProfile(model)
-          const thinking = getThinkingLabel(profile)
-          return <li key={model.id}>
-            <span className="provider-icon" aria-hidden="true"><ModelIcon provider="openrouter" model={model.id} size={19} /></span>
-            <div className="provider-model-name model-priced-name" title={profile.available === false ? `${model.name ?? model.id}（当前不可用）` : profile.enabled === false ? `${model.name ?? model.id}（已停用）` : model.name ?? model.id}><strong>{model.name ?? model.id}{profile.available === false ? ' · 当前不可用' : ''}</strong><ModelPriceTag descriptor={model} /></div>
-            <div className="provider-model-actions">{thinking && <span className="provider-model-thinking" title={`当前推理强度：${thinking}`}>{thinking}</span>}<Button size="icon" variant="ghost" disabled={busy} aria-label={`配置 ${model.name ?? model.id}`} title="模型高级设置" onClick={() => onConfigure(profile)}><SlidersHorizontal size={16} /></Button>
-              <Switch aria-label={`启用 ${model.name ?? model.id}`} checked={profile.enabled !== false} disabled={busy || profile.available === false} onCheckedChange={() => onToggle(profile)} /></div>
-          </li>
-        })}</ul>
+        {renderModels(models, `${vendor} 未启用模型`)}
       </ManufacturerGroup>)}
     </section>
     {!enabled.length && !groups.size && <p className="provider-no-results">{search ? '没有匹配的模型，请尝试其他关键词。' : '暂无可调用的模型，请刷新目录重试。'}</p>}

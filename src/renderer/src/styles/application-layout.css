@@ -1,6 +1,6 @@
 .window-shell {
   --titlebar-height: calc(44rem / 14);
-  --task-sidebar-width: clamp(210px, 19vw, 300px);
+  --task-sidebar-width: clamp(210px, 19vw, 400px);
   background: var(--bg);
   flex-direction: column;
   width: 100%;
@@ -109,7 +109,7 @@
 }
 
 .app.tools-open {
-  grid-template-columns: var(--task-sidebar-width) minmax(320px, 1fr) minmax(320px, 38%);
+  grid-template-columns: var(--task-sidebar-width) minmax(320px, 1fr) minmax(320px, calc((100% - var(--task-sidebar-width)) * 0.5));
 }
 
 .task-sidebar {

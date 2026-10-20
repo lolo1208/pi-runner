@@ -7,6 +7,7 @@ import { chatgptReferencePricing } from '../../shared/model-pricing'
 import type { ModelSettingsStore } from './model-settings-store'
 import { ModelError, requiredString } from './model-validation'
 import { requestPiStream } from './pi-stream'
+import type { OllamaCallInfo } from './pi-ollama'
 import { modelResponseError } from './model-request-error'
 import type { PiAttachments } from './pi-attachments'
 import { exchangeChatgptToken, loginChatgpt } from './chatgpt-oauth'
@@ -266,6 +267,6 @@ export class ChatgptService {
     })
     const levels = actualThinkingLevels(configured)
     const thinkingLevel = parseThinkingLevel(selectedModelThinking(profile, { values: levels, default: model.defaultThinkingLevel })) ?? 'off'
-    return { runtime, model: runtime.getModel(providerId, profile.model)!, thinkingLevel }
+    return { runtime, model: runtime.getModel(providerId, profile.model)!, thinkingLevel, ollamaCall: (): OllamaCallInfo | undefined => undefined }
   }
 }

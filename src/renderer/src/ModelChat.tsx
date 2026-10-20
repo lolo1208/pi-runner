@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { QueueEditState } from '../../shared/conversations'
-import type { ChatgptUsage, OpenrouterUsage, ChatImage, ChatMessage, ModelProfile, ModelProfileView, ModelProviderConnection, ModelReply, ModelSettings, ProviderId } from '../../shared/models'
+import type { ChatgptUsage, OpenrouterUsage, ChatImage, ChatMessage, ModelProfile, ModelProfileView, ModelProviderConnection, ModelReply, ModelSettings, OutputSpeed, ProviderId } from '../../shared/models'
 import { unwrapModelResult } from './model-result'
 import { ChatComposer } from './components/chat/ChatComposer'
 import type { QueuedMessage } from './components/chat/MessageQueue'
@@ -229,6 +229,13 @@ export default function ModelChat({ snapshots, initialIntentMode = 'execute', on
   }
   const [pending, setPending] = useState<{ message: ChatMessage; firstMessage: number } | null>(null)
   const [streamedText, setStreamedText] = useState('')
+  const [outputSpeed, setOutputSpeed] = useState<OutputSpeed>()
+  // 对话结束后不立即消失，保留最后统计停留一段时间，方便查看。
+  useEffect(() => {
+    if (requestId || !outputSpeed) return
+    const timer = setTimeout(() => setOutputSpeed(undefined), 15000)
+    return () => clearTimeout(timer)
+  }, [requestId, outputSpeed])
   const [agentStatus, setAgentStatus] = useState('')
   const [execution, setExecution] = useState<{ model: string; provider: ProviderId; startedAt: number; firstMessage: number }>()
   const activeRequest = useRef<string | null>(null)
@@ -273,6 +280,7 @@ export default function ModelChat({ snapshots, initialIntentMode = 'execute', on
       setCommandApproval(previous => previous?.id === event.approvalId ? null : previous)
     }
     if (event.type === 'text') setStreamedText(text => event.resetText ? event.text ?? '' : text + (event.text ?? ''))
+    if (event.type === 'speed' && event.speed) setOutputSpeed(event.speed)
     if (event.type === 'status') { setAgentStatus(event.text ?? ''); if (event.resetText) setStreamedText('') }
     if (event.type === 'transcript' && event.messages) {
       nativeHistory.current = true
@@ -361,7 +369,7 @@ export default function ModelChat({ snapshots, initialIntentMode = 'execute', on
     const { id: _queueId, ...message } = item
     setQueue(items => items.filter(queued => queued.id !== item.id))
     setScrollToLatestRequest(value => value + 1)
-    busyRef.current = true; setError(''); setNotice(''); setPending({ message, firstMessage: messages.length }); setStreamedText(''); setAgentStatus('正在连接模型…')
+    busyRef.current = true; setError(''); setNotice(''); setPending({ message, firstMessage: messages.length }); setStreamedText(''); setOutputSpeed(undefined); setAgentStatus('正在连接模型…')
     cancelledRef.current = false
     const id = crypto.randomUUID(); setRequestId(id); activeRequest.current = id
     setExecution({ model: profile.model, provider: profile.provider, startedAt: performance.now(), firstMessage: messages.length })
@@ -451,7 +459,7 @@ export default function ModelChat({ snapshots, initialIntentMode = 'execute', on
       {active && error && <p className="error" role="alert">{error}</p>}
       {active && notice && <p className="request-notice" role="status">{notice}</p>}
       {active && project && <SandboxStatus key={project} visible={permissionMode === 'auto'} state={currentSandboxState} onInspect={() => setSandboxOpen(true)} />}
-      <ChatComposer stopping={stopping} active={active} queue={queue} editingId={editingId} queuePaused={queuePaused} onResumeQueue={() => setQueuePaused(false)} onCancelEdit={restoreDraft} onEditQueued={editQueued} onDeleteQueued={deleteQueued} onReorderQueued={reorderQueued} intentMode={intentMode} onIntentChange={changeIntent} permissionMode={permissionMode} onPermissionChange={conversationId ? changePermission : undefined} profile={profile} profiles={availableProfiles} providers={providers} onSelectModel={id => { setSelectedModelId(id); onModelChange?.(id) }} onThinkingChange={changeThinking} prompt={prompt} images={images} skillIds={skillIds} onSkillsChange={setSkillIds} onImagesChange={setImages} isBusy={Boolean(requestId)} hasMessages={messages.length > 0} settingsDisabled={settingsDisabled || permissionChanging || !projectReady} sendWithCtrlEnter={sendWithCtrlEnter} onPromptChange={setPrompt} onOpenSettings={onOpenSettings} onSend={submit} onCancel={() => { void stopRequest().catch(() => setError('取消请求失败，请重试')) }} />
+      <ChatComposer stopping={stopping} active={active} outputSpeed={outputSpeed} queue={queue} editingId={editingId} queuePaused={queuePaused} onResumeQueue={() => setQueuePaused(false)} onCancelEdit={restoreDraft} onEditQueued={editQueued} onDeleteQueued={deleteQueued} onReorderQueued={reorderQueued} intentMode={intentMode} onIntentChange={changeIntent} permissionMode={permissionMode} onPermissionChange={conversationId ? changePermission : undefined} profile={profile} profiles={availableProfiles} providers={providers} onSelectModel={id => { setSelectedModelId(id); onModelChange?.(id) }} onThinkingChange={changeThinking} prompt={prompt} images={images} skillIds={skillIds} onSkillsChange={setSkillIds} onImagesChange={setImages} isBusy={Boolean(requestId)} hasMessages={messages.length > 0} settingsDisabled={settingsDisabled || permissionChanging || !projectReady} sendWithCtrlEnter={sendWithCtrlEnter} onPromptChange={setPrompt} onOpenSettings={onOpenSettings} onSend={submit} onCancel={() => { void stopRequest().catch(() => setError('取消请求失败，请重试')) }} />
       {active && <ComposerStatus latestReply={matchingStatistics?.reply} subscriptionUsage={subscriptionUsage} openrouterUsage={openrouterUsage} compressionThreshold={compressionThreshold} project={project} profile={profile} contextLimit={providers?.find(item => item.provider === profile?.provider && item.baseUrl === profile?.baseUrl)?.models.find(item => item.id === profile?.model)?.maxContextTokens} messages={contextMessages(messages, compaction)} prompt={prompt} instruction={customPrompt} attachments={images} usage={contextUsage} rateLimits={matchingStatistics?.reply.rateLimits} onOpenProject={() => {
         if (project) void window.piRunner.openProjectDirectory(project).catch(() => setError('无法打开项目目录，请检查目录是否存在后重试'))
       }} />}

@@ -1,5 +1,6 @@
 import type { ChatMessage, ModelProfile, ModelReply, ModelRateLimit } from '../../shared/models'
 import { asRecord, ModelError, normalizeOllamaUrl } from './model-validation'
+import { ollamaContextTokens } from './pi-ollama'
 import { modelMessages, useFileResponses } from './model-attachments'
 
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024
@@ -49,8 +50,7 @@ export class ModelClient {
     if (isOllama) {
       delete body[profile.tokenParameter]
       delete body.temperature
-      const options: Record<string, number> = { num_predict: profile.maxTokens }
-      if (profile.contextTokens != null) options.num_ctx = profile.contextTokens
+      const options: Record<string, number> = { num_predict: profile.maxTokens, num_ctx: ollamaContextTokens(profile) }
       if (profile.temperature !== null) options.temperature = profile.temperature
       body.options = options
       if (profile.ollamaThinkingLevel != null || profile.thinking != null) body.think = profile.ollamaThinkingLevel ?? profile.thinking

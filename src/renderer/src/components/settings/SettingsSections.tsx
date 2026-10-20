@@ -103,6 +103,14 @@ export function GeneralSettingsSection({ preferences, onPreferences, isMac, sett
           <Label htmlFor="system-notifications" className="sr-only">开启系统通知</Label>
         </div>
       </div>
+      <div className="settings-divider" />
+      <div className="shortcut-setting">
+        <span><b>运行期间阻止系统休眠</b><small>有会话正在执行时阻止系统进入休眠或睡眠；不会阻止自动锁屏和屏幕关闭。</small></span>
+        <div className="flex shrink-0 items-center gap-2">
+          <Switch id="prevent-sleep" checked={preferences.preventSleep} onCheckedChange={preventSleep => onPreferences({ ...preferences, preventSleep })} />
+          <Label htmlFor="prevent-sleep" className="sr-only">运行期间阻止系统休眠</Label>
+        </div>
+      </div>
     </section>
     <p className="hint">设置自动保存在此设备。</p>
   </>

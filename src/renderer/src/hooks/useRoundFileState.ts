@@ -6,11 +6,15 @@ export type RoundFileState = 'checking' | 'matches' | 'different' | 'error'
 
 /** 调用方控制检查时机，只传入已加载聊天范围内需要检查的快照。 */
 export async function checkRoundFileStates(snapshots: AgentSnapshot[]): Promise<Record<string, RoundFileState>> {
-  const groups = new Map<string, string[]>()
-  for (const round of snapshots) groups.set(round.project, [...groups.get(round.project) ?? [], round.after.hash])
+  const groups = new Map<string, Set<string>>()
+  for (const round of snapshots) {
+    const hashes = groups.get(round.project) ?? new Set<string>()
+    hashes.add(round.before.hash); hashes.add(round.after.hash)
+    groups.set(round.project, hashes)
+  }
   const states: Record<string, RoundFileState> = {}
   for (const [project, hashes] of groups) {
-    const matches = new Set(await window.piRunner.getMatchingCheckpoints(hashes, project))
+    const matches = new Set(await window.piRunner.getMatchingCheckpoints([...hashes], project))
     for (const hash of hashes) states[hash] = matches.has(hash) ? 'matches' : 'different'
   }
   return states
@@ -21,9 +25,9 @@ export function useRoundFileState(snapshots: AgentSnapshot[], disabled: boolean,
   const [states, setStates] = useState<Record<string, RoundFileState>>({})
   const lastChecks = useRef(new Map<string, { at: number; targets: string }>())
   const dirty = useRef(true)
-  const targets = JSON.stringify(snapshots.map(round => [round.project, round.after.hash]))
+  const targets = JSON.stringify(snapshots.map(round => [round.project, round.before.hash, round.after.hash]))
   useEffect(() => {
-    const projects = new Set((JSON.parse(targets) as [string, string][]).map(([project]) => project))
+    const projects = new Set((JSON.parse(targets) as [string, string, string][]).map(([project]) => project))
     // 隐藏的会话也记住同项目已被恢复，重新打开时不沿用过期结果。
     const invalidate = (event: Event): void => {
       if (projects.has((event as CustomEvent<string>).detail)) dirty.current = true
@@ -35,7 +39,7 @@ export function useRoundFileState(snapshots: AgentSnapshot[], disabled: boolean,
     if (disabled) dirty.current = true
     if (!active || disabled) return
     const groups = new Map<string, string[]>()
-    for (const [project, hash] of JSON.parse(targets) as [string, string][]) groups.set(project, [...groups.get(project) ?? [], hash])
+    for (const [project, before, after] of JSON.parse(targets) as [string, string, string][]) groups.set(project, [...new Set([...groups.get(project) ?? [], before, after])])
     if (!groups.size) return
     let disposed = false
     let running = false
@@ -78,7 +82,7 @@ export function useRoundFileState(snapshots: AgentSnapshot[], disabled: boolean,
       if (timer !== undefined) clearTimeout(timer)
       timer = setTimeout(() => { timer = undefined; void refresh(dirty.current) }, 250)
     }
-    const onFocus = (): void => { schedule(false) }
+    const onFocus = (): void => { schedule(true) }
     const onRestore = (event: Event): void => {
       if (groups.has((event as CustomEvent<string>).detail)) schedule(true)
     }

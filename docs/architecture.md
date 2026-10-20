@@ -20,11 +20,71 @@ Renderer → window.piRunner → Preload → Main IPC → ShadowGitManager
 
 ## 快照策略
 
-项目影子仓库与独立暂存工作树保存在 `app.getPath('home')/.pi-runner/projects/<项目路径 SHA-256>/shadow-git` 和 `staging` 下，能排除用户 Git 配置、属性过滤器及嵌套仓库的干扰，且不会在项目目录写入应用元数据。所有 Git 调用通过 simple-git 指定专用 GIT_DIR 与 GIT_WORK_TREE，隔离继承的 GIT_* 环境和全局配置，禁用换行转换、提交签名和钩子。强制添加符合快照策略的文件，因此原 `.gitignore` 不决定快照覆盖范围。改动列表只在展示层过滤：`src/main/snapshot/project-ignores.ts` 用 `ignore` 解析项目根与相关目录的 `.gitignore`，按 Git 的目录优先级匹配（深目录规则优先，父目录被排除时不读取其中的规则）；读取失败或路径异常按未忽略处理；不读取全局 gitignore 与 `.git/info/exclude`，匹配器按 `.gitignore` 的 mtime 与大小有限缓存。
+项目影子仓库与独立暂存工作树保存在 `app.getPath('home')/.pi-runner/projects/<项目路径 SHA-256>/shadow-git` 和 `staging` 下，能排除用户 Git 配置、属性过滤器及嵌套仓库的干扰，且不会在项目目录写入应用元数据。所有 Git 调用通过 simple-git 指定专用 GIT_DIR 与 GIT_WORK_TREE，隔离继承的 GIT_* 环境和全局配置，禁用换行转换、提交签名和钩子。采集在遍历和复制前应用内置排除规则与项目 `.gitignore`，随后强制添加暂存区内容。`src/main/snapshot/project-ignores.ts` 用 `ignore` 共用根与嵌套规则的解析及匹配（深目录规则优先，父目录被排除时不读取其中的规则），不读取全局 gitignore 与 `.git/info/exclude`。快照和恢复每次严格读取规则，除规则缺失外的读取错误会中止操作；展示过滤继续采用有限缓存，读取失败时保留可见文件。
 
-单个 Manager 串行执行操作。当前仅支持单窗口/单个 Manager 使用项目；下一阶段需进程级项目锁与配额。快照前必须暂停 Agent 工具写入。识别改名暂按删除和新增处理；二进制展示状态，不渲染文本。Diff 路径必须出现在指定提交间的改动列表中。
+同一影子存储在进程内跨 Manager 串行执行采集、差异读取与恢复，回滚的保护快照和后续恢复共用一次队列操作；尚无跨进程锁和配额。暂存区增量同步，依据源文件和暂存文件的设备、文件标识、大小及纳秒级 mtime、ctime 复用未变化文件；缓存按暂存路径隔离，进程内最多保留 32 个项目，失败、恢复或移除项目时失效。恢复与回滚在写入前按当前规则过滤候选路径，保护旧快照中当前已被排除的文件；不重写或清理历史提交。快照前必须暂停 Agent 工具写入。识别改名暂按删除和新增处理；二进制展示状态，不渲染文本。Diff 路径必须出现在指定提交间的改动列表中。
 
-排除任意层级的 `.git`、`.pi-runner`、`node_modules`、`dist`、`out`、`build-work`、`release`、发行目录 `exports`、`.aws`、`.ssh`，以及 `.env` 与 `.env.*`。不以此替代秘密扫描。拒绝符号链接/联接点和特殊文件；Git 不记录空目录，当前不保证 ACL、扩展属性、时间戳及完整权限元数据。复制不是文件系统原子快照，大文件限制和外部写入冲突检测待实现。
+内置排除任意层级的 `.git`、`.pi-runner`、`node_modules`、`dist`、`out`、`build-work`、`release`、`exports`、`.aws`、`.ssh`、`.cache`、`.tmp`、`.turbo`、`.next`、`.nuxt`、`coverage`、`__pycache__`、`.pytest_cache`，以及 `.env`、`.env.*`、`.pi-runner-check-*`、`*.log`、`*.tmp`、`*.temp`、`*.tsbuildinfo`。内置规则优先于 `.gitignore` 否定规则，没有 `.gitignore` 也生效。不以此替代秘密扫描。拒绝符号链接/联接点和特殊文件；Git 不记录空目录，当前不保证 ACL、扩展属性、时间戳及完整权限元数据。复制前后检查源文件元数据，检测到变化时失败并丢弃基线；这仍不是文件系统原子快照，捕获时应停止外部写入，大文件限制待实现。
+
+额外的编译工具与缓存规则如下。目录名只匹配目录及其子项，文件规则只匹配文件；新增规则按名称忽略大小写，在嵌套项目中同样生效。通用名称规则按项目标记限定范围；采集复用已列举的目录清单识别项目，恢复历史使用相同规则。`snapshot-project-profiles.ts` 集中登记扩展语言、框架与引擎的标记和相对输出路径，避免将 `vendor/`、`_build/`、`public/` 等名称全局排除。
+
+| 工具或用途 | 排除目录 | 排除文件 |
+| --- | --- | --- |
+| Visual Studio / MSVC | `.vs/`、`ipch/` | `*.obj`、`*.pch`、`*.ipch`、`*.pdb`、`*.idb`、`*.ilk`、`*.exp`、`*.tlog`、`*.lastbuildstate`、`*.suo`、`*.sdf`、`*.opensdf`、`*.opendb`、`*.VC.db` 及其 `-shm`、`-wal` 文件；`*.vcxproj.user`、`*.csproj.user`、`*.vbproj.user`、`*.fsproj.user` |
+| GCC / g++ / Clang | `.ccache/`、`.sccache/` | `*.o`、`*.lo`、`*.gch`、`*.gcda`、`*.gcno`、`*.gcov`、`*.dwo`、`*.dwp`、`*.profraw`、`*.profdata`、`*.su`、`*.opt-record.yaml`、`*.opt-record.json` 及对应 `.gz` |
+| CMake / Ninja | `CMakeFiles/`、`cmake-build-*/`、`_deps/` | `CMakeCache.txt`、`cmake_install.cmake`、`install_manifest.txt`、`CTestTestfile.cmake`、`DartConfiguration.tcl`、`.ninja_deps`、`.ninja_log` |
+| Autotools / Meson | `autom4te.cache/`、`.deps/`、`.libs/`、`meson-private/`、`meson-logs/`、`meson-info/` | — |
+| vcpkg | 任意层级的 `vcpkg_installed/`；检测到普通文件 `.vcpkg-root` 的 SDK 根目录下，额外排除直属 `buildtrees/`、`packages/`、`downloads/`、`installed/` | — |
+| Rust / Cargo | `target/`（也覆盖 Maven 等工具的同名构建目录）；`.cargo/registry/`、`.cargo/git/` | `*.rlib`、`*.rmeta`、`*.rs.bk`；`.cargo/` 下的 `.package-cache`、`.package-cache-mutate`、`.global-cache` 及其 `-shm`、`-wal` 文件 |
+| Go | `.gocache/`、`.gomodcache/`、`go-build/`、`go-build<数字>/` | `go.mod` 或 `go.work` 所在目录及其子树内的 `*.test`、`*.test.exe`、`*.coverprofile`、`coverage.out`、`coverage.txt`、`coverage.html`、`covmeta.<十六进制>`、`covcounters.<十六进制>.<进程号>.<时间戳>` |
+| Node / JS / TS | `.pnpm-store/`、`.npm/`、`.yarn-cache/`、`.parcel-cache/`、`.svelte-kit/`、`.angular/`、`.nyc_output/`、`.sass-cache/`、`.vite/`、`.vite-temp/`、`.rollup.cache/`、`.rpt2_cache/`、`.rts2_cache_cjs/`、`.rts2_cache_es/`、`.rts2_cache_umd/`、`.webpack-cache/`、`.docusaurus/`、`.astro/`、`.output/`、`.vercel/`、`.netlify/`、`.serverless/`、`.aws-sam/`、`.expo/`；`.yarn/` 下的 `cache/`、`unplugged/`、`sdks/`；`.nx/` 下的 `cache/`、`workspace-data/` | `.eslintcache`、`.stylelintcache`、`.pnp.js`、`.pnp.cjs`、`.pnp.loader.mjs`、`.pnp.data.json`；`.yarn/install-state.gz`、`.yarn/build-state.yml`；Vite、Vitest、Electron Vite 配置的 `timestamp-<数字>-<十六进制>.js/cjs/mjs` 临时副本 |
+| JS / TS 测试报告 | `playwright-report/`、`test-results/`、`blob-report/` | — |
+| Python | `.mypy_cache/`、`.ruff_cache/`、`.hypothesis/`、`.tox/`、`.nox/`、`.venv/`、`__pypackages__/` | — |
+| Python / JVM 字节码及包缓存 | `.gradle/`、`.kotlin/`、`.nuget/` | `*.pyc`、`*.pyo`、`*.class` |
+| C# / F# / VB / .NET | 含 `.csproj`、`.fsproj`、`.vbproj`、`.sln`、`.slnx` 或 `Directory.Build.props` 的目录下，排除直属 `bin/`、`obj/`、`TestResults/`、`artifacts/` | `*.msbuild.binlog` |
+| Dart / Flutter / Swift | `.dart_tool/`、`.pub-cache/`、`.build/`、`.swiftpm-cache/` | `.packages`、`.flutter-plugins`、`.flutter-plugins-dependencies` |
+| Unity | 同时含 `Assets/` 和 `ProjectSettings/` 的项目根目录下，排除 `Library/`、`Temp/`、`Obj/`、`Logs/`、`UserSettings/`、`Build/`、`Builds/`、`MemoryCaptures/`、`Recordings/` | — |
+| Cocos Creator | 含 `assets/` 与 `project.json`，或含 `assets/` 与声明 `creator.version` 的 `package.json` 的项目根目录下，排除 `library/`、`temp/`、`local/`、`build/` | — |
+| Godot | 任意层级的 `.godot/`；含 `project.godot` 的目录下，额外排除 `.import/`、`.mono/` | — |
+| 编辑器 / 操作系统 | — | `*.swp`、`*.swo`、以 `~` 结尾的备份文件、`.DS_Store`、`Thumbs.db`、`Desktop.ini` |
+
+扩展规则如下，路径均相对项目标记所在目录。表中列出主要产物，完整匹配项见 `snapshot-project-profiles.ts`。
+
+| 语言、工具或引擎 | 项目标记 | 主要排除路径 |
+| --- | --- | --- |
+| Gradle / Android / Kotlin；sbt / Scala | `build.gradle(.kts)`、`settings.gradle(.kts)`；`build.sbt` | `build/`、`.gradle/`、`.kotlin/`、`.cxx/`、`.externalNativeBuild/`；`target/`、`.bloop/`、`.metals/` |
+| Bazel；Buck；SCons | `WORKSPACE(.bazel)`、`MODULE.bazel`；`BUCK`、`.buckconfig`；`SConstruct` | `bazel-bin/`、`bazel-out/`、`bazel-testlogs/`、工作区直属 `bazel-*` 符号链接；`buck-out/`、`.buckd/`；`.sconf_temp/`、`.sconsign.dblite` |
+| Python；Sphinx | `pyproject.toml`、`setup.py`、`setup.cfg`、`requirements.txt`、`Pipfile`、`tox.ini`；`conf.py` | `build/`、`.eggs/`、`*.egg-info/`、`htmlcov/`、`.pdm-build/`、`.coverage`、`.coverage.*`、`.pdm-python`；`_build/` |
+| Bundler / Ruby；Rails | `Gemfile`；另需 `app/`、`config/` | `.bundle/cache/`、`vendor/bundle/`、`.yardoc/`、`_yardoc/`、`.byebug_history`；Rails 的 `tmp/{cache,pids,sockets}/`、`log/` |
+| Composer / PHP；Laravel；Symfony | `composer.json`；`artisan`；`symfony.lock` | `vendor/`、`.phpunit.cache/`、`.phpunit.result.cache`；`bootstrap/cache/`、`storage/framework/{cache,sessions,views}/`、`storage/logs/`、`public/build/`、`public/hot`；`var/cache/`、`var/log/` |
+| Elixir / Phoenix；Erlang | `mix.exs`；`rebar.config` | Elixir 的 `_build/`、`deps/`、`.elixir_ls/`、`cover/`；Erlang 的 `_build/`、`.rebar3/`、`ebin/`；两者的 `erl_crash.dump`、直属 `*.beam` |
+| Haskell；OCaml | `stack.yaml`、`cabal.project`、`*.cabal`；`dune-project`、`dune-workspace`、`*.opam` | `.stack-work/`、`dist-newstyle/`、`.hpc/`、`.cabal-sandbox/` 及直属接口缓存；`_build/`、`_opam/` 及直属编译缓存 |
+| Clojure | `deps.edn`、`project.clj`、`shadow-cljs.edn` | `.cpcache/`、`.clj-kondo/.cache/`、`.shadow-cljs/`、`target/` |
+| R / RStudio；renv；Julia | `*.Rproj`、`DESCRIPTION`；`renv.lock`；`Project.toml`、`JuliaProject.toml` | `.Rproj.user/`、`*.Rcheck/`、`.Rhistory`、`.Rapp.history`；`renv/{library,staging,cache}/`；`.julia/{compiled,logs,scratchspaces}/`、`.CondaPkg/`、直属覆盖率与分配统计文件 |
+| Zig；Nim；D；Fortran | `build.zig(.zon)`；`nim.cfg`、`config.nims`、`*.nimble`；`dub.json/sdl`；`fpm.toml` | `.zig-cache/`、`zig-cache/`、`zig-out/`；`nimcache/`、`.nimcache/`、`nimblecache/`；`.dub/`；`build/` |
+| Xcode；Carthage；Qt | `*.xcodeproj/`；`Cartfile(.resolved)`；`*.pro` | `DerivedData/`、直属 `*.xcuserstate`；`Carthage/Build/`；`.qmake.stash`、`.qmake.cache`、直属 `moc_*.cpp`、`qrc_*.cpp`、`ui_*.h`、`*.moc` |
+| LaTeX | `*.tex`、`*.ltx` | `latex.out/`、`_minted*/`；直属 `*.aux`、`*.fls`、`*.fdb_latexmk`、`*.toc`、`*.lof`、`*.lot`、`*.bcf`、`*.blg`、`*.synctex(.gz)` |
+| Unreal Engine | `*.uproject`、`*.uplugin` | `Intermediate/`、`DerivedDataCache/`、`Saved/{Logs,Cooked,StagedBuilds,ShaderDebugInfo,Crashes}/`；含 `Source/` 时另排除 `Binaries/` |
+| Defold；Ren’Py | `game.project`；`*.rpy` | `build/`、`.internal/`；`cache/`、直属 `*.rpyc` |
+| Hugo；Jekyll | `hugo.toml/yaml/json`，或旧版 `config.toml/yaml/json` 加 `content/`、`themes/`；`_config.yml` | `public/`、`resources/_gen/`、`.hugo_build.lock`；`_site/`、`.jekyll-cache/`、`.sass-cache/`、`.jekyll-metadata` |
+| Docusaurus；Gatsby；Remix；Svelte | 对应框架的 `*.config.js/ts/mjs/cjs` 或 `gatsby-config.*` | `build/`、`.docusaurus/`；`public/`、`.cache/`；`build/`、`public/build/`；`build/` |
+| MkDocs；GitBook；Vagrant | `mkdocs.yml/yaml`；`book.json`；`Vagrantfile` | `site/`；`_book/`；`.vagrant/` |
+
+另外排除专用目录 `.ipynb_checkpoints/`、`.pyre/`、`.pytype/`、`.pdm-build/`、`.pybuilder/`、`.webassets-cache/`、`.Rproj.user/`、`.elixir_ls/`、`.zig-cache/`、`.cxx/`、`.externalNativeBuild/`、`xcuserdata/`、`.terraform/`、`.buildx-cache/`、`.react-router/`、`.vinxi/`、`.nitro/`、`.qwik/`，以及 `.vitepress/cache/`、`.vuepress/.cache/`、`.vuepress/.temp/`。
+
+对未列举的工具和自定义缓存目录，支持 [CACHEDIR.TAG 标准](https://bford.info/cachedir/)：进入子目录前验证其中普通文件 `CACHEDIR.TAG` 的前 43 字节是否为 `Signature: 8a477f597d28d172789f06886806bc55`，匹配时跳过整棵目录树；错误或不完整的签名不会触发排除。采集与恢复使用同一判断，每次操作重新识别标记；不创建或修改标记文件。其他自定义路径可写入项目 `.gitignore`。
+
+保留 `CMakeLists.txt`、CMake Presets、`Makefile`、`build.ninja`、解决方案与项目文件、vcpkg 清单、配置、端口、三元组和锁文件。未将 `build/`、`bin/`、`lib/`、`Debug/`、`packages/`、`downloads/` 等通用目录名全局排除，也不全局排除 `.a`、`.lib`、`.so`、`.dll`、`.exe` 等可能作为依赖分发的文件；这些路径可通过项目 `.gitignore` 进一步排除。
+
+扩展规则保留 Rails/Laravel 上传文件、数据库、R 的 `.RData`/`.rds`、Julia 的 `Manifest.toml` 与 `.julia/dev/`、CocoaPods 与 Carthage 的源码、LaTeX 的 PDF/图片/参考文献、Terraform 状态和锁文件。Unreal 保留 `Build/` 配置资源、`Saved/Autosaves/`、`Saved/SaveGames/`、`Saved/Config/` 及无源码插件的预编译二进制，`Content/`、`SourceArt/` 内的 `.obj` 模型也保留。Bazel 同前缀的普通源码目录保留。
+
+扩展依据：[GitHub 各语言忽略模板](https://github.com/github/gitignore)、[Gradle 目录布局](https://docs.gradle.org/current/userguide/directory_layout.html)、[Unreal 目录结构](https://dev.epicgames.com/documentation/en-us/unreal-engine/unreal-engine-directory-structure)、[Bazel 输出目录](https://docs.bazel.build/versions/main/output_directories.html)。模板仅作为参考，保留用户数据和预置依赖。
+
+保留 `Cargo.lock`、`.cargo/config.toml`、Go 清单及校验文件、`vendor/` 源码、JS/TS 清单与锁文件、`.yarn/patches`、`.yarn/releases`、`.yarn/plugins`、`.d.ts` 和已有 sourcemap、.NET 源码及项目配置。Unity/Cocos 资源目录及 Godot 项目中的 `.obj` 模型使用资源例外保留，不作为 MSVC 目标文件排除；资源 `.meta`、Unity 的 `ProjectSettings/`、`Packages/`，Cocos 的 `settings/`、`profiles/`、`extensions/`、`native/`、`build-templates/`，以及 Godot 的 `.import` 配置文件和 `.uid` 文件均保留。自定义的 Cargo 输出目录、Go 缓存目录及其他工具输出路径可通过 `.gitignore` 补充，不读取或修改项目外的全局缓存。
+
+规则参考：[MSVC 调试信息格式](https://learn.microsoft.com/en-us/cpp/build/reference/z7-zi-zi-debug-information-format)、[GCC 覆盖率文件](https://gcc.gnu.org/onlinedocs/gcc/Invoking-Gcov.html)、[CMake 缓存](https://cmake.org/cmake/help/book/mastering-cmake/chapter/CMake%20Cache.html)、[vcpkg 安装目录](https://learn.microsoft.com/en-us/vcpkg/reference/installation-tree-layout)及其[官方仓库根标记](https://github.com/microsoft/vcpkg)。
+
+语言与引擎规则参考：[Cargo 构建缓存](https://doc.rust-lang.org/cargo/reference/build-cache.html)、[Go 命令与缓存](https://go.dev/cmd/go/)、[Yarn 文件用途](https://yarnpkg.com/getting-started/qa)、[.NET 输出布局](https://learn.microsoft.com/en-us/dotnet/core/sdk/artifacts-output)、[Unity 默认目录](https://docs.unity.com/en-us/engine/7000.0/manual/get-started/project-configuration/default-directories)、[Cocos 项目结构](https://docs.cocos.com/creator/3.8/manual/zh/getting-started/project-structure/)、[Cocos 原生源码](https://github.com/cocos/cocos-docs/blob/master/versions/3.8/en/advanced-topics/native-secondary-development.md)、[Godot 导入流程](https://docs.godotengine.org/en/stable/tutorials/assets_pipeline/import_process.html)。
 
 ## 后续数据模型与轮次
 
@@ -43,7 +103,13 @@ Renderer → window.piRunner → Preload → Main IPC → ShadowGitManager
 | PlanQuestion | id, planId, turnId, prompt, options, answer, answeredAt |
 | PlanConfirmation | id, planId, revisionId, confirmedAt, executionTurnId |
 
-执行轮流程：锁项目 → 建立 base 快照 → 持久化运行中的 Turn → 执行有界 Agent 工具循环 → 无论成功、失败或取消均捕获 end 快照 → 保存 Diff 与轮次结果 → 解锁。计划澄清轮只保存对话与计划状态，不启动项目修改。崩溃恢复需区分孤立 Git 提交与未完成 Turn。
+执行轮流程：锁项目 → 持久化运行中的 Turn → 执行有界 Agent 工具循环，首次可能写入前保存私有恢复基线 → 无论成功、失败或取消，有基线时均比较结束文件树 → 仅实际变化时保存前后对照与轮次关联 → 解锁。计划澄清轮只保存对话与计划状态，不启动项目修改。崩溃恢复需区分私有恢复基线、孤立 Git 提交与未完成 Turn。
+
+`prepareCheckpoint` 用独立的 `refs/pi-runner/pending/<UUID>` 引用保护执行前版本，不移动 HEAD，也不列入正式快照历史。收尾的 `completeCheckpoint` 在同一存储队列中重新采集并比较树：相同则删除本轮临时引用，不发布 snapshot 事件或对话关联；不同则从已采集的树生成前后提交，以当前 HEAD 为父链保留期间的手动快照，再一次性更新 HEAD。失败时保留私有基线，避免丢失执行前文件；完成后的无引用临时对象由 Git 的常规垃圾回收处理，不主动清理历史或压缩仓库。纯聊天、读取工具及已识别的只读命令连基线也不采集。
+
+只读命令分析支持引号、PowerShell 调用运算符、字面量目录切换，以及分号、换行、`&&`、`||` 连接的查询。必须逐条确认只读；重定向、管道、动态展开、未知程序，以及任意一条可能写文件的语句都会触发执行前保护。Git 配置仅放行已列举的显示参数和关闭文件系统监视器；`rg --pre` 等可运行脚本的选项仍按可能写入处理。该判定只决定快照时机，不改变工具权限、沙箱和审批。
+
+扩展查询规则集中在 `src/main/models/snapshot-read-only-queries.ts`：支持文件哈希、目录大小、系统及 PowerShell 信息查询，常见语言、编译器和包管理器的独立版本参数，Go 环境查询，npm/pnpm 依赖列表、npm 包配置读取、pip 包列表，以及 Docker 状态查询。Git 增加分支、标签、远程地址、工作树、配置及 stash 的明确查询形式。具有写入能力的工具按子命令和允许的选项匹配；例如 `go env -w`、`find -delete/-exec`、`tree -o`、Git 创建分支或标签、修改配置，以及构建、安装、执行脚本均保留基线。未知选项同样保留保护；不将 `yarn list` 或 `pnpm explain` 等可能回退到项目脚本的名称认定为只读。
 
 ## Skill 与计划模式
 

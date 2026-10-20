@@ -13,11 +13,12 @@ import type { ChatgptService } from './models/chatgpt-service'
 import { ModelError } from './models/model-validation'
 import type { SandboxService } from './models/sandbox-service'
 import { performFileAction } from './file-actions'
+import { SleepBlocker } from './sleep-blocker'
 import type { FileAction } from '../shared/api'
 import { SkillStore } from './skill-store'
 import { readCodePreview } from './code-preview'
 import { readCodePreviewSnapshot } from './code-preview-snapshots'
-import { showNotification } from './notifications'
+import { showNotification, closeAllNotifications } from './notifications'
 import type { AppNotification } from '../shared/api'
 import { ATTACHMENT_DATA_URL } from '../shared/attachments'
 
@@ -29,6 +30,7 @@ interface IpcHandlerDependencies {
   getChatgptService?: () => ChatgptService
   getSandboxService?: () => SandboxService
   setSnapshotManager: (manager: ShadowGitManager | undefined) => void
+  getSleepBlocker?: () => SleepBlocker
   dataDirectory: string
   rendererUrl: string
 }
@@ -147,6 +149,7 @@ export function registerIpcHandlers(dependencies: IpcHandlerDependencies): void 
       if (conversationId && !window.webContents.isDestroyed()) window.webContents.send(IPC_CHANNELS.notificationActivate, conversationId)
     })
   })
+  handle(IPC_CHANNELS.closeNotifications, () => closeAllNotifications())
   handle(IPC_CHANNELS.saveAttachment, async (name, dataUrl) => {
     const window = dependencies.getMainWindow()
     if (!window) throw new ModelError('应用窗口尚未准备就绪')
@@ -290,6 +293,7 @@ export function registerIpcHandlers(dependencies: IpcHandlerDependencies): void 
     if (!path.isAbsolute(root)) throw new Error('项目路径必须是绝对路径')
     return ShadowGitManager.open(root, dependencies.dataDirectory)
   }
+  handle(IPC_CHANNELS.checkpoints, async project => (await snapshotForProject(project)).listCheckpoints())
   handle(IPC_CHANNELS.rollback, async (base, current, project) => {
     if (dependencies.getModelService().isBusy()) throw new Error('请先停止代理任务再撤销或重做文件修改')
     if (restoringFiles) throw new Error('正在恢复文件，请完成后再撤销或重做')
@@ -338,6 +342,10 @@ export function registerIpcHandlers(dependencies: IpcHandlerDependencies): void 
   handle(IPC_CHANNELS.openrouterConnect, apiKey => modelResult(() => dependencies.getModelService().connectOpenrouter(apiKey)))
   handle(IPC_CHANNELS.openrouterUsage, () => modelResult(() => dependencies.getModelService().openrouterUsage()))
   handle(IPC_CHANNELS.ollamaInfo, (baseUrl, model) => modelResult(() => dependencies.getModelService().getOllamaModelInfo(baseUrl, model)))
+  handle(IPC_CHANNELS.sleepBlocker, active => {
+    if (typeof active !== 'boolean') throw new Error('休眠开关参数无效')
+    dependencies.getSleepBlocker?.().setActive(active)
+  })
   handle(IPC_CHANNELS.windowMinimize, () => { dependencies.getMainWindow()?.minimize() })
   handle(IPC_CHANNELS.windowToggleMaximize, () => {
     const window = dependencies.getMainWindow()

@@ -25,10 +25,10 @@ export default function App(): React.JSX.Element {
     project, readyProjects, savedProjects, projectMeta, isBusy, error, setError, projectPickerOpen, setProjectPickerOpen,
     pendingProjectRemoval, setPendingProjectRemoval, busyTasks, setBusyTasks, pendingProjectDirectories, tasks, setTasks,
     currentTask, composerFocusTaskId, setComposerFocusTaskId, query, setQuery, collapsedProjects, setCollapsedProjects, searchOpen, setSearchOpen,
-    projectSnapshot, isChatBusy, updateProjectSnapshot, runAction, createProjectTask,
-    chooseExistingProject, saveProjectEdit, selectTask, removeTask, removeProject, captureCheckpoint, rollbackCheckpoint,
+    projectSnapshot, isChatBusy, createProjectTask,
+    chooseExistingProject, saveProjectEdit, selectTask, removeTask, removeProject,
   } = workspace
-  const { checkpoints, changes, diff } = projectSnapshot
+  const { checkpoints } = projectSnapshot
   const [preferences, setPreferences] = useState(readPreferences)
   const [systemPrefersDark, setSystemPrefersDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches)
   const resolvedTheme = preferences.theme === 'system' ? (systemPrefersDark ? 'dark' : 'light') : preferences.theme
@@ -77,6 +77,11 @@ export default function App(): React.JSX.Element {
   }
   useEffect(loadSettings, [])
   useEffect(() => window.piRunner.onWindowMaximizedChange?.(setIsMaximized), [])
+  /** 选中会话时同时关闭对应的通知气泡。 */
+  const selectConversation = (task: Parameters<typeof selectTask>[0]): void => {
+    void window.piRunner.closeNotifications?.()?.catch(() => {})
+    selectTask(task)
+  }
   // 点击通知时显示主窗口并选中对应会话；若正在设置页则先返回工作台。
   // 会话已被删除或不存在时只保持已打开的程序，不提示错误。
   useEffect(() => window.piRunner.onNotificationActivate?.(conversationId => {
@@ -84,8 +89,8 @@ export default function App(): React.JSX.Element {
     const task = tasks.find(item => item.id === conversationId)
     if (!task) return
     setSettingsSection(null)
-    selectTask(task)
-  }), [tasks, selectTask])
+    selectConversation(task)
+  }), [tasks, selectConversation])
   useEffect(() => {
     const query = window.matchMedia('(prefers-color-scheme: dark)')
     const update = (): void => setSystemPrefersDark(query.matches)
@@ -97,13 +102,21 @@ export default function App(): React.JSX.Element {
     document.documentElement.dataset.font = preferences.font
     document.documentElement.style.setProperty('--ui-font-size', `${preferences.fontSize}px`)
   }, [resolvedTheme, preferences.font, preferences.fontSize])
+  // 有会话执行且开关开启时请求主进程阻止系统休眠；结束或关闭后自动恢复。
+  const sleepBlocking = preferences.preventSleep && busyTasks.length > 0
+  useEffect(() => {
+    void window.piRunner.setSleepBlocker?.(sleepBlocking)?.catch(() => {})
+    return () => { void window.piRunner.setSleepBlocker?.(false)?.catch(() => {}) }
+  }, [sleepBlocking])
   const updatePreferences = (next: Preferences): void => {
     setPreferences(next)
     try { localStorage.setItem('pi-runner.preferences', JSON.stringify({ ...next, sendWithCtrlEnterVersion: 1 })) } catch { setError('偏好设置未能保存，重启后将恢复默认值。请检查本地存储。') }
   }
   /** 按开关发送系统通知；macOS 走系统通知，Windows 走桌面右下角气泡。 */
+  // 程序处于激活状态且正在查看该会话时不再弹出通知，避免打扰当前操作。
   const sendNotification = (kind: 'success' | 'failure' | 'input', title: string, body: string, conversationId: string): void => {
     if (!preferences.systemNotifications) return
+    if (conversationId === currentTask?.id && settingsSection === null && document.hasFocus()) return
     // 兼容尚未注入通知接口的测试环境。
     void window.piRunner.showNotification?.({ kind, title, body, conversationId })?.catch(() => {})
   }
@@ -163,7 +176,7 @@ export default function App(): React.JSX.Element {
         onPendingProjectRemovalChange={setPendingProjectRemoval}
         onEditProject={root => { setError(''); setProjectEditTarget(root) }}
         onRemoveProject={removeProject}
-        onSelectTask={selectTask}
+        onSelectTask={selectConversation}
         onEditTask={task => setConversationEditId(task.id)}
         onRemoveTask={removeTask}
         onCreateProjectTask={chooseExistingProject}
@@ -186,19 +199,12 @@ export default function App(): React.JSX.Element {
 
       </main>
       {toolsOpen && <ToolSidebar
-        project={project}
+        project={currentTask?.project ?? project}
         isBusy={isBusy || isChatBusy}
         activeTool={tool}
         checkpoints={checkpoints}
-        changes={changes}
-        diff={diff}
-        theme={resolvedTheme}
-        inlineDiff={preferences.inlineDiff}
         onToolChange={setTool}
         onClose={() => setToolsOpen(false)}
-        onCaptureCheckpoint={captureCheckpoint}
-        onRollbackCheckpoint={rollbackCheckpoint}
-        onSelectDiff={filePath => { void runAction(async () => updateProjectSnapshot({ diff: await window.piRunner.getDiff(checkpoints.at(-2)!.hash, checkpoints.at(-1)!.hash, filePath) })) }}
       />}
     </div>
     {settingsSection !== null && <SettingsPage initialSection={settingsSection} settings={settings} error={settingsError} reload={loadSettings} preferences={preferences} onPreferences={updatePreferences} onChange={setSettings} onClose={() => setSettingsSection(null)} />}

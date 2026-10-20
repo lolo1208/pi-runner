@@ -6,7 +6,7 @@ import './paged-list.css'
 export function alignTopInScroller(el: HTMLElement): void {
   let scroller: HTMLElement | null = el.parentElement
   while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement
-  if (!scroller) { el.scrollIntoView({ block: 'start', inline: 'nearest' }); return }
+  if (!scroller) { if (typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'start', inline: 'nearest' }); return }
   const style = getComputedStyle(scroller)
   const border = parseFloat(style.borderTopWidth) || 0
   const offset = el.getBoundingClientRect().top - scroller.getBoundingClientRect().top - border

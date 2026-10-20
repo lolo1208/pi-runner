@@ -1,4 +1,5 @@
 import { forwardRef, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type MutableRefObject } from 'react'
+import { createPortal } from 'react-dom'
 import { Virtuoso, type ListRange, type VirtuosoHandle } from 'react-virtuoso'
 import { Button } from '@/components/ui/button'
 import { Settings2 } from 'lucide-react'
@@ -19,6 +20,35 @@ const USER_SCROLL_PAUSE_MS = 150
 const bubbleText = (content: string): string => content.replace(/^\s+|\s+$/g, '')
 // 折叠摘要中的完整正文仍参与 DOM 布局，但不能用作用户的阅读位置。
 const canAnchorReading = (element: HTMLElement): boolean => element.isConnected && !element.closest('[inert], [hidden], [aria-hidden="true"]')
+
+/** 每轮对话对应一个导航点：用户消息行 + 随后的模型回复摘要。 */
+interface RoundDot { key: string; index: number; user: string; reply: string }
+
+const clipText = (text: string, max: number): string => {
+  const line = text.replace(/\s+/g, ' ').trim()
+  return line.length > max ? `${line.slice(0, max)}…` : line
+}
+
+/** 单个轮次导航点：悬停/聚焦时才渲染 tooltip 内容，避免把未挂载轮次的正文提前插入 DOM。 */
+function RoundDotButton({ roundKey, round, number, active, onJump }: { roundKey: string; round: RoundDot; number: number; active?: boolean; onJump: (index: number) => void }): React.JSX.Element {
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  // tooltip 渲染到 body 的固定定位浮层：导航条的 overflow 裁剪和内层 transform 都不会影响它。
+  const [tipPos, setTipPos] = useState<{ top: number; left: number } | null>(null)
+  const showTip = (): void => {
+    const bounds = buttonRef.current?.getBoundingClientRect()
+    if (bounds) setTipPos({ top: bounds.top + bounds.height / 2, left: bounds.right + 10 })
+  }
+  return <button ref={buttonRef} type="button" data-round-key={roundKey} className={`chat-round-dot${active ? ' active' : ''}`} aria-label={`跳转到第 ${number} 轮对话`} aria-current={active ? 'true' : undefined}
+    onMouseEnter={showTip} onMouseLeave={() => setTipPos(null)} onFocus={showTip} onBlur={() => setTipPos(null)}
+    onClick={() => onJump(round.index)}>
+    <span className="round-dot-mark" aria-hidden="true" />
+    {tipPos && createPortal(<span className="round-tip" role="tooltip" style={{ top: tipPos.top, left: tipPos.left }}>
+      <span className="round-tip-number">第 {number} 轮</span>
+      <span className="round-tip-user">{round.user || '（附件消息）'}</span>
+      {round.reply && <span className="round-tip-reply">{round.reply}</span>}
+    </span>, document.body)}
+  </button>
+}
 
 interface ChatTranscriptProps {
   project?: string | null
@@ -162,10 +192,70 @@ function VirtualTranscript({ rows, position, lastLatestRequest, changes, onRange
   const userInputUntil = useRef(0)
   const dragging = useRef(false)
   const correctedScrollTop = useRef<number | null>(null)
+  // 点击导航点后钉住的行位置：跳转后的程序滚动不再改写强调色，用户真实滚动后解除。
+  const pinnedRoundRef = useRef<number | null>(null)
   const frame = useRef<number | null>(null)
   const geometry = useRef('')
   const activeStatus = isBusy ? agentStatus || '正在等待模型回复…' : undefined
   const rowMap = useMemo(() => new Map(rows.map(row => [row.key, row])), [rows])
+  // 导航点：每条用户消息作为一轮，摘要取本轮回复的第一个助手消息。
+  const rounds = useMemo<RoundDot[]>(() => rows.flatMap((row, index) => {
+    const message = row.messages[0]
+    if (row.kind !== 'message' || message.role !== 'user' || !bubbleText(message.content)) return []
+    const replyRow = rows.slice(index + 1).find(item => item.messages[0]?.role === 'assistant')
+    const reply = replyRow ? bubbleText(replyRow.messages.map(item => item.content).join(' ')) : ''
+    return [{ key: row.key, index, user: clipText(message.content, 160), reply: clipText(reply, 200) }]
+  }), [rows])
+  // 当前阅读位置对应的导航点：取视口顶部可见行之前最近的一轮，用强调色标出。
+  const rowPositions = useMemo(() => new Map(rows.map((row, index) => [row.key, index])), [rows])
+  const [activeRowIndex, setActiveRowIndex] = useState<number | null>(null)
+  const activeRoundKey = useMemo(() => {
+    if (activeRowIndex === null) return undefined
+    let current: string | undefined
+    for (const round of rounds) { if (round.index <= activeRowIndex) current = round.key; else break }
+    return current
+  }, [rounds, activeRowIndex])
+  // 轮次过多时导航条超出可视高度：鼠标悬停在列表上时位置只由鼠标决定；
+  // 离开后恢复自动模式，让强调色小点随内容居中可见。
+  const railRef = useRef<HTMLElement>(null)
+  const railTrackRef = useRef<HTMLDivElement>(null)
+  const [railShift, setRailShift] = useState(0)
+  const [railHover, setRailHover] = useState(false)
+  // 按下小点期间冻结列表平移：点击本身不应引起任何滚动。
+  const railFreezeRef = useRef(false)
+  useEffect(() => {
+    const release = (): void => { setTimeout(() => { railFreezeRef.current = false }, 250) }
+    window.addEventListener('pointerup', release, { passive: true })
+    return () => window.removeEventListener('pointerup', release)
+  }, [])
+  const activeRoundKeyRef = useRef(activeRoundKey)
+  activeRoundKeyRef.current = activeRoundKey
+  const centerRail = useCallback((): void => {
+    if (railFreezeRef.current) return
+    const rail = railRef.current, track = railTrackRef.current
+    const key = activeRoundKeyRef.current
+    const button = key === undefined ? undefined : track?.querySelector<HTMLElement>(`[data-round-key="${key}"]`)
+    if (!rail || !track || !button) return
+    const overflow = rail.scrollHeight - rail.clientHeight
+    if (overflow <= 0) { setRailShift(previous => previous === 0 ? previous : 0); return }
+    const center = button.offsetTop + button.offsetHeight / 2
+    const next = Math.round(Math.min(0, Math.max(-overflow, rail.clientHeight / 2 - center)))
+    setRailShift(previous => previous === next ? previous : next)
+  }, [])
+  const handleShellMouseMove = useCallback((event: React.MouseEvent): void => {
+    if (railFreezeRef.current || !railHover) return
+    const rail = railRef.current
+    if (!rail) return
+    const target = event.target as HTMLElement
+    if (!rail.contains(target)) return
+    const overflow = rail.scrollHeight - rail.clientHeight
+    if (overflow <= 0) { setRailShift(previous => previous === 0 ? previous : 0); return }
+    const bounds = rail.getBoundingClientRect()
+    const ratio = Math.min(1, Math.max(0, (event.clientY - bounds.top) / bounds.height))
+    setRailShift(previous => { const next = Math.round(-overflow * ratio); return next === previous ? previous : next })
+  }, [railHover])
+  // 悬停期间列表只跟鼠标，绝不做内容驱动的平移；离开后按当前内容位置居中。
+  useEffect(() => { if (!railHover && pinnedRoundRef.current === null && !railFreezeRef.current) centerRail() }, [railHover, activeRoundKey, centerRail])
 
   const [initial] = useState(() => {
     const saved = position.current
@@ -235,6 +325,14 @@ function VirtualTranscript({ rows, position, lastLatestRequest, changes, onRange
       lastScrollTop.current = el.scrollTop
     }
     onVisible(keys)
+    // 同步导航点：每次测量都重算；点击跳转后用 pinnedRound 钉住，直到用户再次真实滚动才解除，
+    // 避免跳转后的程序滚动与高度校正把强调色拉回上一轮，也避免任何路径下出现无对应小点的空窗。
+    {
+      // 贴底阅读最后一轮：顶部锚点属于前面的轮次，直接指向最后一行。
+      const atBottom = el.scrollHeight - el.clientHeight - el.scrollTop <= 48
+      const topIndex = pinnedRoundRef.current ?? (atBottom ? rows.length - 1 : anchor ? rowPositions.get(anchor.key) : undefined)
+      setActiveRowIndex(previous => (topIndex ?? null) === previous ? previous : topIndex ?? null)
+    }
     setViewportHeight(previous => previous === bounds.height ? previous : bounds.height)
     const saved: ReadingPosition = { key: anchor?.key, offset: anchor?.offset ?? 0, follow: followLatest.current }
     position.current = saved
@@ -254,7 +352,7 @@ function VirtualTranscript({ rows, position, lastLatestRequest, changes, onRange
     if (resizingAnchor.current && frame.current === null) frame.current = requestAnimationFrame(() => { frame.current = null; measureRef.current() })
     const width = el.scrollHeight > el.clientHeight ? el.offsetWidth - el.clientWidth : 0
     el.parentElement?.style.setProperty('--chat-scrollbar', `${width}px`)
-  }, [position, rowMap, rows, onVisible, initial])
+  }, [position, rowMap, rowPositions, rows, onVisible, initial])
   const measureRef = useRef(measure)
   useLayoutEffect(() => { measureRef.current = measure })
   const scheduleMeasure = useCallback((): void => {
@@ -298,6 +396,7 @@ function VirtualTranscript({ rows, position, lastLatestRequest, changes, onRange
     mutations?.observe(el, { subtree: true, childList: true, characterData: true })
     const userInput = (event?: Event): void => {
       resizingAnchor.current = null
+      pinnedRoundRef.current = null
       // 按键、滚轮和按下鼠标不等于已经滚动，不能提前丢掉仍然有效的阅读锚点。
       userInputUntil.current = performance.now() + USER_SCROLL_PAUSE_MS
       if (event?.type === 'wheel' && (event as WheelEvent).deltaY < 0
@@ -364,7 +463,21 @@ function VirtualTranscript({ rows, position, lastLatestRequest, changes, onRange
     scheduleMeasure()
   }, [scheduleMeasure])
 
-  return <Virtuoso ref={list} className="chat-scroll chat-virtual-scroll" data={rows} components={listComponents}
+  return <div className="chat-transcript-shell" onMouseMove={handleShellMouseMove}>
+    {rounds.length > 0 && <nav ref={railRef} className="chat-round-rail" aria-label="对话轮次导航"
+      onPointerEnter={() => setRailHover(true)} onPointerLeave={() => { railFreezeRef.current = false; setRailHover(false) }}
+      onPointerDown={() => { railFreezeRef.current = true }}>
+        <div ref={railTrackRef} className="chat-round-rail-track" style={{ transform: `translateY(${railShift}px)` }}>
+        {rounds.map((round, number) => <RoundDotButton key={round.key} roundKey={round.key} round={round} number={number + 1} active={round.key === activeRoundKey}
+          onJump={index => {
+            followLatest.current = false
+            pinnedRoundRef.current = index
+            setActiveRowIndex(index)
+            list.current?.scrollToIndex({ index, align: 'start', offset: -12 })
+          }} />)}
+      </div>
+    </nav>}
+    <Virtuoso ref={list} className="chat-scroll chat-virtual-scroll" data={rows} components={listComponents}
     scrollerRef={setScroller} computeItemKey={(_, row) => row.key} defaultItemHeight={180}
     initialTopMostItemIndex={initial.location}
     increaseViewportBy={{ top: viewportHeight, bottom: viewportHeight }} atBottomThreshold={48}
@@ -378,6 +491,7 @@ function VirtualTranscript({ rows, position, lastLatestRequest, changes, onRange
         {row.kind === 'pending' && !isBusy && <div className="thinking" role="status"><span className="busy-dot" />正在等待模型回复…</div>}
       </div>
     </TranscriptScope>} />
+  </div>
 }
 
 const TranscriptMessage = memo(function TranscriptMessage({ row, project, isBusy, execution, activeStatus, changes, settingsDisabled }: {

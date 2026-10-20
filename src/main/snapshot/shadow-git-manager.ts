@@ -1,11 +1,16 @@
-import { readdir, rm, rmdir, readFile, writeFile, mkdir, lstat } from 'node:fs/promises'
+import { rm, rmdir, readFile, writeFile, mkdir, lstat } from 'node:fs/promises'
 import { projectToolPath } from '../models/pi-tools'
 import path from 'node:path'
 import type { SimpleGit } from 'simple-git'
 import { openSnapshotStorage, removeSnapshotStorage, type SnapshotStorage } from './snapshot-storage'
-import { copyProjectFiles } from './project-file-capture'
+import { copyProjectFiles, invalidateProjectFileCapture } from './project-file-capture'
+import { SnapshotFileRules } from './project-ignores'
 import type { ChangedFile, Checkpoint, FileDiff } from '../../shared/api'
 import { SnapshotReadCache } from './snapshot-read-cache'
+import { randomUUID } from 'node:crypto'
+
+/** 未发布的执行前恢复基线，通过独立引用保护，防止任务期间被 Git 回收。 */
+export interface PendingCheckpoint extends Checkpoint { reference: string }
 
 // 跨管理器实例复用缓存，包含存储路径，避免不同数据目录的项目相互串用。
 const changesCache = new SnapshotReadCache<ChangedFile[]>(128, 4 * 1024 * 1024, value => JSON.stringify(value).length * 2)
@@ -33,6 +38,60 @@ export class ShadowGitManager {
     return this.serialized(() => this.captureCheckpoint(label))
   }
 
+  /** 只为可能写文件的操作保留基线，不向项目快照历史添加空轮次。 */
+  prepareCheckpoint(): Promise<PendingCheckpoint> {
+    return this.serialized(async () => {
+      await this.stageProjectFiles()
+      const tree = (await this.git.raw(['write-tree'])).trim()
+      const label = '代理修改前'
+      const hash = (await this.git.raw(['commit-tree', tree, '-m', label])).trim()
+      const reference = `refs/pi-runner/pending/${randomUUID()}`
+      await this.git.raw(['update-ref', reference, hash, '0'.repeat(40)])
+      return { hash, reference, label, createdAt: new Date().toISOString() }
+    })
+  }
+
+  /** 内容确有变化时才发布前后快照；无变化则释放本轮私有基线。失败时保留基线。 */
+  completeCheckpoint(pending: PendingCheckpoint): Promise<{ before: Checkpoint; after: Checkpoint } | undefined> {
+    return this.serialized(async () => {
+      if (!/^refs\/pi-runner\/pending\/[a-f0-9-]{36}$/.test(pending.reference)) throw new Error('无效的任务快照基线')
+      await this.validateCommit(pending.hash)
+      if ((await this.git.revparse([pending.reference])).trim() !== pending.hash) throw new Error('任务快照基线已失效')
+      await this.stageProjectFiles()
+      const tree = (await this.git.raw(['write-tree'])).trim()
+      const beforeTree = (await this.git.revparse([`${pending.hash}^{tree}`])).trim()
+      if (tree === beforeTree) {
+        await this.git.raw(['update-ref', '-d', pending.reference, pending.hash])
+        return undefined
+      }
+      // 直接提交已采集的树，不重新扫描；并发产生的手动快照继续保留在父链中。
+      const head = (await this.git.raw(['rev-parse', '--revs-only', 'HEAD'])).trim()
+      const beforeHash = (await this.git.raw(['commit-tree', beforeTree, ...(head ? ['-p', head] : []), '-m', '代理修改前'])).trim()
+      const afterHash = (await this.git.raw(['commit-tree', tree, '-p', beforeHash, '-m', '代理修改后'])).trim()
+      await this.git.raw(['update-ref', 'HEAD', afterHash, head || '0'.repeat(40)])
+      // 前后版本现已进入正式历史；清理失败不把已成功保存的改动误报为失败。
+      try { await this.git.raw(['update-ref', '-d', pending.reference, pending.hash]) }
+      catch { console.warn('任务快照已保存，临时基线引用清理失败') }
+      return {
+        before: { hash: beforeHash, label: '代理修改前', createdAt: pending.createdAt },
+        after: { hash: afterHash, label: '代理修改后', createdAt: new Date().toISOString() }
+      }
+    })
+  }
+
+  /** 读取影子仓库的完整历史，包含手动快照与恢复前的保护快照。 */
+  listCheckpoints(): Promise<Checkpoint[]> {
+    return this.serialized(async () => {
+      const history = await this.git.raw(['log', '--exclude=refs/pi-runner/pending/*', '--all', '-z', '--format=%H%x00%cI%x00%B'])
+      const fields = history.split('\0')
+      const checkpoints: Checkpoint[] = []
+      for (let index = 0; index + 2 < fields.length; index += 3) {
+        checkpoints.push({ hash: fields[index], createdAt: fields[index + 1], label: fields[index + 2].trim() })
+      }
+      return checkpoints
+    })
+  }
+
   private async captureCheckpoint(label: string): Promise<Checkpoint> {
     if (!label.trim() || label.length > 200) throw new Error('快照名称须为 1–200 个字符')
     await this.stageProjectFiles()
@@ -41,10 +100,13 @@ export class ShadowGitManager {
   }
 
   private async stageProjectFiles(): Promise<void> {
-    // 仅清空快照暂存区，不修改项目工作目录。
-    for (const item of await readdir(this.staging)) await rm(path.join(this.staging, item), { recursive: true, force: true })
-    await copyProjectFiles(this.root, this.staging)
-    await this.git.raw(['add', '--all', '--force', '--', '.'])
+    try {
+      await copyProjectFiles(this.root, this.staging)
+      await this.git.raw(['add', '--all', '--force', '--', '.'])
+    } catch (error) {
+      invalidateProjectFileCapture(this.staging)
+      throw error
+    }
   }
 
   /** 按文件内容比较当前项目与各轮结果，不创建提交，也不修改项目文件。 */
@@ -66,9 +128,10 @@ export class ShadowGitManager {
     return this.serialized(async () => {
       await this.validateCommit(targetHash)
       const safety = await this.captureCheckpoint('恢复到此轮结果前的保护快照')
-      const changes = await this.readChanges(safety.hash, targetHash)
+      const changes = await new SnapshotFileRules(this.root).filter(await this.readChanges(safety.hash, targetHash))
       const targets = await Promise.all(changes.map(file => projectToolPath(this.root, file.path)))
       // 先读取全部目标内容，再触碰项目文件。所有 Git 操作仅针对影子仓库。
+      invalidateProjectFileCapture(this.staging)
       await this.git.raw(['restore', `--source=${targetHash}`, '--worktree', '--', '.'])
       const contents = await Promise.all(changes.map(file => file.status === 'D' ? null : readFile(path.join(this.staging, file.path))))
       for (let index = 0; index < changes.length; index++) {
@@ -150,15 +213,16 @@ export class ShadowGitManager {
   }
 
   /** 保存回滚前快照；只恢复本轮改动，并拒绝覆盖本轮之后的手动修改。 */
-  async rollback(base: string, current: string): Promise<Checkpoint> {
-    const changes = await this.getChanges(base, current)
-    if (!changes.length) throw new Error('此轮没有需要回滚的文件改动')
-    const safety = await this.createCheckpoint('回滚前保护快照')
-    const subsequent = await this.getChanges(current, safety.hash)
-    if (subsequent.some(file => changes.some(change => change.path === file.path))) throw new Error('本轮文件已有后续改动，已保留保护快照；请先查看差异，避免覆盖手动修改')
-    await this.serialized(async () => {
+  rollback(base: string, current: string): Promise<Checkpoint> {
+    return this.serialized(async () => {
+      const changes = await new SnapshotFileRules(this.root).filter(await this.readChanges(base, current))
+      if (!changes.length) throw new Error('此轮没有需要回滚的文件改动')
+      const safety = await this.captureCheckpoint('回滚前保护快照')
+      const subsequent = await this.readChanges(current, safety.hash)
+      if (subsequent.some(file => changes.some(change => change.path === file.path))) throw new Error('本轮文件已有后续改动，已保留保护快照；请先查看差异，避免覆盖手动修改')
       // 先验证所有路径，再恢复暂存区；Git 始终指向影子仓库。
       const targets = await Promise.all(changes.map(file => projectToolPath(this.root, file.path)))
+      invalidateProjectFileCapture(this.staging)
       await this.git.raw(['restore', `--source=${base}`, '--worktree', '--', '.'])
       const contents = await Promise.all(changes.map(file => file.status === 'A' ? null : readFile(path.join(this.staging, file.path))))
       for (let index = 0; index < changes.length; index++) {
@@ -172,7 +236,7 @@ export class ShadowGitManager {
           await writeFile(target, contents[index]!)
         }
       }
+      return this.captureCheckpoint('代理改动已回滚')
     })
-    return this.createCheckpoint('代理改动已回滚')
   }
 }
