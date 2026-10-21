@@ -36,7 +36,7 @@ export function SpeedIndicator({ speed }: { speed: OutputSpeed }): React.JSX.Ele
         <div className="speed-tooltip-heading">
           <div className="speed-tooltip-current">
             <span className="speed-tooltip-label">最近速度</span>
-            <span className="speed-tooltip-value">{current > 0 ? `约${Math.max(1, Math.round(current))}<small> tok/s</small>` : '测速中…'}</span>
+            <span className="speed-tooltip-value">{current > 0 ? <>约{Math.max(1, Math.round(current))}<small> tok/s</small></> : '测速中…'}</span>
           </div>
           <Sparkline samples={speed.samples} />
         </div>

@@ -44,6 +44,9 @@ export function macosSandboxProfile(project: string, scratch: string, protectedD
 
 export function macosSandboxEnvironment(project: string, scratch: string): NodeJS.ProcessEnv {
   return { PATH: `${project}/node_modules/.bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`, HOME: scratch, TMPDIR: scratch + '/', TMP: scratch, TEMP: scratch,
+    XDG_CONFIG_HOME: path.join(scratch, 'config'), XDG_CACHE_HOME: path.join(scratch, 'cache'), XDG_DATA_HOME: path.join(scratch, 'data'), XDG_STATE_HOME: path.join(scratch, 'state'),
+    PYTHONPYCACHEPREFIX: path.join(scratch, 'python-cache'), PIP_CACHE_DIR: path.join(scratch, 'pip-cache'),
+    npm_config_userconfig: path.join(scratch, 'npmrc'), npm_config_globalconfig: path.join(scratch, 'npm-globalrc'), npm_config_store_dir: path.join(scratch, 'pnpm-store'), PNPM_HOME: path.join(scratch, 'pnpm-home'),
     LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8', BASH_ENV: '/dev/null', ENV: '/dev/null', NODE_OPTIONS: '--preserve-symlinks --preserve-symlinks-main', npm_config_cache: path.join(scratch, 'npm-cache'), COREPACK_HOME: path.join(scratch, 'corepack'), NO_COLOR: '1' }
 }
 

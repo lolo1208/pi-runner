@@ -1,9 +1,9 @@
-import { mkdir, readdir, rm } from 'node:fs/promises'
+import { mkdir, readdir, rm, writeFile, rename } from 'node:fs/promises'
 import path from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import { createAgentSession, createExtensionRuntime, estimateTokens as estimatePiTokens, SessionManager, SettingsManager, type AgentSession, type ResourceLoader, type ToolDefinition } from '@earendil-works/pi-coding-agent'
 import type { AssistantMessage, Usage } from '@earendil-works/pi-ai'
-import type { ChatExecution, ChatMessage, ModelProfile, ModelReply, ModelRateLimit, AgentRequestOptions, AgentEvent, OutputSpeed } from '../../shared/models'
+import type { ChatExecution, ChatMessage, ChatWorkItem, ModelProfile, ModelReply, ModelRateLimit, AgentRequestOptions, AgentEvent, OutputSpeed } from '../../shared/models'
 import { systemOutputTokens } from '../../shared/output-tokens'
 import { estimateContextTokens, estimateTextTokens, normalizeCompressionThreshold, type ContextOptions } from '../../shared/context'
 import { ShadowGitManager, type PendingCheckpoint } from '../snapshot/shadow-git-manager'
@@ -41,6 +41,8 @@ const toolActions: Record<string, string> = {
   ls: '查看目录',
   find: '查找',
   grep: '搜索',
+  read_skill_file: '读取技能文件',
+  report_skill_usage: '说明技能用途',
   ask_user_question: '确认需求',
   submit_plan: '提交计划'
 }
@@ -96,20 +98,101 @@ export class PiAgentService {
     try {
       const files = (await readdir(directory)).filter(file => file.endsWith('.jsonl'))
       if (!files.length) return null
-      return this.transcript(SessionManager.open(path.join(directory, files[0]), directory))
+      const skills = await new SkillStore(path.join(this.dependencies.dataDirectory, 'skills')).list()
+      return this.transcript(SessionManager.open(path.join(directory, files[0]), directory), new Map(skills.map(skill => [skill.id, skill])))
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
       throw new ModelError('无法恢复代理会话，请检查本地会话文件')
     }
   }
   async remove(id: string): Promise<void> { await rm(this.directory(id), { recursive: true, force: true }); this.modes.delete(id) }
-  private transcript(manager: SessionManager): ChatMessage[] {
+  async deleteRound(id: string, index: number, expectedHistoryId?: string): Promise<ChatMessage[] | null> {
+    const directory = this.directory(id)
+    let files: string[]
+    try { files = (await readdir(directory)).filter(file => file.endsWith('.jsonl')) }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error }
+    if (!files.length) return null
+    if (files.length !== 1) throw new ModelError('代理会话存在多个记录文件，请检查本地会话数据')
+    const file = path.join(directory, files[0])
+    const manager = SessionManager.open(file, directory)
+    const skills = await new SkillStore(path.join(this.dependencies.dataDirectory, 'skills')).list()
+    const displaySkills = new Map(skills.map(skill => [skill.id, skill]))
+    const visibleIds: string[] = []
+    const messages = this.transcript(manager, displaySkills, visibleIds)
+    if (messages[index]?.role !== 'user') throw new ModelError('这轮对话已变化，请重新打开会话后重试')
+    if (expectedHistoryId !== undefined && visibleIds[index] !== expectedHistoryId) throw new ModelError('这轮对话已变化，请重新打开会话后重试')
+    const next = messages.findIndex((message, position) => position > index && message.role === 'user')
+    const branch = manager.getBranch()
+    const branchIds = new Set(branch.map(entry => entry.id))
+    const start = branch.findIndex(entry => entry.id === visibleIds[index])
+    const end = next < 0 ? branch.length : branch.findIndex(entry => entry.id === visibleIds[next])
+    const round = branch.slice(start, end)
+    const fileIds = new Set(round.flatMap(entry => entry.type === 'message' && entry.message.role === 'user'
+      ? [...JSON.stringify(entry.message).matchAll(/\[pi-runner-files:([\w-]+)\]/g)].map(match => match[1]) : []))
+    const removed = new Set(round.filter(entry => !(entry.type === 'custom' && entry.customType === 'pi-runner-files') && entry.type !== 'compaction' && entry.type !== 'branch_summary').map(entry => entry.id))
+    const entries = manager.getEntries()
+    for (const entry of entries) {
+      if (entry.type === 'custom') {
+        const data = entry.data as { id?: string; entryId?: string }
+        if ((entry.customType === 'pi-runner-files' && fileIds.has(data?.id ?? '')) || (data?.entryId && removed.has(data.entryId))) removed.add(entry.id)
+      }
+      if ((entry.type === 'context_edit' || entry.type === 'label') && removed.has(entry.targetId)) removed.add(entry.id)
+      if (entry.type === 'custom' && entry.customType === 'pi-runner-execution'
+        && (entry.data as { entryIds: string[] }).entryIds.every(id => removed.has(id))) removed.add(entry.id)
+    }
+    const byId = new Map(entries.map(entry => [entry.id, entry]))
+    const retained = entries.flatMap(entry => {
+      if (removed.has(entry.id)) return []
+      // 摘要累积旧内容，使用保留的原始消息重建；其他轮次的信息保持完整。
+      if (entry.type === 'compaction' || entry.type === 'branch_summary') {
+        const ancestors = [...new Map([
+          ...(entry.type === 'branch_summary' ? manager.getBranch(entry.fromId) : []),
+          ...manager.getBranch(entry.id)
+        ].map(ancestor => [ancestor.id, ancestor])).values()]
+        if (ancestors.some(ancestor => removed.has(ancestor.id))) {
+          const source = ancestors.filter(ancestor => !removed.has(ancestor.id) && (ancestor.type === 'message' || ancestor.type === 'custom_message' || ancestor.type === 'custom' && ancestor.customType === 'pi-runner-files'))
+          entry = { ...entry, summary: source.map(ancestor => JSON.stringify(ancestor)).join('\n') || '此前没有保留的对话内容。', details: undefined }
+          if (entry.type === 'compaction') entry = { ...entry, firstKeptEntryId: entry.id, systemMessage: undefined }
+          if (entry.type === 'branch_summary') {
+            let fromId: string | null = entry.fromId
+            while (fromId && removed.has(fromId)) fromId = byId.get(fromId)?.parentId ?? null
+            entry = { ...entry, fromId: fromId ?? entry.id }
+          }
+        }
+      }
+      if (entry.type === 'custom' && entry.customType === 'pi-runner-execution') {
+        const data = entry.data as { entryIds: string[] }
+        const entryIds = data.entryIds.filter(id => !removed.has(id))
+        entry = { ...entry, data: { ...data, entryIds } }
+      }
+      if (entry.type === 'custom' && entry.customType === 'pi-runner-snapshot' && branchIds.has(entry.id)) {
+        const data = entry.data as import('../../shared/models').AgentSnapshot
+        const endIndex = next < 0 ? messages.length : next
+        if (data.messageIndex !== undefined && data.messageIndex >= endIndex) entry = { ...entry, data: { ...data, messageIndex: data.messageIndex - (endIndex - index) } }
+      }
+      let parentId = entry.parentId
+      while (parentId && removed.has(parentId)) parentId = byId.get(parentId)?.parentId ?? null
+      return [{ ...entry, parentId }]
+    })
+    const temporary = `${file}.delete-${randomUUID()}.tmp`
+    try {
+      await writeFile(temporary, [manager.getHeader(), ...retained].map(entry => JSON.stringify(entry)).join('\n') + '\n', { encoding: 'utf8', mode: 0o600, flush: true })
+      await rename(temporary, file)
+    } finally { await rm(temporary, { force: true }) }
+    return this.transcript(SessionManager.open(file, directory), displaySkills)
+  }
+  private transcript(manager: SessionManager, skills: ReadonlyMap<string, { name: string }> = new Map(), visibleIds?: string[]): ChatMessage[] {
     const attachments = new Map<string, ChatMessage>()
     const executions = new Map<string, ChatExecution>()
     const skillNotices = new Map<string, string>()
     const durations = new Map<string, number>()
+    const skillCallNames = new Map<string, string>()
     const results = new Map<string, { content: string; isError: boolean }>()
     for (const entry of manager.getBranch()) {
+      if (entry.type === 'custom' && entry.customType === 'pi-runner-skill-call') {
+        const data = entry.data as { toolCallId: string; name: string }
+        skillCallNames.set(data.toolCallId, data.name)
+      }
       if (entry.type === 'custom' && entry.customType === 'pi-runner-skill-usage') {
         const data = entry.data as { entryId: string; notice: string }
         skillNotices.set(data.entryId, data.notice)
@@ -162,10 +245,12 @@ export class PiAgentService {
           if (block.type === 'thinking') return [{ id: `${entry.id}-${index}`, kind: 'thinking', content: block.thinking }]
           if (block.type !== 'toolCall') return []
           const result = results.get(block.id)
-          return [{ id: block.id, kind: 'tool', name: block.name, args: block.arguments, content: result?.content ?? '', completed: Boolean(result), isError: result?.isError }]
+          const skillName = skills.get(String(block.arguments.skillId ?? ''))?.name ?? skillCallNames.get(block.id)
+          return [{ id: block.id, kind: 'tool', name: block.name, ...(skillName ? { skillName } : {}), args: block.arguments, content: result?.content ?? '', completed: Boolean(result), isError: result?.isError }]
         })
       } : undefined
-      return original ? [{ ...original, ...(snapshotHashes.has(entry.id) ? { snapshotHash: snapshotHashes.get(entry.id) } : {}) }] : content.trim() || call?.work.length ? [{ role: message.role as 'user' | 'assistant', content: content + (skillNotices.get(entry.id) ?? ''),
+      if (original || content.trim() || call?.work.length) visibleIds?.push(entry.id)
+      return original ? [{ ...original, historyId: entry.id, ...(snapshotHashes.has(entry.id) ? { snapshotHash: snapshotHashes.get(entry.id) } : {}) }] : content.trim() || call?.work.length ? [{ role: message.role as 'user' | 'assistant', content: content + (skillNotices.get(entry.id) ?? ''), historyId: entry.id,
         ...(call ? { call } : {}),
         ...(codeSnapshots.has(entry.id) ? { codeSnapshotId: codeSnapshots.get(entry.id) } : {}),
         ...(snapshotHashes.has(entry.id) ? { snapshotHash: snapshotHashes.get(entry.id) } : {}),
@@ -173,7 +258,13 @@ export class PiAgentService {
     })
   }
   async run(profile: ModelProfile, apiKey: string, messages: ChatMessage[], signal: AbortSignal, instruction: string, context: ContextOptions | undefined, options: AgentRequestOptions | undefined, requestId: string, isTest: boolean, onModelRequestActive: (active: boolean) => void = () => {}): Promise<ModelReply> {
+    const publish = (event: Omit<AgentEvent, 'requestId' | 'conversationId'>): void => {
+      try { this.dependencies.emit({ ...event, requestId, conversationId: options?.conversationId ?? requestId }) }
+      catch { console.warn('会话事件发送失败，任务继续执行') }
+    }
+    publish({ type: 'status', text: '正在准备会话…' })
     const skillStore = new SkillStore(path.join(this.dependencies.dataDirectory, 'skills'))
+    const displaySkills = new Map((isTest ? [] : await skillStore.list()).map(skill => [skill.id, skill]))
     const skillIds = isTest ? [] : messages.at(-1)?.skillIds ?? []
     const discoveredSkills = isTest ? [] : await skillStore.discoverable()
     const selectedSkills = skillIds.length ? await skillStore.selected(skillIds) : []
@@ -230,13 +321,9 @@ export class PiAgentService {
     const manager = options ? await this.manager(options.conversationId, cwd) : SessionManager.inMemory(cwd)
     const pendingCodeSnapshots: Promise<void>[] = []
     const attachments = new PiAttachments(manager)
-    const responses = useFileResponses(profile, [...this.transcript(manager), ...messages])
+    const responses = useFileResponses(profile, [...this.transcript(manager, displaySkills), ...messages])
     let rateLimits: ModelRateLimit[] = [], before: PendingCheckpoint | undefined
     let beforePromise: Promise<void> | undefined
-    const publish = (event: Omit<AgentEvent, 'requestId' | 'conversationId'>): void => {
-      try { this.dependencies.emit({ ...event, requestId, conversationId: options?.conversationId ?? requestId }) }
-      catch { console.warn('会话事件发送失败，任务继续执行') }
-    }
     // 流式输出速度统计：按秒级窗口采样，节流后随事件下发，供输入框角落的速度指示器使用。
     const speed = { outputTokens: 0, windowTokens: 0, windowStarted: 0, firstDelta: 0, peak: 0, recent: 0, samples: [] as OutputSpeed['samples'], lastPublish: 0 }
     const publishSpeed = (force = false): void => {
@@ -275,6 +362,29 @@ export class PiAgentService {
     }
     const activeTools = new Map<string, string>()
     const waitingTools = new Map<string, string>()
+    const liveWork = new Map<string, Partial<ChatWorkItem>>()
+    let outputTimer: ReturnType<typeof setTimeout> | undefined
+    const currentTranscript = (): ChatMessage[] => {
+      const messages = this.transcript(manager, displaySkills).map<ChatMessage>(message => !message.call || previousEntries.has(message.historyId ?? '') ? message : {
+      ...message, call: { ...message.call, work: message.call.work.map(item => {
+        if (item.kind !== 'tool' || item.completed) return item
+        const live = liveWork.get(item.id)
+        const waiting = waitingTools.get(item.id) ?? (['ask_user_question', 'submit_plan'].includes(item.name ?? '') ? waitingTools.get('plan-interaction') : undefined)
+        return { ...item, state: 'queued', ...live, ...(waiting ? { state: 'waiting', stateText: waiting } : {}) }
+      }) }
+      })
+      // 工具开始事件已经给出了参数；即使原生历史尚未保存，也立即提供可展开的记录。
+      const recorded = new Set(messages.flatMap(message => message.call?.work.map(item => item.id) ?? []))
+      const pending = [...activeTools].filter(([id]) => !recorded.has(id)).map(([id, name]): ChatWorkItem => ({
+        id, kind: 'tool', name, args: liveWork.get(id)?.args, content: '', completed: false,
+        ...liveWork.get(id), ...(waitingTools.has(id) ? { state: 'waiting', stateText: waitingTools.get(id) } : {})
+      }))
+      if (pending.length) messages.push({ role: 'assistant', historyId: `live:${requestId}`, content: '', execution: { model: profile.model, provider: profile.provider }, call: { work: pending } })
+      return messages
+    }
+    const publishTranscript = (): void => publish({ type: 'transcript', messages: currentTranscript() })
+    const outputText = (result: { content?: { type: string; text?: string }[] } | undefined): string =>
+      (result?.content ?? []).filter(block => block.type === 'text').map(block => block.text ?? '').join('\n')
     let modelStatus = '正在连接模型…', lastStatus = ''
     const status = (text: string, resetText = false): void => {
       if (text === lastStatus && !resetText) return
@@ -291,6 +401,7 @@ export class PiAgentService {
       if (waiting) waitingTools.set(id, text)
       else waitingTools.delete(id)
       refreshStatus()
+      publishTranscript()
     }
     status(modelStatus)
     const provider = await createPiProvider(profile, apiKey, attachments, responses, limits => { rateLimits = limits }, this.dependencies.fetchRequest, this.dependencies.chatgpt, onModelRequestActive)
@@ -310,7 +421,7 @@ export class PiAgentService {
     const resourceLoader: ResourceLoader = {
       getExtensions: () => ({ extensions: [], errors: [], runtime: createExtensionRuntime() }), getSkills: () => ({ skills: [], diagnostics: [] }),
       getPrompts: () => ({ prompts: [], diagnostics: [] }), getThemes: () => ({ themes: [], diagnostics: [] }), getAgentsFiles: () => ({ agentsFiles: [] }),
-      getSystemPrompt: () => isTest ? '' : ['你是 Pi Runner · 行动派的助手。对话、注释与日志以中文为主。', `当前权限模式：${mode === 'auto' ? '项目自审' : mode === 'full' ? '完全访问' : '每次询问'}。“每次询问”模式下，文件和目录修改及命令执行前均需询问用户并获得批准；项目自审模式由应用自动审查项目内操作，允许普通文件和目录的创建、修改、删除、查询、移动、重命名和复制；完全访问使用当前用户的本机权限，文件修改、删除、命令与脚本执行、项目外访问及联网均不再逐项请求批准；此模式不要自行询问执行许可。文件和目录操作必须优先使用专用工具，不要用终端命令代替：mkdir 创建目录，write 写入文件，edit 修改文件，delete 删除文件，rmdir 删除目录（删除非空目录时设置 recursive=true），move 移动或重命名，copy 复制，stat 查看信息，ls 查看目录内容，find 查找文件或目录，grep 搜索文件内容，read 读取文件。批量操作先用 find 查找，再逐项调用对应工具。执行模式下，用户已经明确要求的项目内文件和目录操作直接调用工具，是否需要审批由应用执行，不要额外询问执行许可。项目自审模式下的复合脚本和其他终端命令在系统沙箱内直接运行，项目外普通文件读写会被系统拦截；调用全局工具、测试子进程和联网无需审批；不要仅因命令复杂就询问许可。不要因工具位于项目外、命令组合、测试或联网设置 outsideSandbox=true。只有需要读取或写入项目外普通文件时才同时设置 externalFileAccess=true 和 outsideSandbox=true，应用将请求批准。应用会自动处理可安全恢复的文件操作、隔离配置和运行时访问问题；按工具返回的 recovery 状态继续任务。调用全局工具、测试子进程和联网不申请完整本机权限；工具不可用时保留兼容性错误。其他错误先根据原始结果调整实现；partial-or-unknown 表示可能已完成部分操作，先核对结果，只完成剩余步骤，不重放整段脚本。不得绕过 denied 或 awaiting-approval 状态重复申请相同授权。Windows PowerShell 5 的 Remove-Item 等路径命令可能访问项目祖先而被拒绝，优先使用专用文件工具或项目内 System.IO API。用户拒绝后请调整方案，不要变换语法重试相同动作。${project ? `当前项目：${project}` : '未绑定项目，不存在自动授权的工作区。'}`, instruction, planning ? PLAN_INSTRUCTION : '当前为执行模式。若本轮计划已批准，请按批准内容执行。'].filter(Boolean).join('\n\n'),
+      getSystemPrompt: () => isTest ? '' : ["辅助脚本、截图、日志、下载中间文件及工具缓存优先写入系统临时目录的专用子目录，完成后清理。必须在项目内暂存时，仅使用 tmp/、temp/ 或 .tmp/ 下的专用子目录，避免在项目根目录散落临时文件或缓存。构建产物和用户明确要求保留的文件遵循项目约定。", '你是 Pi Runner · 行动派的助手。对话、注释与日志以中文为主。', `当前权限模式：${mode === 'auto' ? '项目沙箱' : mode === 'full' ? '完全访问' : '每次询问'}。“每次询问”模式下，文件和目录修改及命令执行前均需询问用户并获得批准；项目沙箱模式由系统沙箱隔离执行，自动允许项目内操作，允许普通文件和目录的创建、修改、删除、查询、移动、重命名和复制；完全访问使用当前用户的本机权限，文件修改、删除、命令与脚本执行、项目外访问及联网均不再逐项请求批准；此模式不要自行询问执行许可。文件和目录操作必须优先使用专用工具，不要用终端命令代替：mkdir 创建目录，write 写入文件，edit 修改文件，delete 删除文件，rmdir 删除目录（删除非空目录时设置 recursive=true），move 移动或重命名，copy 复制，stat 查看信息，ls 查看目录内容，find 查找文件或目录，grep 搜索文件内容，read 读取文件。批量操作先用 find 查找，再逐项调用对应工具。执行模式下，用户已经明确要求的项目内文件和目录操作直接调用工具，是否需要审批由应用执行，不要额外询问执行许可。项目沙箱模式下的复合脚本和其他终端命令在系统沙箱内直接运行，项目外普通文件读写会被系统拦截；调用全局工具、测试子进程和联网无需审批；不要仅因命令复杂就询问许可。不要因工具位于项目外、命令组合、测试或联网设置 outsideSandbox=true。只有需要读取或写入项目外普通文件时才同时设置 externalFileAccess=true 和 outsideSandbox=true，应用将请求批准。应用会自动处理可安全恢复的文件操作、隔离配置和运行时访问问题；按工具返回的 recovery 状态继续任务。调用全局工具、测试子进程和联网不申请完整本机权限；工具不可用时保留兼容性错误。其他错误先根据原始结果调整实现；partial-or-unknown 表示可能已完成部分操作，先核对结果，只完成剩余步骤，不重放整段脚本。不得绕过 denied 或 awaiting-approval 状态重复申请相同授权。Windows PowerShell 5 的 Remove-Item 等路径命令可能访问项目祖先而被拒绝，优先使用专用文件工具或项目内 System.IO API。用户拒绝后请调整方案，不要变换语法重试相同动作。${project ? `当前项目：${project}` : '未绑定项目，不存在自动授权的工作区。'}`, instruction, planning ? PLAN_INSTRUCTION : '当前为执行模式。若本轮计划已批准，请按批准内容执行。'].filter(Boolean).join('\n\n'),
       getSystemPromptSource: () => undefined, getAppendSystemPrompt: () => [], getAppendSystemPromptSources: () => [], extendResources: () => {}, reload: async () => {}
     }
     const projectTools = isTest || !options ? [] : piProjectTools(snapshot?.getRoot() ?? cwd, () => snapshot ? beforePromise ??= (async () => {
@@ -337,13 +448,13 @@ export class PiAgentService {
     const interactions = planning && options ? planTools(
       async (details, toolSignal) => {
         manager.appendCustomEntry('pi-runner-plan-message', { role: 'assistant', content: details.kind === 'review' ? `${details.title}\n\n${details.content}` : (details.questions ?? []).map(question => `${question.question}\n${question.options.map(option => `- ${option.label}${option.description ? `：${option.description}` : ''}`).join('\n')}`).join('\n\n') } satisfies ChatMessage)
-        publish({ type: 'transcript', messages: this.transcript(manager) })
+        publishTranscript()
         const response = await this.interactions.ask(requestId, options.conversationId, details, toolSignal ?? signal, waitingFor('plan-interaction', details.kind === 'questions' ? '等待你回答问题…' : '等待你审阅计划…'))
         signal.throwIfAborted()
         interactionVersion++
         if (details.kind === 'questions') { clarified = true; session?.setActiveToolsByName(planningTools()) }
         manager.appendCustomEntry('pi-runner-plan-message', { role: 'user', content: response.answers ? (details.questions ?? []).map(question => `${question.header || question.question}：${response.answers![question.id]}`).join('\n') : response.decision === 'approve' ? '批准计划并开始执行' : `修改计划：${response.feedback}` } satisfies ChatMessage)
-        publish({ type: 'transcript', messages: this.transcript(manager) })
+        publishTranscript()
         return response
       },
       (title, content) => {
@@ -413,7 +524,7 @@ export class PiAgentService {
                   manager.appendCustomEntry('pi-runner-code-preview', { entryId: entry.id, snapshotId: 'unavailable' })
                   throw error
                 } finally {
-                  publish({ type: 'transcript', messages: this.transcript(manager) })
+                  publishTranscript()
                 }
               }, '审查时代码快照保存失败，请重新生成报告'))
             }
@@ -440,14 +551,33 @@ export class PiAgentService {
           if (update.type === 'thinking_delta') trackOutputDelta(update.delta)
         }
         if (event.type === 'message_start' && event.message.role === 'assistant') { completedResponse = false; callStarted = performance.now(); modelStatus = '正在等待模型回复…'; status(modelStatus, true) }
-        if (event.type === 'message_end' && ['user', 'assistant'].includes(event.message.role)) publish({ type: 'transcript', messages: this.transcript(manager) })
-        if (event.type === 'tool_execution_start') { activeTools.set(event.toolCallId, event.toolName); refreshStatus() }
+        // SDK 先通知订阅者，再同步保存消息；等当前调用栈结束后读取，
+        // 同时包含工具结果，避免执行列表落后一条甚至一整次模型调用。
+        if (event.type === 'message_end' && ['user', 'assistant', 'toolResult'].includes(event.message.role)) {
+          queueMicrotask(publishTranscript)
+        }
+        if (event.type === 'tool_execution_start') {
+          const skill = displaySkills.get(String(event.args?.skillId ?? ''))
+          // 名称优先从技能列表映射；调用时保存快照，供技能删除后的历史记录使用。
+          if (skill) manager.appendCustomEntry('pi-runner-skill-call', { toolCallId: event.toolCallId, name: skill.name })
+          activeTools.set(event.toolCallId, event.toolName)
+          liveWork.set(event.toolCallId, { state: 'running', args: event.args, ...(skill ? { skillName: skill.name } : {}) })
+          refreshStatus()
+          publishTranscript()
+        }
+        if (event.type === 'tool_execution_update') {
+          liveWork.set(event.toolCallId, { ...liveWork.get(event.toolCallId), content: outputText(event.partialResult).slice(-12000) })
+          // 工具更新是累计输出；合并密集通知，只发送最近内容。
+          outputTimer ??= setTimeout(() => { outputTimer = undefined; publishTranscript() }, 150)
+        }
         if (event.type === 'tool_execution_end') {
+          if (outputTimer) { clearTimeout(outputTimer); outputTimer = undefined }
           activeTools.delete(event.toolCallId)
           waitingTools.delete(event.toolCallId)
-          modelStatus = event.isError ? `${toolActions[event.toolName] ?? '任务'}失败，正在处理...` : `已完成${toolActions[event.toolName] ?? '任务'}`
+          liveWork.set(event.toolCallId, { completed: true, isError: event.isError, content: outputText(event.result) })
+          modelStatus = event.isError ? `${toolActions[event.toolName] ?? '任务'}失败，正在处理...` : '正在等待模型继续处理…'
           refreshStatus()
-          publish({ type: 'transcript', messages: this.transcript(manager) })
+          publishTranscript()
         }
         if (event.type === 'compaction_start') { modelStatus = '正在压缩上下文，完整记录仍保留…'; refreshStatus() }
         if (event.type === 'compaction_end') { modelStatus = event.errorMessage ? '上下文压缩失败，请检查模型服务' : '正在连接模型…'; refreshStatus() }
@@ -547,9 +677,10 @@ export class PiAgentService {
       let elapsedMs = Math.round(performance.now() - started)
       await finishSafely(() => { elapsedMs = saveExecution() }, '回复已完成，但执行统计保存失败')
       completedReply = { text: apiKey ? text.split(apiKey).join('[已隐藏密钥]') : text, model: profile.model, elapsedMs, truncated: final.stopReason === 'length',
-        usage: { inputTokens: final.usage.input + final.usage.cacheRead + final.usage.cacheWrite, outputTokens: final.usage.output }, roundUsage, rateLimits, messages: this.transcript(manager), warnings }
+        usage: { inputTokens: final.usage.input + final.usage.cacheRead + final.usage.cacheWrite, outputTokens: final.usage.output }, roundUsage, rateLimits, messages: this.transcript(manager, displaySkills), warnings }
       return completedReply
     } finally {
+      if (outputTimer) clearTimeout(outputTimer)
       if (profile.provider === 'chatgpt') this.dependencies.chatgpt?.invalidateUsage()
       signal.removeEventListener('abort', abort)
       if (session) {
@@ -558,13 +689,15 @@ export class PiAgentService {
         await finishSafely(() => unsubscribe?.(), '会话事件取消订阅失败，请重新打开应用')
         await finishSafely(() => completedSession.dispose(), '会话资源释放失败，请重新打开应用')
       }
+      for (const [id, work] of liveWork) if (!work.completed) liveWork.set(id, { ...work, state: 'interrupted' })
+      waitingTools.clear()
       if (!executionSaved) await finishSafely(saveExecution, '执行统计保存失败')
       if (before && snapshot) {
         try {
           status('正在保存本轮改动…')
           const checkpoints = await snapshot.completeCheckpoint(before)
           if (checkpoints) {
-            const round = { project: snapshot.getRoot(), ...checkpoints, messageIndex: this.transcript(manager).length - 1 }
+            const round = { project: snapshot.getRoot(), ...checkpoints, messageIndex: this.transcript(manager, displaySkills).length - 1 }
             manager.appendCustomEntry('pi-runner-snapshot', round)
             publish({ type: 'snapshot', snapshot: round })
           }
@@ -572,7 +705,7 @@ export class PiAgentService {
       }
       await Promise.all(pendingCodeSnapshots)
       await finishSafely(() => {
-        const messages = this.transcript(manager)
+        const messages = currentTranscript()
         if (completedReply) completedReply.messages = messages
         publish({ type: 'transcript', messages })
       }, '最终会话记录刷新失败，请重新打开会话')

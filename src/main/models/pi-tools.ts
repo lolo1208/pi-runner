@@ -1,5 +1,6 @@
 import { lstat, realpath, readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
+import os from 'node:os'
 import { createReadToolDefinition, createEditToolDefinition, createWriteToolDefinition, createLsToolDefinition, createFindToolDefinition, createGrepToolDefinition, createPowerShellToolDefinition, createBashToolDefinition, type ToolDefinition } from '@earendil-works/pi-coding-agent'
 import { ModelError } from './model-validation'
 import type { PermissionMode } from '../../shared/models'
@@ -122,11 +123,17 @@ export function piProjectTools(root: string, beforeMutation: () => Promise<void>
     }
     if (target.split(path.sep).some(part => hiddenProjectData(part))) throw new ModelError('文件工具不能访问 Git 元数据或应用内部数据')
   }
-  const definitions: ToolDefinition<any, any>[] = [createReadToolDefinition(root), createEditToolDefinition(root), createWriteToolDefinition(root), createDeleteToolDefinition(), ...filesystemToolDefinitions(protectPath), createLsToolDefinition(root), createFindToolDefinition(root), createGrepToolDefinition(root), process.platform === 'win32' ? createPowerShellToolDefinition(root) : createBashToolDefinition(root)]
+  // 本机执行和批准后的恢复也要在 PowerShell 启动前指定缓存位置。
+  const localShellOptions = { spawnHook: (context: { command: string; cwd: string; env: NodeJS.ProcessEnv }) => ({ ...context, env: {
+    ...Object.fromEntries(Object.entries(context.env).filter(([key]) => !['psmoduleanalysiscachepath', 'pythonpycacheprefix', 'pip_cache_dir', 'tmpdir', 'tmp', 'temp'].includes(key.toLowerCase()))),
+    TMPDIR: os.tmpdir(), TMP: os.tmpdir(), TEMP: os.tmpdir(), PSModuleAnalysisCachePath: path.join(os.tmpdir(), 'pi-runner-ModuleAnalysisCache'),
+    PYTHONPYCACHEPREFIX: path.join(os.tmpdir(), 'pi-runner-python-cache'), PIP_CACHE_DIR: path.join(os.tmpdir(), 'pi-runner-pip-cache')
+  } }) }
+  const definitions: ToolDefinition<any, any>[] = [createReadToolDefinition(root), createEditToolDefinition(root), createWriteToolDefinition(root), createDeleteToolDefinition(), ...filesystemToolDefinitions(protectPath), createLsToolDefinition(root), createFindToolDefinition(root), createGrepToolDefinition(root), process.platform === 'win32' ? createPowerShellToolDefinition(root, localShellOptions) : createBashToolDefinition(root, localShellOptions)]
   return definitions.map(tool => ({ ...tool,
     ...(['bash', 'powershell'].includes(tool.name) ? {
-      description: `${tool.description} 项目自审模式在系统沙箱内运行项目命令，调用已安装的全局开发工具、测试子进程和联网无需审批；项目外普通文件的读写仍需批准。不要仅因绝对工具路径、复合命令、测试或联网设置 outsideSandbox=true。只有确需项目外普通文件访问时才同时设置 externalFileAccess=true 和 outsideSandbox=true。全局工具的安装文件只读，用户配置和缓存使用独立临时区；缺少依赖、普通程序错误或沙箱兼容性错误不等于模型授权故障，也不自动申请完整本机权限。项目内文件操作优先使用 copy、move、delete、mkdir、rmdir 专用工具。Windows PowerShell 5 的路径命令可能探测项目祖先，简单文件操作会自动转交专用工具。partial-or-unknown 表示可能已部分执行，先核对结果，只完成剩余操作，不重放整段脚本；denied/awaiting-approval 不得重复申请相同授权。`,
-      parameters: { ...tool.parameters, properties: { ...tool.parameters.properties, outsideSandbox: { type: 'boolean', description: '申请沙箱外执行。开发工具调用、测试子进程和联网应在沙箱内免审批执行；项目外普通文件访问须同时明确 externalFileAccess。' }, externalFileAccess: { type: 'boolean', description: '本次命令确需读取或写入项目外普通文件时设为 true，项目自审模式需要批准。全局工具及其安装依赖不属于普通文件访问。' } } }
+      description: `${tool.description} 项目沙箱模式在系统沙箱内运行项目命令，调用已安装的全局开发工具、测试子进程和联网无需审批；项目外普通文件的读写仍需批准。不要仅因绝对工具路径、复合命令、测试或联网设置 outsideSandbox=true。只有确需项目外普通文件访问时才同时设置 externalFileAccess=true 和 outsideSandbox=true。全局工具的安装文件只读，用户配置和缓存使用独立临时区；缺少依赖、普通程序错误或沙箱兼容性错误不等于模型授权故障，也不自动申请完整本机权限。项目内文件操作优先使用 copy、move、delete、mkdir、rmdir 专用工具。Windows PowerShell 5 的路径命令可能探测项目祖先，简单文件操作会自动转交专用工具。partial-or-unknown 表示可能已部分执行，先核对结果，只完成剩余操作，不重放整段脚本；denied/awaiting-approval 不得重复申请相同授权。`,
+      parameters: { ...tool.parameters, properties: { ...tool.parameters.properties, outsideSandbox: { type: 'boolean', description: '申请沙箱外执行。开发工具调用、测试子进程和联网应在沙箱内免审批执行；项目外普通文件访问须同时明确 externalFileAccess。' }, externalFileAccess: { type: 'boolean', description: '本次命令确需读取或写入项目外普通文件时设为 true，项目沙箱模式需要批准。全局工具及其安装依赖不属于普通文件访问。' } } }
     } : {}),
     ...(['find', 'grep'].includes(tool.name) ? { description: `${tool.name === 'find' ? '按 glob 查找普通文件和目录' : '按模式搜索普通文件内容'}；不跟随链接，排除 Git 元数据、应用内部数据和 node_modules。` } : {}),
     execute: async (id, args, signal, update, context) => {

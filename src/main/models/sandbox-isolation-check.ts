@@ -1,7 +1,7 @@
 import { SANDBOX_CHECKS } from '../../shared/sandbox'
 import { randomUUID } from 'node:crypto'
 import { createServer } from 'node:http'
-import { mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, realpath, rm, rmdir, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { TerminalSandbox } from './terminal-sandbox'
 import { ModelError } from './model-validation'
@@ -15,10 +15,15 @@ export async function checkCachedSandboxIsolation(sandbox: TerminalSandbox, proj
   const workspace = await createSandboxCheckWorkspace()
   const { outside } = workspace
   const outsideFile = path.join(outside, 'outside.txt'), privateFile = path.join(dataDirectory, `isolation-check-${randomUUID()}.txt`)
-  const token = randomUUID(), file = path.join(project, `.pi-runner-check-${randomUUID()}.txt`)
-  let created = false
+  const token = randomUUID(), temporary = path.join(project, '.tmp')
+  const probe = path.join(temporary, `pi-runner-check-${randomUUID()}`), file = path.join(probe, 'probe.txt')
+  let created = false, createdTemporary = false, createdProbe = false
   try {
     await sandbox.prepare(project, signal)
+    // 必须验证真实项目的写权限；探针只放在明确的临时目录中，不跟随已有链接。
+    createdTemporary = await mkdir(temporary, { recursive: true }) !== undefined
+    if (await realpath(temporary) !== temporary) throw new ModelError('项目临时目录发生重定向，停止边界校验')
+    await mkdir(probe); createdProbe = true
     await writeFile(file, 'probe', { flag: 'wx' }); created = true
     await mkdir(dataDirectory, { recursive: true })
     await writeFile(outsideFile, token); await writeFile(privateFile, token)
@@ -28,7 +33,14 @@ export async function checkCachedSandboxIsolation(sandbox: TerminalSandbox, proj
     const result = await sandbox.exec(command, project, { signal, timeout: 20, onData: data => { output = (output + data.toString('utf8')).slice(-8000) } })
     if (result.exitCode !== 0 || !output.includes(token) || await readFile(outsideFile, 'utf8') !== token) throw new ModelError('已有隔离环境未通过快速边界校验，请重新检测')
   } finally {
-    await Promise.all([workspace.cleanup(), rm(privateFile, { force: true }), ...(created ? [rm(file, { force: true })] : [])])
+    try {
+      await Promise.all([workspace.cleanup(), rm(privateFile, { force: true }), ...(created ? [rm(file, { force: true })] : [])])
+    } finally {
+      // 仅删除空目录，保留检测期间其他进程写入的内容以及原有 .tmp。
+      for (const directory of [...(createdProbe ? [probe] : []), ...(createdTemporary ? [temporary] : [])]) {
+        await rmdir(directory).catch(error => { if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(error.code)) throw error })
+      }
+    }
   }
 }
 /** 所有探针只接触本次创建的测试文件；拒绝必须有来自隔离进程的明确标记。 */

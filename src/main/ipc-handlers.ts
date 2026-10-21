@@ -337,6 +337,7 @@ export function registerIpcHandlers(dependencies: IpcHandlerDependencies): void 
   handle(IPC_CHANNELS.modelTest, (id, requestId) => modelResult(() => dependencies.getModelService().request(id, requestId, null, true)))
   handle(IPC_CHANNELS.modelChat, (id, requestId, messages, customPrompt, context, agent) => modelResult(() => { if (restoringFiles) throw new ModelError('正在恢复文件，请完成后再发送消息'); loadPermissions(); return dependencies.getModelService().request(id, requestId, messages, false, customPrompt, context, agent) }))
   handle(IPC_CHANNELS.agentHistory, id => modelResult(() => dependencies.getModelService().history(id)))
+  handle(IPC_CHANNELS.agentDeleteRound, (id, index, expectedHistoryId) => modelResult(() => dependencies.getModelService().deleteRound(id, index, expectedHistoryId)))
   handle(IPC_CHANNELS.modelCancel, requestId => modelResult(() => dependencies.getModelService().cancel(requestId)))
   handle(IPC_CHANNELS.ollamaConnect, baseUrl => modelResult(() => dependencies.getModelService().connectOllama(baseUrl)))
   handle(IPC_CHANNELS.openrouterConnect, apiKey => modelResult(() => dependencies.getModelService().connectOpenrouter(apiKey)))

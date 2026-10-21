@@ -6,7 +6,7 @@ import type { PermissionMode } from '../../../../shared/models'
 
 const modes = [
   { value: 'default' as const, label: '每次询问', icon: ShieldQuestion, description: '项目内读取和搜索直接执行；每次修改文件、执行终端命令或访问项目外内容前，都会询问你是否允许。' },
-  { value: 'auto' as const, label: '项目自审', icon: ShieldCheck, description: '应用自动审查项目内文件和目录操作，无需逐项确认；终端命令通过隔离检查后在沙箱中运行。已安装开发工具、测试子进程及联网能力可用时无需逐项审批；项目外普通文件读写仍需批准。文件隔离失败时停止终端执行。' },
+  { value: 'auto' as const, label: '项目沙箱', icon: ShieldCheck, description: '项目内文件和目录操作自动允许，无需逐项确认；终端命令通过隔离检查后在沙箱中运行。已安装开发工具、测试子进程及联网能力可用时无需逐项审批；项目外普通文件读写仍需批准。文件隔离失败时停止终端执行。' },
   { value: 'full' as const, label: '完全访问', icon: ShieldAlert, description: '使用当前用户的本机权限访问文件、执行命令与联网，不再逐项请求批准。' }
 ]
 

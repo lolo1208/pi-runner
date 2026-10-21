@@ -1,6 +1,7 @@
 .conversation-model-picker {
   z-index: 50;
   width: min(440px, calc(100vw - 24px));
+  height: 600px;
   max-height: var(--radix-popover-content-available-height);
   display: flex;
   flex-direction: column;
@@ -143,6 +144,10 @@
 
 .conversation-model-reasoning {
   flex: none;
+  /* 固定推理区占位，切换模型时保持列表高度与条目位置不变。 */
+  box-sizing: border-box;
+  height: calc(96rem / 14);
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 7px;
@@ -158,4 +163,4 @@
 .conversation-model-thinking-option { flex: 1 0 auto; min-width: 34px; border: 0; padding: 4px 8px; border-radius: 11px; text-align: center; font-size: calc(12rem / 14); color: var(--muted); background: transparent; cursor: pointer; }
 .conversation-model-thinking-option[data-state="checked"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 3px #0002; }
 .conversation-model-thinking:disabled, .conversation-model-thinking[data-disabled] { opacity: .6; }
-.conversation-model-reasoning-hint { margin: 0; font-size: calc(11.5rem / 14); line-height: 1.6; color: var(--muted); }
+.conversation-model-reasoning-hint { margin: 8px 0 0; font-size: calc(11.5rem / 14); line-height: 1.6; color: var(--muted); }

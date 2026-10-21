@@ -54,6 +54,7 @@ function parseState(value: unknown): ConversationState {
     if (task.messages !== undefined && (!Array.isArray(task.messages) || !task.messages.every(value => {
       const message = record(value)
       if (!validSkillIds(message.skillIds)) return false
+      if (message.historyId !== undefined && (typeof message.historyId !== 'string' || !/^[\w-]{1,128}$/.test(message.historyId))) return false
       return (message.role === 'user' || message.role === 'assistant') && typeof message.content === 'string' && images(message.images)
     }))) throw new Error('会话消息格式无效')
   }

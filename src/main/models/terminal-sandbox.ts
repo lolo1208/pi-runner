@@ -33,7 +33,12 @@ const environmentKeys = new Set(['path', 'pathext', 'systemroot', 'windir', 'com
 
 /** 命令环境只继承运行工具所需的系统信息，不向子进程传递模型密钥或会话凭据。 */
 export function sandboxEnvironment(home: string, scratch: string, inherited: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  const env = Object.fromEntries(Object.entries(inherited).filter(([key, value]) => value !== undefined && environmentKeys.has(key.toLowerCase())))
+  const redirected = new Set(['userprofile', 'appdata', 'localappdata'])
+  const env = Object.fromEntries(Object.entries(inherited).filter(([key, value]) => value !== undefined && environmentKeys.has(key.toLowerCase()) && !redirected.has(key.toLowerCase())))
+  // 在启动 PowerShell 前固定缓存路径，避免用户目录 API 不可用时退回当前项目。
+  Object.assign(env, { PSModuleAnalysisCachePath: path.join(scratch, 'cache', 'ModuleAnalysisCache'), TMPDIR: scratch,
+    XDG_DATA_HOME: path.join(scratch, 'data'), XDG_STATE_HOME: path.join(scratch, 'state'),
+    PYTHONPYCACHEPREFIX: path.join(scratch, 'python-cache'), PIP_CACHE_DIR: path.join(scratch, 'pip-cache') })
   Object.assign(env, { USERPROFILE: scratch, APPDATA: path.join(scratch, 'appdata'), LOCALAPPDATA: path.join(scratch, 'localappdata') })
   // Rust 用户数据留在临时区；实际工具链安装文件由 developerToolReads 逐项只读授权。
   Object.assign(env, { RUSTUP_HOME: path.join(scratch, 'rustup'), RUSTUP_AUTO_INSTALL: '0', CARGO_HOME: path.join(scratch, 'cargo'), PLAYWRIGHT_BROWSERS_PATH: inherited.PLAYWRIGHT_BROWSERS_PATH ?? path.join(inherited.LOCALAPPDATA ?? path.join(os.homedir(), 'AppData', 'Local'), 'ms-playwright') })

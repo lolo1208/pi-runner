@@ -3,7 +3,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Modal } from '@/components/ui/modal'
 import { Textarea } from '@/components/ui/textarea'
-import { FolderOpen } from 'lucide-react'
+import { ArrowRightToLine, FolderOpen } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { MAX_CUSTOM_PROMPT_LENGTH } from '../../../shared/models'
 import { defaultProjectName, MAX_PROJECT_NAME_LENGTH } from '../project-meta'
@@ -23,6 +23,7 @@ export function ProjectEditDialog({ root, name, directory, prompt, isBusy, error
   const [draftName, setDraftName] = useState(name || defaultProjectName(root))
   const [draftDirectory, setDraftDirectory] = useState(directory)
   const [draftPrompt, setDraftPrompt] = useState(prompt)
+  const [promptFocused, setPromptFocused] = useState(false)
   const promptRef = useRef<HTMLTextAreaElement>(null)
   useEffect(() => {
     const el = promptRef.current
@@ -50,7 +51,15 @@ export function ProjectEditDialog({ root, name, directory, prompt, isBusy, error
         </div>
         <div className="project-edit-field">
           <Label htmlFor="project-edit-prompt">项目提示词</Label>
-          <Textarea ref={promptRef} id="project-edit-prompt" rows={2} className="project-edit-prompt" maxLength={MAX_CUSTOM_PROMPT_LENGTH} value={draftPrompt} placeholder="为此项目添加的固定提示词，会随此项目的每次对话一起发送。" disabled={isBusy} onChange={event => setDraftPrompt(event.target.value)} />
+          <div className="custom-prompt-input" data-suggestion-visible={promptFocused && draftPrompt === ''}>
+          <Textarea ref={promptRef} id="project-edit-prompt" rows={2} className="project-edit-prompt" maxLength={MAX_CUSTOM_PROMPT_LENGTH} value={draftPrompt} placeholder="修改完成后，跳过复杂的测试和验证。" disabled={isBusy} onFocus={() => setPromptFocused(true)} onBlur={() => setPromptFocused(false)} onChange={event => setDraftPrompt(event.target.value)} onKeyDown={event => {
+            if (event.key === 'Tab' && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey && !event.nativeEvent.isComposing && draftPrompt === '') {
+              event.preventDefault()
+              setDraftPrompt('修改完成后，跳过复杂的测试和验证。')
+            }
+          }} />
+          {promptFocused && draftPrompt === '' && <div className="custom-prompt-placeholder" aria-hidden="true">修改完成后，跳过复杂的测试和验证。 <kbd><ArrowRightToLine size={12} />Tab</kbd></div>}
+          </div>
           <p className="hint">修改从下一轮对话生效。</p>
         </div>
       </div>

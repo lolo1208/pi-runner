@@ -23,7 +23,7 @@ export async function sandboxVerificationFingerprint(options: { runtimeDirectory
       return { kind, manifest, file: [info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs].map(String) }
     } catch (error) { if (kind === backend || (error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; return { kind, missing: true } }
   }))
-  const environment = { policy: 3, platform: process.platform, release: os.release(), arch: process.arch, user: os.userInfo().username, backend, runtimes, temporaryDirectory: os.tmpdir() }
+  const environment = { policy: 4, platform: process.platform, release: os.release(), arch: process.arch, user: os.userInfo().username, backend, runtimes, temporaryDirectory: os.tmpdir() }
   const key = JSON.stringify([backend, directories])
   const stamp = JSON.stringify({ ...environment, identities })
   const cached = cachedFingerprints.get(key)

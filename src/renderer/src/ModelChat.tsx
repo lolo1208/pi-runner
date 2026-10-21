@@ -28,6 +28,7 @@ import { PagedList } from './components/PagedList'
 
 interface Props {
   snapshots?: import('../../shared/models').AgentSnapshot[]
+  onSnapshotsChange?(snapshots: import('../../shared/models').AgentSnapshot[]): void
   initialIntentMode?: IntentMode
   onIntentChange?(mode: IntentMode): void
   initialPermissionMode?: PermissionMode
@@ -57,10 +58,10 @@ interface Props {
   project?: string | null; providers?: ModelProviderConnection[]
   /** 快捷面板改完推理档位后回传新的模型设置，由顶层刷新。 */
   onModelSettingsChange?(settings: ModelSettings): void
-  profile: ModelProfileView | undefined; onBusyChange(busy: boolean): void; onOpenSettings(section?: 'models' | 'skills'): void
+  profile: ModelProfileView | undefined; onBusyChange(busy: boolean, historyOnly?: boolean): void; onOpenSettings(section?: 'models' | 'skills'): void
   onMessagesChange?(messages: ChatMessage[], restored?: boolean): void; settingsDisabled?: boolean; sendWithCtrlEnter?: boolean
 }
-function ModelChat({ notificationNavigationRequest = 0, snapshots, initialIntentMode = 'execute', onIntentChange, initialPermissionMode = 'default', onPermissionChange, active = true, projectReady = true, projectCurrent = true, conversationId, initialMessages = [], initialDraft = '', initialDraftImages = [], initialDraftSkillIds = [], initialQueue = [], initialQueuePaused = false, initialQueueEdit, onQueueChange, initialCompaction, onCompactionChange, compressionThreshold = DEFAULT_COMPRESSION_THRESHOLD, onDraftChange, profile: defaultProfile, profiles, project, providers, onModelSettingsChange, onBusyChange, onReplyComplete, onTaskEnd, onWaitingForInputChange, onOpenSettings, onMessagesChange, initialModelId, onModelChange, settingsDisabled, sendWithCtrlEnter = true, customPrompt = '' }: Props): React.JSX.Element {
+function ModelChat({ notificationNavigationRequest = 0, snapshots, onSnapshotsChange, initialIntentMode = 'execute', onIntentChange, initialPermissionMode = 'default', onPermissionChange, active = true, projectReady = true, projectCurrent = true, conversationId, initialMessages = [], initialDraft = '', initialDraftImages = [], initialDraftSkillIds = [], initialQueue = [], initialQueuePaused = false, initialQueueEdit, onQueueChange, initialCompaction, onCompactionChange, compressionThreshold = DEFAULT_COMPRESSION_THRESHOLD, onDraftChange, profile: defaultProfile, profiles, project, providers, onModelSettingsChange, onBusyChange, onReplyComplete, onTaskEnd, onWaitingForInputChange, onOpenSettings, onMessagesChange, initialModelId, onModelChange, settingsDisabled, sendWithCtrlEnter = true, customPrompt = '' }: Props): React.JSX.Element {
   const [permissionMode, setPermissionMode] = useState(initialPermissionMode)
   const [intentMode, setIntentMode] = useState<IntentMode>(initialIntentMode)
   const intentCallback = useRef(onIntentChange)
@@ -105,6 +106,8 @@ function ModelChat({ notificationNavigationRequest = 0, snapshots, initialIntent
     if (profile && profile.id !== selectedModelId) setSelectedModelId(profile.id)
   }, [profile?.id, selectedModelId])
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages)
+  const [deletingRound, setDeletingRound] = useState(false)
+  const deletionRunning = useRef(false)
   const [scrollToLatestRequest, setScrollToLatestRequest] = useState(0)
   const [compaction, setCompaction] = useState(initialCompaction)
   const [prompt, setPrompt] = useState(initialDraft)
@@ -247,6 +250,7 @@ function ModelChat({ notificationNavigationRequest = 0, snapshots, initialIntent
   const [agentStatus, setAgentStatus] = useState('')
   const [execution, setExecution] = useState<{ model: string; provider: ProviderId; startedAt: number; firstMessage: number }>()
   const activeRequest = useRef<string | null>(null)
+  const transcriptRef = useRef(messages)
   const nativeHistory = useRef(false)
   const [historyReady, setHistoryReady] = useState(!conversationId || !window.piRunner.getAgentHistory)
   const messagesCallback = useRef(onMessagesChange)
@@ -261,7 +265,7 @@ function ModelChat({ notificationNavigationRequest = 0, snapshots, initialIntent
     let active = true
     void window.piRunner.getAgentHistory(conversationId).then(unwrapModelResult).then(history => {
       if (!active) return
-      if (history) { nativeHistory.current = true; setMessages(history); messagesCallback.current?.(history, true) }
+      if (history) { nativeHistory.current = true; transcriptRef.current = history; setMessages(history); messagesCallback.current?.(history, true) }
       setHistoryReady(true)
     }).catch(() => { if (active) setError('代理会话恢复失败，请检查本地会话文件后重试') })
     return () => { active = false }
@@ -292,6 +296,9 @@ function ModelChat({ notificationNavigationRequest = 0, snapshots, initialIntent
     if (event.type === 'status') { setAgentStatus(event.text ?? ''); if (event.resetText) streamBuffer.clear() }
     if (event.type === 'transcript' && event.messages) {
       nativeHistory.current = true
+      const previousAssistant = transcriptRef.current.filter(message => message.role === 'assistant')
+      const nextAssistant = event.messages.filter(message => message.role === 'assistant')
+      transcriptRef.current = event.messages
       setMessages(event.messages); messagesCallback.current?.(event.messages)
       // SDK 的同步事件可能早于用户消息写入；确认本轮消息已入历史后才移除临时气泡。
       const history = event.messages
@@ -300,7 +307,8 @@ function ModelChat({ notificationNavigationRequest = 0, snapshots, initialIntent
         && (message.images?.length ?? 0) === (previous.message.images?.length ?? 0)
         && (message.images ?? []).every((image, index) => image.id === previous.message.images?.[index].id)
       ) ? null : previous)
-      streamBuffer.clear()
+      // 工具进度和预览保存也会刷新历史，不能清掉下一次模型调用正在生成的正文。
+      if (nextAssistant.length !== previousAssistant.length || nextAssistant.at(-1)?.historyId !== previousAssistant.at(-1)?.historyId || nextAssistant.at(-1)?.content !== previousAssistant.at(-1)?.content) streamBuffer.clear()
     }
   }), [conversationId])
   const [statistics, setStatistics] = useState<{ profileId: string; reply: ModelReply } | null>(null)
@@ -378,6 +386,7 @@ function ModelChat({ notificationNavigationRequest = 0, snapshots, initialIntent
     busyRef.current = true; setError(''); setNotice(''); setPending({ message, firstMessage: messages.length }); streamBuffer.clear(); setOutputSpeed(undefined); setAgentStatus('正在连接模型…')
     cancelledRef.current = false
     const id = crypto.randomUUID(); setRequestId(id); activeRequest.current = id
+    transcriptRef.current = messages
     setExecution({ model: profile.model, provider: profile.provider, startedAt: performance.now(), firstMessage: messages.length })
     const next: ChatMessage[] = [...messages, message]
     let replyReceived = false
@@ -419,9 +428,30 @@ function ModelChat({ notificationNavigationRequest = 0, snapshots, initialIntent
   }
   // 等历史更新后再执行下一条，确保下一轮使用完整上下文。编辑时暂缓队列执行。
   useEffect(() => {
-    if (requestId || busyRef.current || editingId || queuePaused || permissionChanging || settingsDisabled || !projectReady || !historyReady || pendingFullAccess || !profile || !queue.length) return
+    if (deletionRunning.current || requestId || busyRef.current || editingId || queuePaused || permissionChanging || settingsDisabled || !projectReady || !historyReady || pendingFullAccess || !profile || !queue.length) return
     void send(queue[0])
   })
+  const deleteRound = useCallback(async (index: number): Promise<void> => {
+    if (busyRef.current || deletionRunning.current || !historyReady) throw new Error('请等待当前任务结束后删除')
+    if (messages[index]?.role !== 'user') throw new Error('这轮对话已变化，请重试')
+    deletionRunning.current = true; setDeletingRound(true)
+    try {
+      onBusyChange(true, true)
+      const nextIndex = messages.findIndex((message, position) => position > index && message.role === 'user')
+      const end = nextIndex < 0 ? messages.length : nextIndex
+      const removedHashes = new Set(messages.slice(index, end).flatMap(message => message.snapshotHash ? [message.snapshotHash] : []))
+      const history = conversationId ? unwrapModelResult(await window.piRunner.deleteAgentRound(conversationId, index, messages[index].historyId)) : null
+      const retained = history ?? [...messages.slice(0, index), ...messages.slice(end)]
+      nativeHistory.current = history !== null
+      setMessages(retained); onMessagesChange?.(retained)
+      setCompaction(undefined); onCompactionChange?.(undefined)
+      onSnapshotsChange?.((snapshots ?? []).flatMap(snapshot => {
+        if (removedHashes.has(snapshot.after.hash) || snapshot.messageIndex !== undefined && snapshot.messageIndex >= index && snapshot.messageIndex < end) return []
+        return [{ ...snapshot, ...(snapshot.messageIndex !== undefined && snapshot.messageIndex >= end ? { messageIndex: snapshot.messageIndex - (end - index) } : {}) }]
+      }))
+      setStatistics(null); setOutputSpeed(undefined); setExecution(undefined); setNotice(''); setError('')
+    } finally { deletionRunning.current = false; setDeletingRound(false); onBusyChange(false, true) }
+  }, [messages, conversationId, historyReady, snapshots, onMessagesChange, onCompactionChange, onSnapshotsChange, onBusyChange])
   return <section className="model-chat" aria-label="模型对话">
     {active && sandboxState && <SandboxSetupDialog open={sandboxOpen} state={sandboxState} taskRunning={Boolean(requestId)} onClose={() => setSandboxOpen(false)} onRun={async action => {
       const state = unwrapModelResult(await window.piRunner.startSandbox(action))
@@ -446,7 +476,7 @@ function ModelChat({ notificationNavigationRequest = 0, snapshots, initialIntent
       try { unwrapModelResult(await window.piRunner.respondToolApproval(fullConfirmation.requestId, conversationId, fullConfirmation.approval.id, allow)) }
       catch (e) { setError(e instanceof Error ? e.message : '权限确认失败，请重试') }
     }} />}
-    <ChatTranscript notificationNavigationRequest={historyReady ? notificationNavigationRequest : 0} project={project} active={active} scrollToLatestRequest={scrollToLatestRequest} snapshots={snapshots} messages={messages} pendingMessage={pending?.message ?? null} streamedText={streamedText} agentStatus={stopping ? '正在停止任务…' : agentStatus} isBusy={Boolean(requestId)} execution={execution} hasProfile={Boolean(profile)} settingsDisabled={settingsDisabled} onOpenSettings={onOpenSettings} />
+    <ChatTranscript onDeleteRound={deleteRound} deletingRound={deletingRound || !historyReady} notificationNavigationRequest={historyReady ? notificationNavigationRequest : 0} project={project} active={active} scrollToLatestRequest={scrollToLatestRequest} snapshots={snapshots} messages={messages} pendingMessage={pending?.message ?? null} streamedText={streamedText} agentStatus={stopping ? '正在停止任务…' : agentStatus} sandboxState={permissionMode === 'auto' && !stopping ? currentSandboxState : null} isBusy={Boolean(requestId)} execution={execution} hasProfile={Boolean(profile)} settingsDisabled={settingsDisabled} onOpenSettings={onOpenSettings} />
     <div className="composer-wrap" hidden={!active}>
       {requestId && !interaction && planProgress && <div className="plan-waiting plan-progress" role="status"><LoaderCircle size={18} className="plan-progress-spinner" aria-hidden="true" /><span>{planProgress}</span></div>}
       {interaction && <div className="plan-waiting"><span>{interaction.kind === 'questions' ? '计划正在等待你的回答' : '计划已准备好，等待你的批准'}</span><Button variant="outline" onClick={() => setInteractionOpen(true)}>{interaction.kind === 'questions' ? '回答问题' : '审阅计划'}</Button></div>}
@@ -465,7 +495,7 @@ function ModelChat({ notificationNavigationRequest = 0, snapshots, initialIntent
       {active && error && <p className="error" role="alert">{error}</p>}
       {active && notice && <p className="request-notice" role="status">{notice}</p>}
       {active && project && <SandboxStatus key={project} visible={permissionMode === 'auto'} taskRunning={Boolean(requestId)} state={currentSandboxState} onInspect={() => setSandboxOpen(true)} />}
-      <ChatComposer stopping={stopping} active={active} queue={queue} editingId={editingId} queuePaused={queuePaused} onResumeQueue={() => setQueuePaused(false)} onCancelEdit={restoreDraft} onEditQueued={editQueued} onDeleteQueued={deleteQueued} onReorderQueued={reorderQueued} intentMode={intentMode} onIntentChange={changeIntent} permissionMode={permissionMode} onPermissionChange={conversationId ? changePermission : undefined} profile={profile} profiles={availableProfiles} providers={providers} onSelectModel={id => { setSelectedModelId(id); onModelChange?.(id) }} onThinkingChange={changeThinking} prompt={prompt} images={images} skillIds={skillIds} onSkillsChange={setSkillIds} onImagesChange={setImages} isBusy={Boolean(requestId)} hasMessages={messages.length > 0} settingsDisabled={settingsDisabled || permissionChanging || !projectReady} sendWithCtrlEnter={sendWithCtrlEnter} onPromptChange={setPrompt} onOpenSettings={onOpenSettings} onSend={submit} onCancel={() => { void stopRequest().catch(() => setError('取消请求失败，请重试')) }} />
+      <ChatComposer stopping={stopping} active={active} queue={queue} editingId={editingId} queuePaused={queuePaused} onResumeQueue={() => setQueuePaused(false)} onCancelEdit={restoreDraft} onEditQueued={editQueued} onDeleteQueued={deleteQueued} onReorderQueued={reorderQueued} intentMode={intentMode} onIntentChange={changeIntent} permissionMode={permissionMode} onPermissionChange={conversationId ? changePermission : undefined} profile={profile} profiles={availableProfiles} providers={providers} onSelectModel={id => { setSelectedModelId(id); onModelChange?.(id) }} onThinkingChange={changeThinking} prompt={prompt} images={images} skillIds={skillIds} onSkillsChange={setSkillIds} onImagesChange={setImages} isBusy={Boolean(requestId)} hasMessages={messages.length > 0} settingsDisabled={settingsDisabled || permissionChanging || deletingRound || !projectReady} sendWithCtrlEnter={sendWithCtrlEnter} onPromptChange={setPrompt} onOpenSettings={onOpenSettings} onSend={submit} onCancel={() => { void stopRequest().catch(() => setError('取消请求失败，请重试')) }} />
       {active && <ComposerStatus outputSpeed={outputSpeed} latestReply={matchingStatistics?.reply} subscriptionUsage={subscriptionUsage} openrouterUsage={openrouterUsage} compressionThreshold={compressionThreshold} project={project} profile={profile} contextLimit={providers?.find(item => item.provider === profile?.provider && item.baseUrl === profile?.baseUrl)?.models.find(item => item.id === profile?.model)?.maxContextTokens} messages={statusMessages} prompt={prompt} instruction={customPrompt} attachments={images} usage={contextUsage} rateLimits={matchingStatistics?.reply.rateLimits} onOpenProject={() => {
         if (project) void window.piRunner.openProjectDirectory(project).catch(() => setError('无法打开项目目录，请检查目录是否存在后重试'))
       }} />}

@@ -68,6 +68,7 @@ export interface PiRunnerApi {
   chatWithModel(id: string, requestId: string, messages: ChatMessage[], customPrompt?: string, context?: import('./context').ContextOptions, agent?: AgentRequestOptions): Promise<ModelResult<ModelReply>>
   onAgentEvent(callback: (event: AgentEvent) => void): () => void
   getAgentHistory(conversationId: string): Promise<ModelResult<ChatMessage[] | null>>
+  deleteAgentRound(conversationId: string, index: number, expectedHistoryId?: string): Promise<ModelResult<ChatMessage[] | null>>
   cancelModelRequest(requestId: string): Promise<ModelResult<void>>
   connectOllama(baseUrl: string): Promise<ModelResult<ModelSettings>>
   connectOpenrouter(apiKey?: string): Promise<ModelResult<ModelSettings>>
@@ -99,7 +100,7 @@ export const IPC_CHANNELS = {
   selectProject: 'project:select', checkpoint: 'snapshot:create',
   checkpoints: 'snapshot:list',
   changes: 'snapshot:changes', diff: 'snapshot:diff', restore: 'snapshot:restore', matches: 'snapshot:matches',
-  rollback: 'snapshot:rollback', agentEvent: 'models:agent-event', agentHistory: 'models:agent-history',
+  rollback: 'snapshot:rollback', agentEvent: 'models:agent-event', agentHistory: 'models:agent-history', agentDeleteRound: 'models:agent-delete-round',
   modelSettings: 'models:list', modelSave: 'models:save',
   modelActivate: 'models:activate', modelTest: 'models:test', modelChat: 'models:chat', modelCancel: 'models:cancel',
   ollamaConnect: 'models:ollama-connect', ollamaInfo: 'models:ollama-info',

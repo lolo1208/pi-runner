@@ -75,6 +75,7 @@ const api: PiRunnerApi = {
   testModel: (id, requestId) => ipcRenderer.invoke(IPC_CHANNELS.modelTest, id, requestId),
   chatWithModel: (id, requestId, messages, customPrompt, context, agent) => ipcRenderer.invoke(IPC_CHANNELS.modelChat, id, requestId, messages, customPrompt, context, agent),
   getAgentHistory: id => ipcRenderer.invoke(IPC_CHANNELS.agentHistory, id),
+  deleteAgentRound: (id, index, expectedHistoryId) => ipcRenderer.invoke(IPC_CHANNELS.agentDeleteRound, id, index, expectedHistoryId),
   onAgentEvent: callback => {
     const listener = (_event: Electron.IpcRendererEvent, event: import('../shared/models').AgentEvent): void => callback(event)
     ipcRenderer.on(IPC_CHANNELS.agentEvent, listener)

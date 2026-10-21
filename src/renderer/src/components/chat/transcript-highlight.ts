@@ -10,6 +10,7 @@ export function highlightTranscript(scroller: HTMLElement, key: string, onDone?:
     row?.style.removeProperty('--chat-arrival-delay')
   }
   const tick = (time: number): void => {
+    if (!scroller.isConnected) { clear(); return }
     // 虚拟列表可能复用或替换节点，不能只持有第一次找到的 DOM。
     const next = Array.from(scroller.querySelectorAll<HTMLElement>('[data-transcript-key]'))
       .find(element => element.dataset.transcriptKey === key) ?? null

@@ -343,12 +343,13 @@ button.chat-round-dot:focus-visible { outline: 1px solid var(--accent); outline-
 /* 气泡等宽的透明区域延伸到按钮底部，支持先向下再横向移动。 */
 .chat-message.user:hover::after,
 .chat-message.user:focus-within::after { pointer-events: auto; }
-.chat-message.user .message-copy {
+.chat-message.user .message-actions {
   position: absolute;
   top: calc(100% + 6rem / 14);
   z-index: 1;
   right: 0;
-  width: calc(24rem / 14);
+  display: flex;
+  gap: calc(4rem / 14);
   height: calc(24rem / 14);
   min-height: 0;
   padding: 0;
@@ -358,10 +359,13 @@ button.chat-round-dot:focus-visible { outline: 1px solid var(--accent); outline-
   opacity: 0;
   pointer-events: none;
 }
-.chat-message.user:hover .message-copy,
-.chat-message.user:focus-within .message-copy { opacity: 1; pointer-events: auto; }
+.chat-message.user:hover .message-actions,
+.chat-message.user:focus-within .message-actions { opacity: 1; pointer-events: auto; }
+.chat-message.user .message-actions > button { width: calc(24rem / 14); height: calc(24rem / 14); min-height: 0; padding: 0; color: var(--muted); }
 .chat-message.user .message-copy:hover { background: var(--hover); color: var(--text); }
-@media (hover: none) { .chat-message.user .message-copy { opacity: 1; pointer-events: auto; } }
+.chat-message.user .message-delete:hover,
+.chat-message.user .message-delete:focus-visible { background: var(--error-bg); color: var(--error); }
+@media (hover: none) { .chat-message.user .message-actions { opacity: 1; pointer-events: auto; } }
 
 /* 附件与气泡内边距对齐，间距统一由 flex gap 控制 */
 .chat-message.user .chat-images { margin: 0; padding: 0; }
@@ -715,14 +719,14 @@ button.chat-round-dot:focus-visible { outline: 1px solid var(--accent); outline-
 :root[data-theme="dark"] .permission-mode-trigger:not(:disabled):hover.permission-full,
 :root[data-theme="dark"] .permission-mode-trigger:not(:disabled):focus-visible.permission-full { color: #facc15; }
 
-/* 目的模式配色：计划用紫色与蓝色的权限色区分，执行沿用默认文字色；图标跟随 currentColor。 */
-.intent-plan { color: #6d28d9; }
-:root[data-theme="dark"] .intent-plan { color: #c4b5fd; }
+/* 目的模式配色：计划使用浓郁森林绿，执行沿用默认文字色；图标跟随 currentColor。 */
+.intent-plan { color: #315f46; }
+:root[data-theme="dark"] .intent-plan { color: #8fc49d; }
 /* 悬停与键盘焦点保持本模式颜色，避免被通用 hover 规则换回默认文字色。 */
 .intent-mode-trigger:not(:disabled):hover.intent-plan,
-.intent-mode-trigger:not(:disabled):focus-visible.intent-plan { color: #6d28d9; }
+.intent-mode-trigger:not(:disabled):focus-visible.intent-plan { color: #315f46; }
 :root[data-theme="dark"] .intent-mode-trigger:not(:disabled):hover.intent-plan,
-:root[data-theme="dark"] .intent-mode-trigger:not(:disabled):focus-visible.intent-plan { color: #c4b5fd; }
+:root[data-theme="dark"] .intent-mode-trigger:not(:disabled):focus-visible.intent-plan { color: #8fc49d; }
 
 
 .modal-panel.image-preview-content {
@@ -1052,11 +1056,15 @@ button.chat-round-dot:focus-visible { outline: 1px solid var(--accent); outline-
 .chat-call-toggle.ui-button, .chat-work-toggle.ui-button { min-height: calc(28rem / 14); padding-block: 4px; }
 .chat-call-count { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; padding: 0 5px; border-radius: 5px; background: var(--hover); color: var(--text); font-size: calc(11rem / 14); line-height: 18px; font-variant-numeric: tabular-nums; }
 .chat-work-list { display: flex; flex-direction: column; gap: 4px; margin-block: 4px 8px; }
+.chat-work-progress { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 4px 10px; color: var(--muted); font-size: calc(12rem / 14); line-height: 1.5; }
+.chat-work-progress > svg { flex-shrink: 0; }
+.chat-work-progress > span { min-width: 0; overflow-wrap: anywhere; }
 .chat-call-section + .chat-call-section { margin-top: 4px; }
 .chat-call-section > .chat-markdown { margin: 6px 10px 12px; }
 .chat-work-toggle > svg:first-child, .chat-call-toggle > svg:first-child { flex-shrink: 0; }
-.chat-work-summary { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; text-align: left; }
-.chat-work-summary > span { flex-shrink: 0; white-space: nowrap; }
+.chat-work-summary { display: flex; flex: 1; align-items: baseline; gap: 8px; min-width: 0; text-align: left; line-height: 1.5; }
+.chat-work-summary > span { flex-shrink: 1; overflow-wrap: anywhere; }
+.chat-work-summary > .chat-work-skill-name { flex-shrink: 1; min-width: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
 .chat-work-summary small { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono, monospace); font-size: calc(11rem / 14); }
 .chat-work-detail { margin: 6px 0 12px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); }
 .chat-work-detail pre { margin: 0; max-height: 480px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; font-family: var(--font-mono, monospace); font-size: calc(12rem / 14); line-height: 1.7; }

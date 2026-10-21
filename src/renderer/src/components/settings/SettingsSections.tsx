@@ -18,8 +18,8 @@ interface PreferencesSectionProps {
   onPreferences: (preferences: Preferences) => void
 }
 
-const CUSTOM_PROMPT_EXAMPLE = '默认使用简体中文，包括对话、文档、代码注释和日志；必要的技术术语与标识符保留原文。'
-const CUSTOM_PROMPT_PLACEHOLDER = `例如：${CUSTOM_PROMPT_EXAMPLE}`
+const CUSTOM_PROMPT_EXAMPLE = '默认使用简体中文，包括与我的对话、文档、代码注释和日志；必要的技术术语与标识符保留原文。'
+const CUSTOM_PROMPT_PLACEHOLDER = CUSTOM_PROMPT_EXAMPLE
 
 export function GeneralSettingsSection({ preferences, onPreferences, isMac, settings, onModelSettingsChange, onBusyChange }: PreferencesSectionProps & {
   isMac: boolean
@@ -209,7 +209,7 @@ export function AboutSettingsSection(): React.JSX.Element {
         <div className="about-feature-icon"><Sliders size={18} /></div>
         <div className="about-feature-content">
           <h4>细粒度安全审批</h4>
-          <p>支持每次询问、项目自审与完全访问三种权限模式。项目自审由应用审查项目内操作，终端命令受沙箱边界约束。</p>
+          <p>支持每次询问、项目沙箱与完全访问三种权限模式。项目沙箱自动允许项目内操作，终端命令受沙箱边界约束。</p>
         </div>
       </div>
       <div className="about-feature-item">

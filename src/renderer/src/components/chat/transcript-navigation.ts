@@ -11,9 +11,11 @@ export function navigateTranscript(
   let settledSince: number | undefined
   let anchor: { element: HTMLElement; top: number } | undefined
   let direction = 0
-  const targetIndex = positions.get(targetKey)!
+  const targetIndex = positions.get(targetKey)
+  if (targetIndex === undefined) return () => {}
 
   const tick = (time: number): void => {
+    if (!scroller.isConnected || !positions.has(targetKey)) return
     const bounds = scroller.getBoundingClientRect()
     // 通知唤起窗口时可能仍在后台或尚无可见布局，不能提前结束导航和播放提示。
     if (document.hidden || bounds.height <= 0 || bounds.width <= 0) {
@@ -29,7 +31,7 @@ export function navigateTranscript(
       const drift = anchor.element.getBoundingClientRect().top - anchor.top
       if (Math.abs(drift) > 0.5) scroller.scrollTop += drift
     }
-    const items = Array.from(scroller.querySelectorAll<HTMLElement>('[data-transcript-key]'))
+    const items = Array.from(scroller.querySelectorAll<HTMLElement>('[data-transcript-key]')).filter(item => positions.has(item.dataset.transcriptKey!))
     const first = items[0], last = items.at(-1)
     if (!first || !last) { frame = requestAnimationFrame(tick); return }
     const firstIndex = positions.get(first.dataset.transcriptKey!)!

@@ -107,9 +107,9 @@ export interface ChatAttachment { id: string; name: string; dataUrl: string }
 /** 沿用图片附件的类型与存储字段，兼容已有会话；现在可包含任意文件。 */
 export type ChatImage = ChatAttachment
 export interface ChatExecution { model: string; provider?: ProviderId; elapsedMs?: number; roundId?: string }
-export interface ChatWorkItem { id: string; kind: 'thinking' | 'tool'; name?: string; args?: Record<string, unknown>; content: string; isError?: boolean; completed?: boolean }
+export interface ChatWorkItem { id: string; kind: 'thinking' | 'tool'; name?: string; skillName?: string; args?: Record<string, unknown>; content: string; isError?: boolean; completed?: boolean; state?: 'queued' | 'running' | 'waiting' | 'interrupted'; stateText?: string }
 export interface ChatCall { elapsedMs?: number; usage?: ModelUsage; work: ChatWorkItem[] }
-export interface ChatMessage { role: 'user' | 'assistant'; content: string; images?: ChatImage[]; skillIds?: string[]; execution?: ChatExecution; call?: ChatCall; snapshotHash?: string; codeSnapshotId?: string }
+export interface ChatMessage { role: 'user' | 'assistant'; content: string; images?: ChatImage[]; skillIds?: string[]; execution?: ChatExecution; call?: ChatCall; snapshotHash?: string; codeSnapshotId?: string; historyId?: string }
 export interface ModelUsage { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number }
 export interface ModelRateLimit { kind: 'requests' | 'tokens'; limit: number; remaining: number; reset?: string }
 export interface ChatgptAuthStatus { state: 'signed-out' | 'authorizing' | 'signed-in'; url?: string; manualInput?: boolean; error?: string; catalogSource?: 'account' | 'sdk' }

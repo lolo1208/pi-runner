@@ -32,6 +32,15 @@ export class ModelService {
     return this.openrouter.usage(await this.store.openrouterKey())
   }
   history(id: unknown) { return this.client instanceof PiAgentService ? this.client.history(profileId(id)) : Promise.resolve(null) }
+  async deleteRound(id: unknown, index: unknown, expectedHistoryId?: unknown) {
+    const conversationId = profileId(id)
+    if (!Number.isSafeInteger(index) || (index as number) < 0) throw new ModelError('对话轮次无效')
+    if (expectedHistoryId !== undefined && (typeof expectedHistoryId !== 'string' || !/^[\w-]{1,128}$/.test(expectedHistoryId))) throw new ModelError('对话消息标识无效')
+    if (this.isBusy(conversationId)) throw new ModelError('请先停止当前会话，再删除记录')
+    this.permissionPrompts.set(conversationId, new AbortController())
+    try { return this.client instanceof PiAgentService ? await this.client.deleteRound(conversationId, index as number, expectedHistoryId as string | undefined) : null }
+    finally { this.permissionPrompts.delete(conversationId) }
+  }
   removeHistory(id: string) {
     if (this.isBusy(id)) throw new ModelError('请先停止当前会话，再删除记录')
     return this.client instanceof PiAgentService ? this.client.remove(id) : Promise.resolve()

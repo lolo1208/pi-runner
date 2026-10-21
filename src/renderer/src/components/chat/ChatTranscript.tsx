@@ -4,10 +4,11 @@ import { Virtuoso, type ListRange, type VirtuosoHandle } from 'react-virtuoso'
 import { Button } from '@/components/ui/button'
 import { Settings2 } from 'lucide-react'
 import type { AgentSnapshot, ChatMessage, ProviderId } from '../../../../shared/models'
+import type { SandboxState } from '../../../../shared/sandbox'
 import { ChatImages } from './ChatImages'
 import { CopyMessageButton } from './CopyMessageButton'
+import { DeleteRoundButton } from './DeleteRoundButton'
 import { RoundChanges } from './RoundChanges'
-import { ExecutionLabel } from './ExecutionLabel'
 import { RoundActivity } from './RoundActivity'
 import { ChatMarkdown } from './ChatMarkdown'
 import { roundChangesKey, useRoundChanges } from '../../hooks/useRoundChanges'
@@ -62,11 +63,14 @@ interface ChatTranscriptProps {
   pendingMessage: ChatMessage | null
   streamedText?: string
   agentStatus?: string
+  sandboxState?: SandboxState | null
   isBusy?: boolean
   execution?: { model: string; provider?: ProviderId; startedAt: number; firstMessage: number }
   hasProfile: boolean
   settingsDisabled?: boolean
   onOpenSettings: () => void
+  onDeleteRound?(index: number): Promise<void>
+  deletingRound?: boolean
 }
 
 interface TranscriptRow {
@@ -80,6 +84,7 @@ interface TranscriptRow {
 
 interface ReadingPosition {
   key?: string
+  pinnedKey?: string
   offset: number
   follow: boolean
 }
@@ -92,7 +97,10 @@ const listComponents = { List: MessageList }
 export const ChatTranscript = memo(function ChatTranscript(props: ChatTranscriptProps): React.JSX.Element {
   const { messages, snapshots = NO_SNAPSHOTS, pendingMessage, streamedText = '', isBusy, execution, active = true } = props
   const [store] = useState(() => new TranscriptState())
-  const position = useRef<ReadingPosition>({ offset: 0, follow: true })
+  const [position, setPosition] = useState<MutableRefObject<ReadingPosition>>(() => ({ current: { offset: 0, follow: true } }))
+  const navigationTarget = useRef<string | null>(null)
+  const messageKeys = useRef(new WeakMap<ChatMessage, string>())
+  const nextMessageKey = useRef(0)
   const lastLatestRequest = useRef(props.scrollToLatestRequest ?? 0)
   const lastNotificationRequest = useRef(0)
   const previousMessages = useRef(messages)
@@ -111,7 +119,16 @@ export const ChatTranscript = memo(function ChatTranscript(props: ChatTranscript
       const previous = groups.at(-1)
       if (message.role === 'assistant' && previous?.messages[0].role === 'assistant'
         && (!message.execution?.roundId || !previous.messages[0].execution?.roundId || message.execution.roundId === previous.messages[0].execution?.roundId)) previous.messages.push(message)
-      else groups.push({ key: `message:${index}:${message.role}:${message.execution?.roundId ?? ''}`, messages: [message], index, roundIndex, snapshots: [], kind: 'message' })
+      else {
+        let key = message.historyId ? `message:native:${message.historyId}` : messageKeys.current.get(message)
+        if (!key && messages.length >= previousMessages.current.length) {
+          const old = previousMessages.current[index]
+          if (old && old.role === message.role && old.execution?.roundId === message.execution?.roundId && message.content.startsWith(old.content)) key = messageKeys.current.get(old)
+        }
+        key ??= `message:local:${nextMessageKey.current++}`
+        messageKeys.current.set(message, key)
+        groups.push({ key, messages: [message], index, roundIndex, snapshots: [], kind: 'message' })
+      }
       messageGroups.set(index, groups.at(-1)!)
     })
     for (const round of snapshots) {
@@ -146,24 +163,42 @@ export const ChatTranscript = memo(function ChatTranscript(props: ChatTranscript
   }, [])
   useLayoutEffect(() => { if (!active) setViewport({ range: null, visible: [], ready: false }) }, [active])
 
-  // 恢复项目会截断消息；重置测量并清理后续轮次的交互状态。
+  const previousRows = useRef(rows)
+  // 删除与恢复后重置测量，但保留仍存在的阅读目标；已删目标就近落到下一轮或上一轮。
   useLayoutEffect(() => {
     const previous = previousMessages.current
     previousMessages.current = messages
     const replaced = messages.length < previous.length || messages.some((message, index) => {
       const old = previous[index]
-      return old && (old.role !== message.role || old.execution?.roundId !== message.execution?.roundId || Boolean(old.content && !message.content.startsWith(old.content)))
+      return old && (old.role !== message.role || old.historyId !== message.historyId || old.execution?.roundId !== message.execution?.roundId || Boolean(old.content && !message.content.startsWith(old.content)))
     })
     if (replaced) {
-      position.current = { offset: 0, follow: true }
+      const oldRows = previousRows.current
+      const saved = position.current
+      const targetKey = navigationTarget.current ?? saved.pinnedKey ?? saved.key
+      const retainedKeys = new Set(rows.map(row => row.key))
+      const oldIndex = oldRows.findIndex(row => row.key === targetKey)
+      const retained = retainedKeys.has(targetKey ?? '') ? targetKey : undefined
+      const nearest = retained ?? oldRows.slice(Math.max(0, oldIndex)).find(row => retainedKeys.has(row.key))?.key
+        ?? oldRows.slice(0, Math.max(0, oldIndex)).reverse().find(row => retainedKeys.has(row.key))?.key
+      const preserveAnchor = retained && !navigationTarget.current && retainedKeys.has(saved.key ?? '')
+      setPosition({ current: nearest ? {
+        key: preserveAnchor ? saved.key : nearest,
+        offset: preserveAnchor ? saved.offset : 0,
+        pinnedKey: navigationTarget.current || saved.pinnedKey ? nearest : undefined,
+        follow: saved.follow && !navigationTarget.current
+      } : { offset: 0, follow: true } })
+      navigationTarget.current = null
+      if (messages.length < previous.length) lastNotificationRequest.current = props.notificationNavigationRequest ?? lastNotificationRequest.current
       setViewport({ range: null, visible: [], ready: false })
       setRevision(value => value + 1)
     }
+    previousRows.current = rows
     store.retain(new Set(rows.map(row => row.key)))
-  }, [messages, rows, store])
+  }, [messages, rows, store, position, props.notificationNavigationRequest])
 
   return <TranscriptProvider key={revision} store={store} active={active}>
-    {active && (rows.length ? <VirtualTranscript {...props} rows={rows} position={position} lastLatestRequest={lastLatestRequest} lastNotificationRequest={lastNotificationRequest} changes={changes} onRange={setRange} onVisible={setVisible} />
+    {active && (rows.length ? <VirtualTranscript {...props} rows={rows} position={position} navigationTarget={navigationTarget} lastLatestRequest={lastLatestRequest} lastNotificationRequest={lastNotificationRequest} changes={changes} onRange={setRange} onVisible={setVisible} />
       : <div className="chat-scroll"><div className="chat-welcome">
         <div className="welcome-brand">
           <div className="welcome-mark"><img src="./icons/app-icon.png" alt="" draggable={false} /></div>
@@ -176,9 +211,10 @@ export const ChatTranscript = memo(function ChatTranscript(props: ChatTranscript
   </TranscriptProvider>
 })
 
-function VirtualTranscript({ rows, position, lastLatestRequest, lastNotificationRequest, changes, onRange, onVisible, project, streamedText = '', agentStatus, isBusy, execution, settingsDisabled, scrollToLatestRequest = 0, notificationNavigationRequest = 0 }: ChatTranscriptProps & {
+function VirtualTranscript({ rows, position, navigationTarget, lastLatestRequest, lastNotificationRequest, changes, onRange, onVisible, project, streamedText = '', agentStatus, sandboxState, isBusy, execution, settingsDisabled, onDeleteRound, deletingRound, scrollToLatestRequest = 0, notificationNavigationRequest = 0 }: ChatTranscriptProps & {
   rows: TranscriptRow[]
   position: MutableRefObject<ReadingPosition>
+  navigationTarget: MutableRefObject<string | null>
   lastLatestRequest: MutableRefObject<number>
   lastNotificationRequest: MutableRefObject<number>
   changes: ReturnType<typeof useRoundChanges>
@@ -208,28 +244,31 @@ function VirtualTranscript({ rows, position, lastLatestRequest, lastNotification
       onDone?.()
     })
   }, [])
-  useEffect(() => () => {
+  useLayoutEffect(() => () => {
     highlight.current?.()
   }, [])
   const stopNavigation = useCallback((): void => {
+    navigationTarget.current = null
     if (!navigation.current) return
     navigation.current?.()
     navigation.current = null
     layoutAnchor.current = null
     resizingAnchor.current = null
-  }, [])
-  useEffect(() => stopNavigation, [stopNavigation])
+  }, [navigationTarget])
+  useLayoutEffect(() => stopNavigation, [stopNavigation])
   // 点击导航点后钉住的行位置：跳转后的程序滚动不再改写强调色，用户真实滚动后解除。
-  const pinnedRoundRef = useRef<number | null>(null)
+  const pinnedRoundRef = useRef<number | null>(position.current.pinnedKey ? Math.max(0, rows.findIndex(row => row.key === position.current.pinnedKey)) : null)
   const frame = useRef<number | null>(null)
   const geometry = useRef('')
   const activeStatus = isBusy ? agentStatus || '正在等待模型回复…' : undefined
+  const activeAssistantKey = isBusy && execution ? [...rows].reverse().find(row => row.kind === 'message' && row.messages[0]?.role === 'assistant' && row.index + row.messages.length > execution.firstMessage)?.key : undefined
   const rowMap = useMemo(() => new Map(rows.map(row => [row.key, row])), [rows])
   // 导航点：每条用户消息作为一轮，摘要取本轮回复的第一个助手消息。
   const rounds = useMemo<RoundDot[]>(() => rows.flatMap((row, index) => {
     const message = row.messages[0]
-    if (row.kind !== 'message' || message.role !== 'user' || !bubbleText(message.content)) return []
-    const replyRow = rows.slice(index + 1).find(item => item.messages[0]?.role === 'assistant')
+    if (row.kind !== 'message' || message.role !== 'user') return []
+    const following = rows[index + 1]
+    const replyRow = following?.messages[0]?.role === 'assistant' ? following : undefined
     const reply = replyRow ? bubbleText(replyRow.messages.map(item => item.content).join(' ')) : ''
     return [{ key: row.key, index, user: clipText(message.content, 160), reply: clipText(reply, 200) }]
   }), [rows])
@@ -337,16 +376,19 @@ function VirtualTranscript({ rows, position, lastLatestRequest, lastNotification
     const keys: string[] = []
     let anchor: { key: string; offset: number } | undefined
     let visibleRow: HTMLElement | undefined
+    let initialAnchorVisible = false
     for (const item of el.querySelectorAll<HTMLElement>('[data-transcript-key]')) {
       const rect = item.getBoundingClientRect()
       if (rect.bottom <= bounds.top || rect.top >= bounds.bottom) continue
       const key = item.dataset.transcriptKey!
+      if (key === initial.saved.key) initialAnchorVisible = true
       anchor ??= { key, offset: rect.top - bounds.top }
       visibleRow ??= item
       keys.push(...(rowMap.get(key)?.snapshots.map(roundChangesKey) ?? []))
     }
     if (!initialized.current) {
-      const ready = initial.follow ? el.scrollHeight - el.clientHeight - el.scrollTop <= 48 : anchor?.key === initial.saved.key
+      const atBottom = el.scrollHeight - el.clientHeight - el.scrollTop <= 48
+      const ready = initial.follow ? atBottom : anchor?.key === initial.saved.key || initialAnchorVisible && (atBottom || el.scrollTop <= 1)
       if (!anchor || !ready) return
       initialized.current = true
       lastScrollTop.current = el.scrollTop
@@ -361,7 +403,7 @@ function VirtualTranscript({ rows, position, lastLatestRequest, lastNotification
       setActiveRowIndex(previous => (topIndex ?? null) === previous ? previous : topIndex ?? null)
     }
     setViewportHeight(previous => previous === bounds.height ? previous : bounds.height)
-    const saved: ReadingPosition = { key: anchor?.key, offset: anchor?.offset ?? 0, follow: followLatest.current }
+    const saved: ReadingPosition = { key: anchor?.key, pinnedKey: pinnedRoundRef.current === null ? undefined : rows[pinnedRoundRef.current]?.key, offset: anchor?.offset ?? 0, follow: followLatest.current }
     position.current = saved
     measuredScrollTop.current = el.scrollTop
     // 行内的卡片也可能变高；优先锚定屏内实际文字，不能只保存整行顶部。
@@ -388,6 +430,8 @@ function VirtualTranscript({ rows, position, lastLatestRequest, lastNotification
   }, [])
   // 胶囊与通知共用到位回调，等目标挂载并稳定后再播放高亮。
   const jumpToRow = useCallback((index: number, onArrival?: () => void): void => {
+    const target = rows[index]
+    if (!target) return
     stopNavigation()
     layoutAnchor.current = null
     resizingAnchor.current = null
@@ -395,16 +439,18 @@ function VirtualTranscript({ rows, position, lastLatestRequest, lastNotification
     pinnedRoundRef.current = index
     setActiveRowIndex(index)
     const el = scroll.current
-    const key = rows[index].key
+    const key = target.key
+    navigationTarget.current = key
     if (el) navigation.current = navigateTranscript(el, key, rowPositions, () => {
       navigation.current = null
+      navigationTarget.current = null
       layoutAnchor.current = null
       resizingAnchor.current = null
       initialized.current = true
       measureRef.current()
       highlightRow(key, onArrival)
     }, window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false)
-  }, [stopNavigation, rows, rowPositions, highlightRow])
+  }, [stopNavigation, rows, rowPositions, highlightRow, navigationTarget])
   const setScroller = useCallback((el: HTMLElement | Window | null): void => {
     scroll.current = el instanceof HTMLElement ? el : null
   }, [])
@@ -542,38 +588,46 @@ function VirtualTranscript({ rows, position, lastLatestRequest, lastNotification
     onScroll={handleScroll} rangeChanged={range => { onRange(range); scheduleMeasure() }} totalListHeightChanged={handleHeightChange}
     itemContent={(_, row) => <TranscriptScope id={row.key}>
       <div className={`chat-virtual-row ${row.messages[0]?.role ?? 'assistant'}`} data-transcript-key={row.key}>
-        {row.kind === 'stream' ? <article className="chat-message assistant" aria-label="正在生成的回复" aria-live="polite"><ExecutionLabel execution={execution} startedAt={execution?.startedAt} status={activeStatus} busy />{streamedText && <ChatMarkdown project={project} content={streamedText} />}</article>
-          : <TranscriptMessage row={row} project={project} isBusy={isBusy} execution={execution} activeStatus={activeStatus} changes={changes} settingsDisabled={settingsDisabled} />}
+        {row.kind === 'stream' ? <article className="chat-message assistant" aria-label="正在生成的回复" aria-live="polite">{!activeAssistantKey && <RoundActivity messages={[]} execution={execution} startedAt={execution?.startedAt} status={activeStatus} sandboxState={sandboxState} initiallyOpen={false} busy />}{streamedText && <ChatMarkdown project={project} content={streamedText} />}</article>
+          : <TranscriptMessage row={row} project={project} isBusy={isBusy} execution={row.key === activeAssistantKey ? execution : undefined} activeStatus={activeStatus} sandboxState={sandboxState} changes={changes} settingsDisabled={settingsDisabled} onDeleteRound={onDeleteRound} deletingRound={deletingRound} />}
         {row.kind === 'pending' && !isBusy && <div className="thinking" role="status"><span className="busy-dot" />正在等待模型回复…</div>}
       </div>
     </TranscriptScope>} />
   </div>
 }
 
-const TranscriptMessage = memo(function TranscriptMessage({ row, project, isBusy, execution, activeStatus, changes, settingsDisabled }: {
+const TranscriptMessage = memo(function TranscriptMessage({ row, project, isBusy, execution, activeStatus, sandboxState, changes, settingsDisabled, onDeleteRound, deletingRound }: {
   row: TranscriptRow
   project?: string | null
   isBusy?: boolean
   execution?: ChatTranscriptProps['execution']
   activeStatus?: string
+  sandboxState?: SandboxState | null
   changes: ReturnType<typeof useRoundChanges>
   settingsDisabled?: boolean
+  onDeleteRound?(index: number): Promise<void>
+  deletingRound?: boolean
 }): React.JSX.Element {
   const message = row.messages[0]
   const busy = Boolean(isBusy && execution && row.index + row.messages.length > execution.firstMessage)
   return <article className={`chat-message ${message.role}`} data-round-index={row.roundIndex}>
-    {message.role === 'assistant' && <RoundActivity project={project} messages={row.messages} busy={busy} execution={busy ? execution : row.messages.at(-1)?.execution} startedAt={busy ? execution?.startedAt : undefined} status={busy ? activeStatus : undefined} />}
+    {message.role === 'assistant' && <RoundActivity project={project} messages={row.messages} busy={busy} execution={busy ? execution : row.messages.at(-1)?.execution} startedAt={busy ? execution?.startedAt : undefined} status={busy ? activeStatus : undefined} sandboxState={busy ? sandboxState : undefined} />}
     {Boolean(message.images?.length) && <ChatImages images={message.images!} />}
     {message.role === 'user' && message.content && <p>{bubbleText(message.content)}</p>}
-    {message.role === 'user' && bubbleText(message.content) && <CopyMessageButton text={bubbleText(message.content)} />}
+    {message.role === 'user' && <div className="message-actions">
+      {bubbleText(message.content) && <CopyMessageButton text={bubbleText(message.content)} />}
+      {onDeleteRound && row.kind === 'message' && <DeleteRoundButton disabled={isBusy || settingsDisabled || deletingRound} onDelete={() => onDeleteRound(row.index)} />}
+    </div>}
     {row.snapshots.map(round => {
       const key = roundChangesKey(round)
       return <TranscriptScope key={key} id={`snapshot:${key}`}><RoundChanges round={round} data={changes.data[key]} onRetry={() => changes.retry(round)} disabled={isBusy || settingsDisabled} /></TranscriptScope>
     })}
   </article>
 }, (previous, next) => previous.row === next.row && previous.project === next.project && previous.isBusy === next.isBusy
+  && previous.execution === next.execution
+  && previous.onDeleteRound === next.onDeleteRound && previous.deletingRound === next.deletingRound
   && previous.settingsDisabled === next.settingsDisabled
   && (!(next.isBusy && next.execution && next.row.index + next.row.messages.length > next.execution.firstMessage)
-    || previous.execution === next.execution && previous.activeStatus === next.activeStatus)
+    || previous.execution === next.execution && previous.activeStatus === next.activeStatus && previous.sandboxState === next.sandboxState)
   && previous.changes.retry === next.changes.retry
   && next.row.snapshots.every(round => previous.changes.data[roundChangesKey(round)] === next.changes.data[roundChangesKey(round)]))
