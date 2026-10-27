@@ -1,6 +1,7 @@
 import { useId } from 'react'
 import { Check, ChevronDown, ChevronRight, ChevronUp, RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import type { AgentSnapshot } from '../../../../shared/models'
 import { RoundDiffDialog } from './RoundDiffDialog'
 import { FileContextMenu } from './FileContextMenu'
@@ -40,7 +41,7 @@ export function RoundChanges({ round, disabled, data, onRetry, fileState = data?
   return <section className="round-changes" aria-label="本轮文件改动" aria-busy={Boolean(busy) || data?.status === 'loading'}>
     <header className="round-changes-header">
       <div className="round-changes-summary">
-        <button type="button" className="round-changes-title" disabled={!files} title={files ? `审查本轮 ${files.length} 个文件的改动` : undefined} onClick={() => setReview('')}>{files ? <span className="round-changes-title-text">已更改 {files.length} 个文件</span> : data?.status === 'loading' ? '正在读取文件改动…' : data?.status === 'error' ? '文件改动读取失败' : '等待加载文件改动…'}{files && <ChevronRight className="round-changes-title-hint" size={14} aria-hidden="true" />}</button>
+      {files ? <Tooltip><TooltipTrigger asChild><button type="button" className="round-changes-title" onClick={() => setReview('')}><span className="round-changes-title-text">已更改 {files.length} 个文件</span><ChevronRight className="round-changes-title-hint" size={14} aria-hidden="true" /></button></TooltipTrigger><TooltipContent>审查本轮 {files.length} 个文件的改动</TooltipContent></Tooltip> : <button type="button" className="round-changes-title" disabled>{data?.status === 'loading' ? '正在读取文件改动…' : data?.status === 'error' ? '文件改动读取失败' : '等待加载文件改动…'}</button>}
         {files && <span className="tool-approval-diffstat"><em>+{additions}</em>{deletions > 0 && <em className="is-del">-{deletions}</em>}</span>}
       </div>
       {files && <div className="round-changes-actions">{(['before', 'after'] as const).map(point => {
@@ -48,10 +49,10 @@ export function RoundChanges({ round, disabled, data, onRetry, fileState = data?
         const label = point === 'before' ? '改前' : '改后'
         return <div key={point} className="round-changes-point" role="group" aria-label={`${label}文件状态`}>
           {state === 'matches'
-            ? <span className="round-changes-current" role="status" aria-label={`${label}：文件已同步`} title={`项目文件与此轮${label}的状态一致`}><Check size={14} aria-hidden="true" />文件已同步</span>
+            ? <Tooltip><TooltipTrigger asChild><span className="round-changes-current" role="status" aria-label={`${label}：文件已同步`}><Check size={14} aria-hidden="true" />文件已同步</span></TooltipTrigger><TooltipContent>项目文件与此轮{label}的状态一致</TooltipContent></Tooltip>
             : state === 'error'
               ? <Button variant="ghost" aria-label={`重新检查${label}文件状态`} disabled={disabled || Boolean(busy)} onClick={() => window.dispatchEvent(new CustomEvent(PROJECT_FILES_RESTORED, { detail: round.project }))}>状态检查失败，重试</Button>
-              : <Button variant="ghost" aria-label={`还原到${label}`} disabled={disabled || Boolean(busy) || state === 'checking'} onClick={() => void restore(point)} title={state === 'checking' ? `正在检查${label}文件状态…` : `把整个项目还原到此轮${label}的文件状态，包括后来新增和删除的文件`}><RotateCcw size={14} aria-hidden="true" />{busy === point ? '正在还原…' : `还原到${label}`}</Button>}
+              : <Tooltip><TooltipTrigger asChild><span className="inline-flex" tabIndex={disabled || Boolean(busy) || state === 'checking' ? 0 : undefined}><Button variant="ghost" aria-label={`还原到${label}`} disabled={disabled || Boolean(busy) || state === 'checking'} onClick={() => void restore(point)}><RotateCcw size={14} aria-hidden="true" />{busy === point ? '正在还原…' : `还原到${label}`}</Button></span></TooltipTrigger><TooltipContent>{state === 'checking' ? `正在检查${label}文件状态…` : `把整个项目还原到此轮${label}的文件状态，包括后来新增和删除的文件`}</TooltipContent></Tooltip>}
         </div>
       })}</div>}
     </header>

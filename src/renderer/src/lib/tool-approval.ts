@@ -17,13 +17,7 @@ export function approvalCommand(approval: ToolApproval): string {
   return typeof approval.args.command === 'string' ? approval.args.command : JSON.stringify(approval.args, null, 2)
 }
 
-/** 沙箱恢复会同时带上原命令，两者不同时需要在审批时对照展示。 */
-export function approvalOriginalCommand(approval: ToolApproval): string | undefined {
-  const original = approval.args.originalCommand
-  return typeof original === 'string' && original && original !== approval.args.command ? original : undefined
-}
-
-/** 模式说明本身没有额外信息，命令弹窗只在真正需要扩权时展示原因。 */
+/** 省略重复的模式说明，保留额外批准原因。 */
 export function commandApprovalNotice(approval: ToolApproval): string | undefined {
   const reason = approval.reason.trim()
   return !reason || reason === DEFAULT_COMMAND_APPROVAL_REASON ? undefined : reason

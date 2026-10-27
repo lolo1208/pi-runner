@@ -47,7 +47,7 @@ src/
   renderer/src/App.tsx               # 工作台组件
   renderer/src/styles.css
   renderer/src/env.d.ts
-tests/shadow-git-manager.test.ts
+  main/models/pi-tools-permission.test.ts
 docs/
 ```
 
@@ -76,7 +76,7 @@ docs/
 
 Windows 推荐在 dev-menu 输入 `a`，或执行 `pnpm dist:win:all`。菜单 `b/c/d` 分别单独导出安装包、便携版、ZIP。三件套仅执行一次构建、目录打包和包内依赖校验；7-Zip 多线程生成 ZIP 与共享 LZMA2 载荷后，两个 NSIS 外壳并行生成，不重复压缩载荷。固定版本 7-Zip 安装包与工具文件按 SHA-256 校验并缓存在 `build-work/tools/`，工具损坏时从已校验的包重新解出。Electron 只保留简体中文与英语，asar 排除映射、类型声明和开发文档，保留许可证；调整排除规则后必须通过包内依赖加载验证。
 
-Windows 导出（含 `pack:dir`）会先使用系统 .NET Framework 的 C# 编译器重新编译 `AppContainerRunner.cs` 并生成校验清单，再校验本地沙箱运行时，避免源码修改后打包旧宿主。包内运行时仍会在打包后再次校验；编译或校验失败时停止导出。
+工具权限见[权限模式与自动审核](tool-permissions.md)。三种模式共享文件路径校验和终端执行前审核，系统临时目录可用于临时文件，网络不逐项审批。终端及子进程使用当前用户权限，开发命令放行意味着信任其脚本行为。
 
 Windows 安装包与便携版首次打包时才自动下载固定版本的 NSIS，并校验 SHA-256；工具保存在 `build-work/tools/nsis-x64-3.13.7507.353/`，后续校验并复用，缺失或损坏时重新下载。首次准备工具还会下载并校验官方 7-Zip `26.04`，借助 electron-builder 的解压工具解出完整 7-Zip，再解出 NSIS；无需系统安装这些工具，也不执行下载的安装程序。仓库仅保留 `scripts/nsis-x64-manifest.json` 的版本与校验信息，`scripts/vendor/` 旧工具目录已忽略，无需提交。macOS 开发和打包不准备这些 Windows 工具。首次下载失败时，检查 GitHub Releases 的网络访问或 `HTTP_PROXY` / `HTTPS_PROXY`（也支持小写形式），然后重新运行打包命令；缓存就绪后可离线复用。
 
@@ -94,12 +94,12 @@ Windows 安装包与便携版首次打包时才自动下载固定版本的 NSIS�
 
 ## 本地测试与临时文件
 
-本地测试代码和配置统一放在 `tests/`，Git 忽略整个目录；`pnpm test` 使用 `tests/vitest.config.ts`，测试仍以项目根目录为工作目录。测试脚本的编译产物、日志和手动探测数据放在 `tests/.artifacts/`，不要写到根目录。已有 Electron 冒烟脚本写入 `out/` 的截图与测试数据也属于忽略的构建产物。
+当前自动测试文件随被测代码放在 `src/`，`pnpm test` 使用 Vitest 默认发现规则。手动探测数据、日志和测试脚本产物放在已忽略的 `.tmp/` 或 `tests/.artifacts/`，不要写到项目根目录。Electron 冒烟脚本的截图与测试数据也属于忽略的测试产物。
 
-`node tests/appcontainer-probe.cjs` 在 `tests/.artifacts/` 下创建独立探测目录，并在结束时清理；运行时位置按脚本所在目录解析，不依赖启动命令的当前目录。历史的根目录冒烟编译产物与日志已归档到 `tests/.artifacts/legacy-smoke/`。
+文件与终端工具的权限逻辑位于 `security-paths.ts`、`pi-tools.ts`、`tool-permissions.ts` 和 `tool-review-service.ts`。审核模型通过设置、IPC 和模型配置存储传递，选项为空时跟随默认模型。
 
 ## 交付与文档维护
 
-发行脚本在压缩前使用包内 Electron 加载 `app.asar` 中的主进程依赖；加载失败会停止导出，避免发布无法启动的程序。`patches/app-builder-lib@26.15.3.patch` 兼容 pnpm 新版 JSON 配置输出，确保打包工具正确识别 hoisted 布局并收集嵌套依赖的对应版本。补丁由 `pnpm-workspace.yaml` 注册，离线安装也会自动应用；升级 electron-builder 时须重新检查补丁和 `tests/packaged-dependencies.test.ts`。
+发行脚本在压缩前使用包内 Electron 加载 `app.asar` 中的主进程依赖；加载失败会停止导出，避免发布无法启动的程序。`patches/app-builder-lib@26.15.3.patch` 兼容 pnpm 新版 JSON 配置输出，确保打包工具正确识别 hoisted 布局并收集嵌套依赖的对应版本。补丁由 `pnpm-workspace.yaml` 注册，离线安装也会自动应用；升级 electron-builder 时须重新检查补丁和包内运行时依赖加载检查。
 
 说明行为变化、验证结果和未解决问题；编译通过不等于跨平台验收通过。需求更新规格，边界/数据格式更新架构，进度更新路线，验证追加验收记录。存储、应用 ID 或目录更名须说明兼容与迁移子响。

@@ -63,7 +63,7 @@ export function ProjectSidebar({ groups, busyProjectRoots, projectNames, hasMatc
         }
         result.push({ key: `task-toggle:${root}`, root, tasks, taskToggle: true })
       }
-      if (!tasks.length && root !== UNLINKED_PROJECT_LABEL) result.push({ key: `empty:${root}`, root, tasks, empty: true })
+      if (!tasks.length) result.push({ key: `empty:${root}`, root, tasks, empty: true })
     }
     return result
   }, [groups, collapsedProjects, expandedTaskProjects])
@@ -77,8 +77,8 @@ export function ProjectSidebar({ groups, busyProjectRoots, projectNames, hasMatc
   }, [])
   return <aside className="task-sidebar">
     <nav className="task-actions" aria-label="对话操作">
-      <Button className="conversation-action-button" disabled={isBusy} title="新建对话" aria-label="新建对话" onClick={onStartTask}><MessageCirclePlus size={17} aria-hidden="true" /><span>新建对话</span></Button>
-      <Button title="搜索对话" aria-label="搜索对话" onClick={onToggleSearch} aria-expanded={searchOpen}><Search size={17} /><span>搜索对话</span></Button>
+      <Button className="conversation-action-button" disabled={isBusy} aria-label="新建对话" onClick={onStartTask}><MessageCirclePlus size={17} aria-hidden="true" /><span>新建对话</span></Button>
+      <Button aria-label="搜索对话" onClick={onToggleSearch} aria-expanded={searchOpen}><Search size={17} /><span>搜索对话</span></Button>
     </nav>
     {searchOpen && <div className="search-field">
       <Search size={15} />

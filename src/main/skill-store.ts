@@ -197,9 +197,11 @@ export class SkillStore {
       const document = await readFile(path.join(root, 'SKILL.md'), 'utf8')
       if (!document.trim()) throw new ModelError('SKILL.md 不能为空')
       const field = (key: string): string => skillField(document, key)
-      const name = field('name') || path.basename(root)
-      if (skills.some(skill => skill.name === name)) throw new ModelError(`已安装同名技能「${name}」，请选择其他技能`)
-      const id = randomUUID(), target = path.join(this.directory, id)
+      const name = (field('name') || path.basename(root)).slice(0, 200)
+      const existing = skills.find(skill => skill.name === name)
+      const id = existing?.id ?? randomUUID(), target = path.join(this.directory, id)
+      const staged = path.join(this.directory, `.install-${randomUUID()}`)
+      const backup = path.join(this.directory, `.replace-${randomUUID()}`)
       let bytes = 0, count = 0
       const copy = async (from: string, to: string): Promise<void> => {
         await mkdir(to, { recursive: true })
@@ -216,9 +218,26 @@ export class SkillStore {
         }
       }
       try {
-        await copy(root, target)
-        return await this.save([...skills, { id, name: name.slice(0, 200), description: field('description').slice(0, 2000), enabled: true }])
-      } catch (error) { await rm(target, { recursive: true, force: true }); throw error }
+        await copy(root, staged)
+        if (existing) {
+          const current = await lstat(target)
+          if (!current.isDirectory() || current.isSymbolicLink() || path.dirname(await realpath(target)) !== await realpath(this.directory)) throw new ModelError('技能目录异常，请检查技能根目录后重试')
+          await rename(target, backup)
+        }
+        try {
+          await rename(staged, target)
+          const updated = existing
+            ? skills.map(skill => skill.id === id ? { ...skill, description: field('description').slice(0, 2000) } : skill)
+            : [...skills, { id, name, description: field('description').slice(0, 2000), enabled: true }]
+          const result = await this.save(updated)
+          if (existing) await rm(backup, { recursive: true, force: true }).catch(() => {})
+          return result
+        } catch (error) {
+          await rm(target, { recursive: true, force: true })
+          if (existing) await rename(backup, target)
+          throw error
+        }
+      } finally { await rm(staged, { recursive: true, force: true }) }
     }).catch(error => { if (error instanceof ModelError) throw error; throw new ModelError('技能安装失败，请确认目录中有 SKILL.md，并检查文件访问权限后重试') })
   }
 

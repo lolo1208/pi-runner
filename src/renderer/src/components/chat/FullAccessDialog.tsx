@@ -17,7 +17,7 @@ export function FullAccessDialog({ onRespond }: { onRespond(allow: boolean): Pro
         <div><Globe size={17} /><span><strong>网络访问</strong><small>执行联网命令、访问网络资源</small></span></div>
       </div>
       <p className="full-access-note">文件修改、删除与命令执行均不再逐项确认。项目外修改不在项目快照的回滚范围内。此权限将按会话永久保存。</p>
-      <AlertDialogFooter><AlertDialogAction asChild><Button type="button" disabled={answering} onClick={event => { event.preventDefault(); respond(true) }}><ShieldAlert size={15} />开启完全访问</Button></AlertDialogAction><AlertDialogCancel asChild><Button type="button" variant="outline" disabled={answering} onClick={event => { event.preventDefault(); respond(false) }}>取消</Button></AlertDialogCancel></AlertDialogFooter>
+      <AlertDialogFooter><AlertDialogAction asChild><Button type="button" className="warning" disabled={answering} onClick={event => { event.preventDefault(); respond(true) }}><ShieldAlert size={15} />开启完全访问</Button></AlertDialogAction><AlertDialogCancel asChild><Button type="button" variant="outline" disabled={answering} onClick={event => { event.preventDefault(); respond(false) }}>取消</Button></AlertDialogCancel></AlertDialogFooter>
     </AlertDialogContent>
   </AlertDialog>
 }

@@ -2,6 +2,7 @@ import { Fragment, createElement, type ReactNode } from 'react'
 import { Lexer, type Token, type Tokens } from 'marked'
 import type { CodeReference } from '../../../../shared/code-preview'
 import { SyntaxCode } from './SyntaxCode'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 export interface PlanSection { id: string; text: string }
 export function parsePlan(content: string): { tokens: Token[]; sections: PlanSection[] } {
@@ -27,7 +28,7 @@ function renderTokens(tokens: Token[], prefix = 'plan', onCodeReference?: (refer
     switch (token.type) {
       case 'codeReference': {
         const reference = token.reference as CodeReference
-        return onCodeReference ? <button key={key} type="button" className="code-reference" onClick={() => onCodeReference(reference)} title="查看代码及前后 10 行"><code>{reference.path}</code><span>{String(token.label)}</span></button> : <Fragment key={key}>{token.raw}</Fragment>
+        return onCodeReference ? <Tooltip key={key}><TooltipTrigger asChild><button type="button" className="code-reference" onClick={() => onCodeReference(reference)}><code>{reference.path}</code><span>{String(token.label)}</span></button></TooltipTrigger><TooltipContent>查看代码及前后 10 行</TooltipContent></Tooltip> : <Fragment key={key}>{token.raw}</Fragment>
       }
       case 'space': case 'def': return null
       case 'heading': return createElement(`h${(token as Tokens.Heading).depth}`, { key, id: `${prefix}-section-${index}` }, children)

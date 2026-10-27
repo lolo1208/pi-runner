@@ -47,6 +47,13 @@ export function GeneralSettingsSection({ preferences, onPreferences, isMac, sett
     catch (e) { setError(e instanceof Error ? e.message : '默认模型保存失败，请重试。') }
     finally { savingRef.current = false; setSaving(false); onBusyChange(false) }
   }
+  const changeReviewModel = async (id: string): Promise<void> => {
+    if (savingRef.current || id === (settings?.reviewProfileId ?? 'follow-default')) return
+    savingRef.current = true; setSaving(true); onBusyChange(true); setError('')
+    try { onModelSettingsChange(unwrapModelResult(await window.piRunner.setReviewModel(id === 'follow-default' ? null : id))) }
+    catch (e) { setError(e instanceof Error ? e.message : '审核模型保存失败，请重试。') }
+    finally { savingRef.current = false; setSaving(false); onBusyChange(false) }
+  }
   return <>
     <h2>通用</h2>
     <p className="section-description">调整工作台的默认行为。</p>
@@ -77,8 +84,16 @@ export function GeneralSettingsSection({ preferences, onPreferences, isMac, sett
           <SelectContent>{usableProfiles.map(item => <SelectItem key={item.id} value={item.id} textValue={`${item.name} · ${PROVIDER_PRESETS.find(provider => provider.id === item.provider)?.label ?? item.provider}`}><span className="model-name-with-icon model-priced-name"><span aria-hidden="true"><ModelIcon model={item.model} provider={item.provider} /></span><span className="model-price-name-text">{item.name} · {PROVIDER_PRESETS.find(provider => provider.id === item.provider)?.label ?? item.provider}</span><ModelPriceTag descriptor={findModelDescriptor(settings?.providers, item)} /></span></SelectItem>)}</SelectContent>
         </Select></div>
       </div>
-      {saving && <p className="hint" role="status">正在保存默认模型…</p>}
+      {saving && <p className="hint" role="status">正在保存模型设置…</p>}
       {error && <p className="error" role="alert">{error}</p>}
+      <div className="settings-divider" />
+      <div className="setting-row">
+        <div><h3>默认审核模型</h3><p>项目自审模式下审核文件修改与命令；可跟随默认模型。模型不可用、审核超时或使用 ChatGPT 订阅时转交你确认。</p></div>
+        <div className="settings-select-control settings-model-select"><Select value={usableProfiles.some(item => item.id === settings?.reviewProfileId) ? settings!.reviewProfileId! : 'follow-default'} disabled={saving || !settings} onValueChange={id => { void changeReviewModel(id) }}>
+          <SelectTrigger aria-label="默认审核模型"><SelectValue placeholder="跟随默认模型" /></SelectTrigger>
+          <SelectContent><SelectItem value="follow-default">跟随默认模型</SelectItem>{usableProfiles.map(item => <SelectItem key={item.id} value={item.id} textValue={`${item.name} · ${PROVIDER_PRESETS.find(provider => provider.id === item.provider)?.label ?? item.provider}`}><span className="model-name-with-icon model-priced-name"><span aria-hidden="true"><ModelIcon model={item.model} provider={item.provider} /></span><span className="model-price-name-text">{item.name} · {PROVIDER_PRESETS.find(provider => provider.id === item.provider)?.label ?? item.provider}</span><ModelPriceTag descriptor={findModelDescriptor(settings?.providers, item)} /></span></SelectItem>)}</SelectContent>
+        </Select></div>
+      </div>
       <div className="settings-divider" />
       <div className="setting-row">
         <div><h3>上下文压缩阈值</h3><p>上下文占用达到该比例时，发送前自动压缩历史消息，默认 90%。</p></div>
@@ -201,15 +216,15 @@ export function AboutSettingsSection(): React.JSX.Element {
       <div className="about-feature-item">
         <div className="about-feature-icon"><ShieldCheck size={18} /></div>
         <div className="about-feature-content">
-          <h4>系统级隔离沙箱</h4>
-          <p>终端命令严格约束在受限系统沙箱中执行，拦截越界访问与高危操作。</p>
+          <h4>工具级权限审核</h4>
+          <p>文件与终端操作在工具函数内做三层审核：命令分类、自动审核、用户确认，拦截越界访问与高危操作。</p>
         </div>
       </div>
       <div className="about-feature-item">
         <div className="about-feature-icon"><Sliders size={18} /></div>
         <div className="about-feature-content">
           <h4>细粒度安全审批</h4>
-          <p>支持每次询问、项目沙箱与完全访问三种权限模式。项目沙箱自动允许项目内操作，终端命令受沙箱边界约束。</p>
+          <p>支持每次询问、项目自审与完全访问三种权限模式。项目自审自动放行安全操作，无法确定时询问你。</p>
         </div>
       </div>
       <div className="about-feature-item">

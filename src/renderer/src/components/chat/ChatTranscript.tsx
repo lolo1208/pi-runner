@@ -4,7 +4,6 @@ import { Virtuoso, type ListRange, type VirtuosoHandle } from 'react-virtuoso'
 import { Button } from '@/components/ui/button'
 import { Settings2 } from 'lucide-react'
 import type { AgentSnapshot, ChatMessage, ProviderId } from '../../../../shared/models'
-import type { SandboxState } from '../../../../shared/sandbox'
 import { ChatImages } from './ChatImages'
 import { CopyMessageButton } from './CopyMessageButton'
 import { DeleteRoundButton } from './DeleteRoundButton'
@@ -63,7 +62,6 @@ interface ChatTranscriptProps {
   pendingMessage: ChatMessage | null
   streamedText?: string
   agentStatus?: string
-  sandboxState?: SandboxState | null
   isBusy?: boolean
   execution?: { model: string; provider?: ProviderId; startedAt: number; firstMessage: number }
   hasProfile: boolean
@@ -211,7 +209,7 @@ export const ChatTranscript = memo(function ChatTranscript(props: ChatTranscript
   </TranscriptProvider>
 })
 
-function VirtualTranscript({ rows, position, navigationTarget, lastLatestRequest, lastNotificationRequest, changes, onRange, onVisible, project, streamedText = '', agentStatus, sandboxState, isBusy, execution, settingsDisabled, onDeleteRound, deletingRound, scrollToLatestRequest = 0, notificationNavigationRequest = 0 }: ChatTranscriptProps & {
+function VirtualTranscript({ rows, position, navigationTarget, lastLatestRequest, lastNotificationRequest, changes, onRange, onVisible, project, streamedText = '', agentStatus, isBusy, execution, settingsDisabled, onDeleteRound, deletingRound, scrollToLatestRequest = 0, notificationNavigationRequest = 0 }: ChatTranscriptProps & {
   rows: TranscriptRow[]
   position: MutableRefObject<ReadingPosition>
   navigationTarget: MutableRefObject<string | null>
@@ -588,21 +586,20 @@ function VirtualTranscript({ rows, position, navigationTarget, lastLatestRequest
     onScroll={handleScroll} rangeChanged={range => { onRange(range); scheduleMeasure() }} totalListHeightChanged={handleHeightChange}
     itemContent={(_, row) => <TranscriptScope id={row.key}>
       <div className={`chat-virtual-row ${row.messages[0]?.role ?? 'assistant'}`} data-transcript-key={row.key}>
-        {row.kind === 'stream' ? <article className="chat-message assistant" aria-label="正在生成的回复" aria-live="polite">{!activeAssistantKey && <RoundActivity messages={[]} execution={execution} startedAt={execution?.startedAt} status={activeStatus} sandboxState={sandboxState} initiallyOpen={false} busy />}{streamedText && <ChatMarkdown project={project} content={streamedText} />}</article>
-          : <TranscriptMessage row={row} project={project} isBusy={isBusy} execution={row.key === activeAssistantKey ? execution : undefined} activeStatus={activeStatus} sandboxState={sandboxState} changes={changes} settingsDisabled={settingsDisabled} onDeleteRound={onDeleteRound} deletingRound={deletingRound} />}
+        {row.kind === 'stream' ? <article className="chat-message assistant" aria-label="正在生成的回复" aria-live="polite">{!activeAssistantKey && <RoundActivity messages={[]} execution={execution} startedAt={execution?.startedAt} status={activeStatus} initiallyOpen={false} busy />}{streamedText && <ChatMarkdown project={project} content={streamedText} />}</article>
+          : <TranscriptMessage row={row} project={project} isBusy={isBusy} execution={row.key === activeAssistantKey ? execution : undefined} activeStatus={activeStatus} changes={changes} settingsDisabled={settingsDisabled} onDeleteRound={onDeleteRound} deletingRound={deletingRound} />}
         {row.kind === 'pending' && !isBusy && <div className="thinking" role="status"><span className="busy-dot" />正在等待模型回复…</div>}
       </div>
     </TranscriptScope>} />
   </div>
 }
 
-const TranscriptMessage = memo(function TranscriptMessage({ row, project, isBusy, execution, activeStatus, sandboxState, changes, settingsDisabled, onDeleteRound, deletingRound }: {
+const TranscriptMessage = memo(function TranscriptMessage({ row, project, isBusy, execution, activeStatus, changes, settingsDisabled, onDeleteRound, deletingRound }: {
   row: TranscriptRow
   project?: string | null
   isBusy?: boolean
   execution?: ChatTranscriptProps['execution']
   activeStatus?: string
-  sandboxState?: SandboxState | null
   changes: ReturnType<typeof useRoundChanges>
   settingsDisabled?: boolean
   onDeleteRound?(index: number): Promise<void>
@@ -611,7 +608,7 @@ const TranscriptMessage = memo(function TranscriptMessage({ row, project, isBusy
   const message = row.messages[0]
   const busy = Boolean(isBusy && execution && row.index + row.messages.length > execution.firstMessage)
   return <article className={`chat-message ${message.role}`} data-round-index={row.roundIndex}>
-    {message.role === 'assistant' && <RoundActivity project={project} messages={row.messages} busy={busy} execution={busy ? execution : row.messages.at(-1)?.execution} startedAt={busy ? execution?.startedAt : undefined} status={busy ? activeStatus : undefined} sandboxState={busy ? sandboxState : undefined} />}
+    {message.role === 'assistant' && <RoundActivity project={project} messages={row.messages} busy={busy} execution={busy ? execution : row.messages.at(-1)?.execution} startedAt={busy ? execution?.startedAt : undefined} status={busy ? activeStatus : undefined} />}
     {Boolean(message.images?.length) && <ChatImages images={message.images!} />}
     {message.role === 'user' && message.content && <p>{bubbleText(message.content)}</p>}
     {message.role === 'user' && <div className="message-actions">
@@ -628,6 +625,6 @@ const TranscriptMessage = memo(function TranscriptMessage({ row, project, isBusy
   && previous.onDeleteRound === next.onDeleteRound && previous.deletingRound === next.deletingRound
   && previous.settingsDisabled === next.settingsDisabled
   && (!(next.isBusy && next.execution && next.row.index + next.row.messages.length > next.execution.firstMessage)
-    || previous.execution === next.execution && previous.activeStatus === next.activeStatus && previous.sandboxState === next.sandboxState)
+    || previous.execution === next.execution && previous.activeStatus === next.activeStatus)
   && previous.changes.retry === next.changes.retry
   && next.row.snapshots.every(round => previous.changes.data[roundChangesKey(round)] === next.changes.data[roundChangesKey(round)]))

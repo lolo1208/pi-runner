@@ -16,10 +16,6 @@ import { ToolApprovalDiffDialog } from './components/chat/ToolApprovalDiffDialog
 import { CommandApprovalDialog } from './components/chat/CommandApprovalDialog'
 import { isCommandApproval } from './lib/tool-approval'
 import { FullAccessDialog } from './components/chat/FullAccessDialog'
-import { SandboxSetupDialog } from './components/chat/SandboxSetupDialog'
-import { SandboxStatus } from './components/chat/SandboxStatus'
-import { mergeSandboxState, sameSandboxProject } from './lib/sandbox-state'
-import type { SandboxState } from '../../shared/sandbox'
 import { PlanDialog } from './components/chat/PlanDialog'
 import { Button } from './components/ui/button'
 import type { IntentMode, PlanInteraction } from '../../shared/models'
@@ -87,11 +83,6 @@ function ModelChat({ notificationNavigationRequest = 0, snapshots, onSnapshotsCh
   waitingCallback.current = onWaitingForInputChange
   useEffect(() => { waitingCallback.current?.(waitingForInput, waitingReason) }, [waitingForInput])
   useEffect(() => () => { waitingCallback.current?.(false) }, [])
-  const [sandboxState, setSandboxState] = useState<SandboxState | null>(null)
-  const currentSandboxState = project && sandboxState && sameSandboxProject(sandboxState.project, project) ? sandboxState : null
-  const [sandboxOpen, setSandboxOpen] = useState(false)
-  const [sandboxRefresh, setSandboxRefresh] = useState(0)
-  const [pendingFullAccess, setPendingFullAccess] = useState(false)
   const [selectedModelId, setSelectedModelId] = useState<string | null>(initialModelId ?? defaultProfile?.id ?? null)
   /**
    * 默认模型仅作为初始值：后续默认设置变化不影响已打开的会话。
@@ -189,42 +180,6 @@ function ModelChat({ notificationNavigationRequest = 0, snapshots, onSnapshotsCh
       onModelSettingsChange?.(settings)
     } catch (e) { setError(e instanceof Error ? e.message : '推理强度保存失败，请重试') }
   }, [onModelSettingsChange])
-  useEffect(() => {
-    if (!pendingFullAccess || requestId) return
-    setPendingFullAccess(false); setSandboxOpen(false)
-    void changePermission('full')
-  }, [pendingFullAccess, requestId, changePermission])
-  useEffect(() => {
-    if (!project || !window.piRunner.getSandboxStatus) { setSandboxState(null); return }
-    if (!projectReady || !projectCurrent || !active) return
-    if (permissionMode !== 'auto' && !sandboxOpen) return
-    let current = true
-    let timer: ReturnType<typeof setTimeout> | undefined, watchdog: ReturnType<typeof setTimeout> | undefined
-    const failed = (e: unknown): void => {
-      // 空闲时的状态查询不代表执行失败；任务开始或手动打开详情后会重新查询。
-      if (!current || (!requestId && !sandboxOpen)) return
-      const message = e instanceof Error ? e.message : '无法查询安全执行状态，请重试'
-      if (permissionMode === 'auto') setSandboxState({ project, phase: 'failed', operationId: '', steps: [], message, updatedAt: Date.now() })
-      else setError(message)
-    }
-    const read = (): void => {
-      let finished = false
-      watchdog = setTimeout(() => { finished = true; failed(new Error('安全执行状态查询超时，请手动检查当前项目和后台服务')) }, 30000)
-      // 浏览会话只查询状态；隔离检查由实际终端调用或用户手动操作触发。
-      void window.piRunner.getSandboxStatus().then(unwrapModelResult).then(state => {
-        if (!current || finished) return
-        const matching = sameSandboxProject(state.project, project)
-        if (matching) setSandboxState(previous => mergeSandboxState(previous, state))
-        if (matching && state.phase === 'running') timer = setTimeout(read, 2000)
-      }).catch(e => { if (!finished) failed(e) }).finally(() => { if (watchdog) clearTimeout(watchdog) })
-    }
-    read()
-    return () => { current = false; if (timer) clearTimeout(timer); if (watchdog) clearTimeout(watchdog) }
-  }, [project, permissionMode, active, projectReady, projectCurrent, requestId, sandboxRefresh, sandboxOpen])
-  useEffect(() => window.piRunner.onSandboxState?.(state => {
-    if (!project || !sameSandboxProject(state.project, project)) return
-    setSandboxState(previous => mergeSandboxState(previous, state))
-  }), [project, active, permissionMode])
   const getApprovalPreview = useCallback(async (approval: ToolApproval) => {
     if (!requestId || !conversationId) throw new Error('审批请求已失效')
     return unwrapModelResult(await window.piRunner.getToolApprovalPreview(requestId, conversationId, approval.id))
@@ -232,7 +187,7 @@ function ModelChat({ notificationNavigationRequest = 0, snapshots, onSnapshotsCh
   /** 回应审批；勾选“重复不再提醒”时把本次决定延续到本对话后续审批。 */
   const respondApproval = async (requestId: string, approval: ToolApproval, allow: boolean): Promise<void> => {
     if (!conversationId) throw new Error('审批请求已失效')
-    if (approvalRepeat) { autoDecision.current = allow; setAutoApproval(allow) }
+    if (approvalRepeat && !approval.mustConfirm) { autoDecision.current = allow; setAutoApproval(allow) }
     unwrapModelResult(await window.piRunner.respondToolApproval(requestId, conversationId, approval.id, allow))
   }
   const [pending, setPending] = useState<{ message: ChatMessage; firstMessage: number } | null>(null)
@@ -281,7 +236,7 @@ function ModelChat({ notificationNavigationRequest = 0, snapshots, onSnapshotsCh
     if (event.type === 'approval' && event.approval) {
       const approval = event.approval
       // 已勾选“重复不再提醒”时不再打扰，直接按同一决定回应。
-      if (autoDecision.current !== null && conversationId) {
+      if (autoDecision.current !== null && conversationId && !approval.mustConfirm) {
         void window.piRunner.respondToolApproval(event.requestId, conversationId, approval.id, autoDecision.current).then(unwrapModelResult).catch(e => setError(e instanceof Error ? e.message : '审批回应失败，请重试'))
         return
       }
@@ -428,7 +383,7 @@ function ModelChat({ notificationNavigationRequest = 0, snapshots, onSnapshotsCh
   }
   // 等历史更新后再执行下一条，确保下一轮使用完整上下文。编辑时暂缓队列执行。
   useEffect(() => {
-    if (deletionRunning.current || requestId || busyRef.current || editingId || queuePaused || permissionChanging || settingsDisabled || !projectReady || !historyReady || pendingFullAccess || !profile || !queue.length) return
+    if (deletionRunning.current || requestId || busyRef.current || editingId || queuePaused || permissionChanging || settingsDisabled || !projectReady || !historyReady || !profile || !queue.length) return
     void send(queue[0])
   })
   const deleteRound = useCallback(async (index: number): Promise<void> => {
@@ -453,15 +408,6 @@ function ModelChat({ notificationNavigationRequest = 0, snapshots, onSnapshotsCh
     } finally { deletionRunning.current = false; setDeletingRound(false); onBusyChange(false, true) }
   }, [messages, conversationId, historyReady, snapshots, onMessagesChange, onCompactionChange, onSnapshotsChange, onBusyChange])
   return <section className="model-chat" aria-label="模型对话">
-    {active && sandboxState && <SandboxSetupDialog open={sandboxOpen} state={sandboxState} taskRunning={Boolean(requestId)} onClose={() => setSandboxOpen(false)} onRun={async action => {
-      const state = unwrapModelResult(await window.piRunner.startSandbox(action))
-      setSandboxState(current => mergeSandboxState(current, state))
-      setSandboxRefresh(value => value + 1)
-    }} onStop={async () => { unwrapModelResult(await window.piRunner.stopSandbox()) }} onFullAccess={() => {
-      if (!requestId) { setSandboxOpen(false); void changePermission('full'); return }
-      setPendingFullAccess(true)
-      void stopRequest().catch(e => { setPendingFullAccess(false); setError(e instanceof Error ? e.message : '停止任务失败，请重试') })
-    }} />}
     {active && interaction && interactionOpen && <PlanDialog key={interaction.id} interaction={interaction} onDismiss={() => setInteractionOpen(false)} onCancel={() => {
       void stopRequest().catch(() => setError('取消计划失败，请重试'))
     }} onRespond={async response => {
@@ -476,7 +422,7 @@ function ModelChat({ notificationNavigationRequest = 0, snapshots, onSnapshotsCh
       try { unwrapModelResult(await window.piRunner.respondToolApproval(fullConfirmation.requestId, conversationId, fullConfirmation.approval.id, allow)) }
       catch (e) { setError(e instanceof Error ? e.message : '权限确认失败，请重试') }
     }} />}
-    <ChatTranscript onDeleteRound={deleteRound} deletingRound={deletingRound || !historyReady} notificationNavigationRequest={historyReady ? notificationNavigationRequest : 0} project={project} active={active} scrollToLatestRequest={scrollToLatestRequest} snapshots={snapshots} messages={messages} pendingMessage={pending?.message ?? null} streamedText={streamedText} agentStatus={stopping ? '正在停止任务…' : agentStatus} sandboxState={permissionMode === 'auto' && !stopping ? currentSandboxState : null} isBusy={Boolean(requestId)} execution={execution} hasProfile={Boolean(profile)} settingsDisabled={settingsDisabled} onOpenSettings={onOpenSettings} />
+    <ChatTranscript onDeleteRound={deleteRound} deletingRound={deletingRound || !historyReady} notificationNavigationRequest={historyReady ? notificationNavigationRequest : 0} project={project} active={active} scrollToLatestRequest={scrollToLatestRequest} snapshots={snapshots} messages={messages} pendingMessage={pending?.message ?? null} streamedText={streamedText} agentStatus={stopping ? '正在停止任务…' : agentStatus} isBusy={Boolean(requestId)} execution={execution} hasProfile={Boolean(profile)} settingsDisabled={settingsDisabled} onOpenSettings={onOpenSettings} />
     <div className="composer-wrap" hidden={!active}>
       {requestId && !interaction && planProgress && <div className="plan-waiting plan-progress" role="status"><LoaderCircle size={18} className="plan-progress-spinner" aria-hidden="true" /><span>{planProgress}</span></div>}
       {interaction && <div className="plan-waiting"><span>{interaction.kind === 'questions' ? '计划正在等待你的回答' : '计划已准备好，等待你的批准'}</span><Button variant="outline" onClick={() => setInteractionOpen(true)}>{interaction.kind === 'questions' ? '回答问题' : '审阅计划'}</Button></div>}
@@ -494,7 +440,6 @@ function ModelChat({ notificationNavigationRequest = 0, snapshots, onSnapshotsCh
       <ToolApprovalDiffDialog open={active && approvalDetailsOpen} onOpenChange={setApprovalDetailsOpen} approvals={approvals} getPreview={getApprovalPreview} />
       {active && error && <p className="error" role="alert">{error}</p>}
       {active && notice && <p className="request-notice" role="status">{notice}</p>}
-      {active && project && <SandboxStatus key={project} visible={permissionMode === 'auto'} taskRunning={Boolean(requestId)} state={currentSandboxState} onInspect={() => setSandboxOpen(true)} />}
       <ChatComposer stopping={stopping} active={active} queue={queue} editingId={editingId} queuePaused={queuePaused} onResumeQueue={() => setQueuePaused(false)} onCancelEdit={restoreDraft} onEditQueued={editQueued} onDeleteQueued={deleteQueued} onReorderQueued={reorderQueued} intentMode={intentMode} onIntentChange={changeIntent} permissionMode={permissionMode} onPermissionChange={conversationId ? changePermission : undefined} profile={profile} profiles={availableProfiles} providers={providers} onSelectModel={id => { setSelectedModelId(id); onModelChange?.(id) }} onThinkingChange={changeThinking} prompt={prompt} images={images} skillIds={skillIds} onSkillsChange={setSkillIds} onImagesChange={setImages} isBusy={Boolean(requestId)} hasMessages={messages.length > 0} settingsDisabled={settingsDisabled || permissionChanging || deletingRound || !projectReady} sendWithCtrlEnter={sendWithCtrlEnter} onPromptChange={setPrompt} onOpenSettings={onOpenSettings} onSend={submit} onCancel={() => { void stopRequest().catch(() => setError('取消请求失败，请重试')) }} />
       {active && <ComposerStatus outputSpeed={outputSpeed} latestReply={matchingStatistics?.reply} subscriptionUsage={subscriptionUsage} openrouterUsage={openrouterUsage} compressionThreshold={compressionThreshold} project={project} profile={profile} contextLimit={providers?.find(item => item.provider === profile?.provider && item.baseUrl === profile?.baseUrl)?.models.find(item => item.id === profile?.model)?.maxContextTokens} messages={statusMessages} prompt={prompt} instruction={customPrompt} attachments={images} usage={contextUsage} rateLimits={matchingStatistics?.reply.rateLimits} onOpenProject={() => {
         if (project) void window.piRunner.openProjectDirectory(project).catch(() => setError('无法打开项目目录，请检查目录是否存在后重试'))

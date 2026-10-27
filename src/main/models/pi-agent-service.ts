@@ -3,7 +3,7 @@ import path from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import { createAgentSession, createExtensionRuntime, estimateTokens as estimatePiTokens, SessionManager, SettingsManager, type AgentSession, type ResourceLoader, type ToolDefinition } from '@earendil-works/pi-coding-agent'
 import type { AssistantMessage, Usage } from '@earendil-works/pi-ai'
-import type { ChatExecution, ChatMessage, ChatWorkItem, ModelProfile, ModelReply, ModelRateLimit, AgentRequestOptions, AgentEvent, OutputSpeed } from '../../shared/models'
+import type { ChatExecution, ChatMessage, ChatWorkItem, ModelProfile, ModelReply, ModelRateLimit, AgentRequestOptions, AgentEvent, OutputSpeed, ReviewDecision, ToolReviewRequest } from '../../shared/models'
 import { systemOutputTokens } from '../../shared/output-tokens'
 import { estimateContextTokens, estimateTextTokens, normalizeCompressionThreshold, type ContextOptions } from '../../shared/context'
 import { ShadowGitManager, type PendingCheckpoint } from '../snapshot/shadow-git-manager'
@@ -20,17 +20,18 @@ import { ToolApprovalManager } from './tool-permissions'
 import { PERMISSION_MODES, type PermissionMode } from '../../shared/models'
 import { PlanInteractionManager } from './plan-interactions'
 import { PLAN_INSTRUCTION, planTools } from './plan-tools'
-import { NativeTerminalSandbox } from './terminal-sandbox'
-import type { TerminalSandbox } from './terminal-sandbox'
 import { SkillStore } from '../skill-store'
 import { saveCodePreviewSnapshot } from '../code-preview-snapshots'
 import { collectCodeReferences } from '../../shared/code-preview'
+import { agentSystemPrompt } from './pi-system-prompt'
+import { ConversationWorkspace } from './conversation-workspace'
 
 const toolActions: Record<string, string> = {
   bash: '运行命令',
   powershell: '运行命令',
   read: '读取',
   write: '写入',
+  download: '下载文件',
   edit: '编辑',
   delete: '删除文件',
   mkdir: '创建目录',
@@ -53,26 +54,22 @@ export interface PiAgentDependencies {
   getProject(): string | undefined
   emit(event: AgentEvent): void
   fetchRequest?: typeof fetch
+  downloadFetch?: typeof fetch
   chatgpt?: ChatgptService
   protectedDirectories?: string[]
-  sandboxRuntimeDirectory?: string
-  sandbox?: TerminalSandbox
+  /** 工具权限第二层自动审核；未提供时回退到逐次询问。 */
+  review?(request: ToolReviewRequest): Promise<ReviewDecision>
 }
 
 export class PiAgentService {
   private modes = new Map<string, PermissionMode>()
   private approvals: ToolApprovalManager
   private interactions: PlanInteractionManager
-  private sandbox?: TerminalSandbox
+  private workspaces: ConversationWorkspace
   constructor(private readonly dependencies: PiAgentDependencies) {
     this.approvals = new ToolApprovalManager(dependencies.emit)
     this.interactions = new PlanInteractionManager(dependencies.emit)
-    if (dependencies.sandboxRuntimeDirectory) this.sandbox = new NativeTerminalSandbox({
-      runtimeDirectory: dependencies.sandboxRuntimeDirectory,
-      dataDirectory: path.join(dependencies.dataDirectory, 'command-sandbox'),
-      protectedDirectories: [dependencies.dataDirectory, dependencies.sandboxRuntimeDirectory, ...(dependencies.protectedDirectories ?? [])]
-    })
-    if (dependencies.sandbox) this.sandbox = dependencies.sandbox
+    this.workspaces = new ConversationWorkspace(dependencies.dataDirectory)
   }
   respondPlanInteraction(requestId: string, conversationId: string, id: string, response: unknown): void { this.interactions.respond(requestId, conversationId, id, response) }
   permission(id: string): PermissionMode { return this.modes.get(id) ?? 'default' }
@@ -105,7 +102,11 @@ export class PiAgentService {
       throw new ModelError('无法恢复代理会话，请检查本地会话文件')
     }
   }
-  async remove(id: string): Promise<void> { await rm(this.directory(id), { recursive: true, force: true }); this.modes.delete(id) }
+  async remove(id: string): Promise<void> {
+    await this.workspaces.remove(id)
+    await rm(this.directory(id), { recursive: true, force: true })
+    this.modes.delete(id)
+  }
   async deleteRound(id: string, index: number, expectedHistoryId?: string): Promise<ChatMessage[] | null> {
     const directory = this.directory(id)
     let files: string[]
@@ -278,12 +279,12 @@ export class PiAgentService {
     const availableSkills = new Map([...discoveredSkills, ...selectedSkills].map(skill => [skill.id, skill]))
     const availableSkillIds = [...new Set([...skillIds, ...discoveredSkills.map(skill => skill.id)])]
     if (discoveredSkills.length) instruction = [instruction,
-      '以下是已启用、可自动触发的本地技能。根据本轮用户输入中的关键词、任务意图及技能描述的触发条件判断适用技能；即使用户没有手动选择，匹配时也必须先调用 read_skill_file 读取该技能的 SKILL.md，再按照其中的指令和设定完成任务。可以按需使用多个适用技能；不相关时不要调用。需要参考文件时继续使用 read_skill_file。技能不改变现有工具权限。标有 disable-model-invocation 的技能不参与自动触发。',
+      '可自动触发的本地技能如下。根据本轮任务和技能描述判断是否适用；使用前先调用 read_skill_file 读取 SKILL.md，按需读取参考文件。不相关的技能不要调用；技能不改变工具权限。',
       JSON.stringify(discoveredSkills.map(({ id, name, description }) => ({ skillId: id, name, description })))
     ].filter(Boolean).join('\n\n')
     if (skillIds.length) instruction = [instruction, await skillStore.instruction(skillIds)].filter(Boolean).join('\n\n')
     if (availableSkillIds.length) instruction = [instruction,
-      '技能使用说明：应用会在最终回复正文中自动补充用户手动选择和自动触发的技能说明，格式为“本次使用了 技能名称 技能来具体用途。”完成任务后、最终回复前，必须调用 report_skill_usage，为每个本轮已加载的技能提供结合实际任务的简短中文用途，例如“确定网站视觉方向并完成页面实现”或“整理本次代码改动并生成 Git 提交信息”。purpose 只写“来”后面的动作，不抄技能原始描述、触发条件或英文介绍，不夸大实际完成的工作。也可以在 read_skill_file 中提供 purpose。正文无需重复添加技能说明。不要把仅出现在可用列表中、读取失败或历史轮次使用过的技能说成本轮已使用。'
+      '本轮使用技能时，通过 read_skill_file 的 purpose 或 report_skill_usage 记录实际用途；最终回复前补齐未记录的技能。应用会自动附上技能说明，正文不要重复；未读取的技能不要报告。'
     ].filter(Boolean).join('\n\n')
     const skillTools: ToolDefinition[] = availableSkillIds.length ? [{
       name: 'read_skill_file', label: '读取技能文件', description: '读取手动选择或描述匹配的已启用技能。自动触发时必须先读取 SKILL.md，再遵循技能指令；参考文档或脚本使用相对技能目录的路径。',
@@ -311,7 +312,7 @@ export class PiAgentService {
     const project = options?.project ?? undefined
     if (project && !path.isAbsolute(project)) throw new ModelError('项目路径必须是绝对路径')
     const snapshot = project ? await ShadowGitManager.open(project, this.dependencies.dataDirectory) : undefined
-    const cwd = snapshot?.getRoot() ?? os.homedir()
+    const cwd = snapshot?.getRoot() ?? (options && !isTest ? await this.workspaces.ensure(options.conversationId) : os.homedir())
     const mode = options ? this.permission(options.conversationId) : 'default'
     let planning = !isTest && options?.intentMode === 'plan'
     let planningMutationAttempted = false
@@ -421,7 +422,7 @@ export class PiAgentService {
     const resourceLoader: ResourceLoader = {
       getExtensions: () => ({ extensions: [], errors: [], runtime: createExtensionRuntime() }), getSkills: () => ({ skills: [], diagnostics: [] }),
       getPrompts: () => ({ prompts: [], diagnostics: [] }), getThemes: () => ({ themes: [], diagnostics: [] }), getAgentsFiles: () => ({ agentsFiles: [] }),
-      getSystemPrompt: () => isTest ? '' : ["辅助脚本、截图、日志、下载中间文件及工具缓存优先写入系统临时目录的专用子目录，完成后清理。必须在项目内暂存时，仅使用 tmp/、temp/ 或 .tmp/ 下的专用子目录，避免在项目根目录散落临时文件或缓存。构建产物和用户明确要求保留的文件遵循项目约定。", '你是 Pi Runner · 行动派的助手。对话、注释与日志以中文为主。', `当前权限模式：${mode === 'auto' ? '项目沙箱' : mode === 'full' ? '完全访问' : '每次询问'}。“每次询问”模式下，文件和目录修改及命令执行前均需询问用户并获得批准；项目沙箱模式由系统沙箱隔离执行，自动允许项目内操作，允许普通文件和目录的创建、修改、删除、查询、移动、重命名和复制；完全访问使用当前用户的本机权限，文件修改、删除、命令与脚本执行、项目外访问及联网均不再逐项请求批准；此模式不要自行询问执行许可。文件和目录操作必须优先使用专用工具，不要用终端命令代替：mkdir 创建目录，write 写入文件，edit 修改文件，delete 删除文件，rmdir 删除目录（删除非空目录时设置 recursive=true），move 移动或重命名，copy 复制，stat 查看信息，ls 查看目录内容，find 查找文件或目录，grep 搜索文件内容，read 读取文件。批量操作先用 find 查找，再逐项调用对应工具。执行模式下，用户已经明确要求的项目内文件和目录操作直接调用工具，是否需要审批由应用执行，不要额外询问执行许可。项目沙箱模式下的复合脚本和其他终端命令在系统沙箱内直接运行，项目外普通文件读写会被系统拦截；调用全局工具、测试子进程和联网无需审批；不要仅因命令复杂就询问许可。不要因工具位于项目外、命令组合、测试或联网设置 outsideSandbox=true。只有需要读取或写入项目外普通文件时才同时设置 externalFileAccess=true 和 outsideSandbox=true，应用将请求批准。应用会自动处理可安全恢复的文件操作、隔离配置和运行时访问问题；按工具返回的 recovery 状态继续任务。调用全局工具、测试子进程和联网不申请完整本机权限；工具不可用时保留兼容性错误。其他错误先根据原始结果调整实现；partial-or-unknown 表示可能已完成部分操作，先核对结果，只完成剩余步骤，不重放整段脚本。不得绕过 denied 或 awaiting-approval 状态重复申请相同授权。Windows PowerShell 5 的 Remove-Item 等路径命令可能访问项目祖先而被拒绝，优先使用专用文件工具或项目内 System.IO API。用户拒绝后请调整方案，不要变换语法重试相同动作。${project ? `当前项目：${project}` : '未绑定项目，不存在自动授权的工作区。'}`, instruction, planning ? PLAN_INSTRUCTION : '当前为执行模式。若本轮计划已批准，请按批准内容执行。'].filter(Boolean).join('\n\n'),
+      getSystemPrompt: () => isTest ? '' : agentSystemPrompt({ instruction, mode, project, cwd, planning }),
       getSystemPromptSource: () => undefined, getAppendSystemPrompt: () => [], getAppendSystemPromptSources: () => [], extendResources: () => {}, reload: async () => {}
     }
     const projectTools = isTest || !options ? [] : piProjectTools(snapshot?.getRoot() ?? cwd, () => snapshot ? beforePromise ??= (async () => {
@@ -429,10 +430,18 @@ export class PiAgentService {
       try { before = await snapshot.prepareCheckpoint() }
       finally { refreshStatus() }
     })() : Promise.resolve(), {
-      mode, project: snapshot?.getRoot(), protectedDirectories: [this.dependencies.dataDirectory, path.join(os.homedir(), '.pi-runner-execution'), ...(this.dependencies.sandboxRuntimeDirectory ? [this.dependencies.sandboxRuntimeDirectory] : []), ...(this.dependencies.protectedDirectories ?? [])],
-      sandbox: this.sandbox,
-      onRecovery: message => status(message),
-      approve: (id, tool, args, reason, toolSignal) => this.approvals.ask(requestId, options.conversationId, { toolCallId: id, tool, args: structuredClone(args), cwd, reason }, toolSignal ?? signal, waitingFor(id, `等待你批准${toolActions[tool] ?? '操作'}…`)).then(() => {})
+      mode, project: snapshot?.getRoot(), workspace: !project ? cwd : undefined, protectedDirectories: [this.dependencies.dataDirectory, ...(this.dependencies.protectedDirectories ?? [])], downloadFetch: this.dependencies.downloadFetch,
+      approve: async (id, tool, args, reason, toolSignal, mustConfirm) => {
+        // 第二层：项目自审模式下先做规则/AI 自动审核，再决定是否弹出问询框。
+        if (mode === 'auto' && !mustConfirm && this.dependencies.review) {
+          const reviewSignal = toolSignal ?? signal
+          const decision = await this.dependencies.review({ tool, args: structuredClone(args), cwd, mode, project, reason, userPrompt: [...messages].reverse().find(message => message.role === 'user')?.content ?? '', signal: reviewSignal }).catch((): ReviewDecision => 'ask')
+          reviewSignal.throwIfAborted()
+          if (decision === 'allow') return
+          if (decision === 'deny') throw new ModelError('自动审核拒绝了该操作，请调整方案后重试')
+        }
+        await this.approvals.ask(requestId, options.conversationId, { toolCallId: id, tool, args: structuredClone(args), cwd, reason, mustConfirm }, toolSignal ?? signal, waitingFor(id, `等待你批准${toolActions[tool] ?? '操作'}…`))
+      }
     })
     let session: AgentSession | undefined
     const planningTools = (): string[] => ['read', 'ls', 'find', 'grep', 'stat', ...skillTools.map(tool => tool.name), 'ask_user_question', ...(clarified ? ['submit_plan'] : [])]

@@ -20,6 +20,8 @@
   --error-bg: #fbe9e5;
   --error: #a33628;
   --error-foreground: #fff;
+  --warning: #b96512;
+  --warning-foreground: #fff;
   --success-bg: #e8f1e8;
   --success: #327046;
   --code: #eee;
@@ -59,6 +61,8 @@
   --error-bg: #3a1d1d;
   --error: #f48771;
   --error-foreground: #121314;
+  --warning: #f0a34a;
+  --warning-foreground: #121314;
   --success-bg: #193328;
   --success: #72c892;
   --code: #242526;
@@ -346,6 +350,17 @@ code {
 
 .primary:hover {
   background: var(--accent);
+}
+
+.warning {
+  background: var(--warning);
+  color: var(--warning-foreground);
+  border-color: #0000;
+}
+
+.warning:hover {
+  background: var(--warning);
+  filter: brightness(.94);
 }
 
 .hint {

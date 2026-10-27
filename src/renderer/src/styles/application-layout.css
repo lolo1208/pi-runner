@@ -192,7 +192,7 @@
 .project-heading-row {
   position: relative;
   align-items: center;
-  min-height: calc(30rem / 14);
+  min-height: calc(36rem / 14);
   margin-bottom: 2px;
   display: flex;
   border-radius: 16px;
@@ -216,8 +216,8 @@
   gap: 8px;
   min-width: 0;
   padding: 5px 10px;
-  min-height: calc(30rem / 14);
-  height: calc(30rem / 14);
+  min-height: calc(36rem / 14);
+  height: calc(36rem / 14);
   font-size: calc(13rem / 14);
   font-weight: 400;
   display: flex;
@@ -245,8 +245,8 @@
 .project-heading-row .project-create-button,
 .project-heading-row .project-edit-button,
 .project-heading-row .project-remove-button {
-  position: absolute;
-  right: 0;
+  position: relative;
+  right: auto;
   background: transparent;
   border: 0;
   min-height: calc(26rem / 14);
@@ -259,12 +259,22 @@
   pointer-events: none;
 }
 
-.project-heading-row .project-create-button {
-  right: 56px;
+.project-heading-row .project-action-tooltip-trigger {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  width: calc(26rem / 14);
+  height: calc(26rem / 14);
 }
 
-.project-heading-row .project-edit-button {
-  right: 28px;
+.project-heading-row .project-create-tooltip { right: 61px; }
+.project-heading-row .project-edit-tooltip { right: 33px; }
+.project-heading-row .project-remove-tooltip { right: 5px; }
+
+.project-heading-row .project-action-tooltip-trigger > button {
+  width: 100%;
+  height: 100%;
 }
 
 .project-heading-row:hover .project-heading {
@@ -426,7 +436,8 @@ to {
 .task-row .task-delete-button,
 .task-row .task-edit-button {
   position: absolute;
-  top: 3px;
+  top: 50%;
+  transform: translateY(-50%);
   right: 5px;
   width: calc(26rem / 14);
   height: calc(26rem / 14);
@@ -494,8 +505,8 @@ to {
   justify-content: flex-start;
   gap: 8px;
   width: 100%;
-  min-height: calc(32rem / 14);
-  height: calc(32rem / 14);
+  min-height: calc(36rem / 14);
+  height: calc(36rem / 14);
   margin-bottom: 2px;
   padding: 0 10px 0 22px;
   font-size: calc(13rem / 14);
@@ -604,9 +615,35 @@ to {
   padding-right: 122px;
 }
 
-.project-running .project-create-button { right: 82px; }
-.project-running .project-edit-button { right: 54px; }
-.project-running .project-remove-button { right: 26px; }
+.project-running .project-running-status { right: 89px; }
+
+.project-heading-conversations .project-create-tooltip { right: 5px; }
+.project-heading-conversations:hover .project-heading,
+.project-heading-conversations:focus-within .project-heading {
+  padding-right: 42px;
+}
+
+.project-heading-conversations.project-running .project-heading,
+.project-heading-conversations.project-running:hover .project-heading,
+.project-heading-conversations.project-running:focus-within .project-heading {
+  padding-right: 70px;
+}
+
+.project-heading-conversations.project-running .project-running-status {
+  right: 42px;
+}
+
+.project-heading-conversations.project-running .project-create-tooltip { right: 5px; }
+
+@media (hover: none) {
+  .project-heading-conversations .project-heading {
+    padding-right: 42px;
+  }
+
+  .project-heading-conversations.project-running .project-heading {
+    padding-right: 70px;
+  }
+}
 
 .task-row.running .task-item {
   padding-right: 10px;

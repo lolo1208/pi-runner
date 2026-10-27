@@ -53,8 +53,7 @@ export function ComposerStatus({ project, profile, contextLimit, messages, promp
 
   return <Tooltip.Provider delayDuration={180}>
     <div className="composer-status" aria-label="会话信息">
-      {project ? <Button type="button" variant="ghost" className="composer-project" title={project} aria-label={`打开项目目录：${projectName}`} onClick={onOpenProject}><Monitor size={13} aria-hidden="true" /><span>{projectName}</span></Button>
-        : <span className="composer-project"><Monitor size={13} aria-hidden="true" /><span>未关联项目</span></span>}
+      {project && <Button type="button" variant="ghost" className="composer-project" title={project} aria-label={`打开项目目录：${projectName}`} onClick={onOpenProject}><Monitor size={13} aria-hidden="true" /><span>{projectName}</span></Button>}
       <div className="composer-status-details">
         {outputSpeed && outputSpeed.outputTokens > 0 && <SpeedIndicator speed={outputSpeed} />}
         {profile?.provider === 'chatgpt' && <SubscriptionLimits usage={subscriptionUsage} latestReply={latestReply} />}

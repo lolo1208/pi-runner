@@ -1,5 +1,6 @@
 import { Button } from '@/components/ui/button'
 import { Copy, Minus, Square, X } from 'lucide-react'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 interface WindowTitleBarProps {
   pageTitle: string
@@ -23,9 +24,9 @@ export function WindowTitleBar({ pageTitle, projectName, isMaximized, onMinimize
       </div>
     </div>
     <div className="window-controls">
-      <Button aria-label="最小化" title="最小化" onClick={onMinimize}><Minus size={15} /></Button>
-      <Button aria-label={isMaximized ? '还原' : '最大化'} title={isMaximized ? '还原' : '最大化'} onClick={onToggleMaximize}>{isMaximized ? <Copy size={13} /> : <Square size={13} />}</Button>
-      <Button className="window-close" aria-label="关闭" title="关闭" onClick={onClose}><X size={15} /></Button>
+      <Tooltip><TooltipTrigger asChild><Button aria-label="最小化" onClick={onMinimize}><Minus size={15} /></Button></TooltipTrigger><TooltipContent side="bottom">最小化</TooltipContent></Tooltip>
+      <Tooltip><TooltipTrigger asChild><Button aria-label={isMaximized ? '还原' : '最大化'} onClick={onToggleMaximize}>{isMaximized ? <Copy size={13} /> : <Square size={13} />}</Button></TooltipTrigger><TooltipContent side="bottom">{isMaximized ? '还原' : '最大化'}</TooltipContent></Tooltip>
+      <Tooltip><TooltipTrigger asChild><Button className="window-close" aria-label="关闭" onClick={onClose}><X size={15} /></Button></TooltipTrigger><TooltipContent side="bottom">关闭</TooltipContent></Tooltip>
     </div>
   </div>
 }

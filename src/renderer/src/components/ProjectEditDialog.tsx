@@ -2,6 +2,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Modal } from '@/components/ui/modal'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Textarea } from '@/components/ui/textarea'
 import { ArrowRightToLine, FolderOpen } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
@@ -45,7 +46,7 @@ export function ProjectEditDialog({ root, name, directory, prompt, isBusy, error
           <Label htmlFor="project-edit-directory">项目目录</Label>
           <div className="project-edit-directory">
             <Input id="project-edit-directory" value={draftDirectory} disabled={isBusy} onChange={event => setDraftDirectory(event.target.value)} />
-            <Button variant="outline" size="icon" aria-label="选择目录" title="选择目录" disabled={isBusy} onClick={chooseDirectory}><FolderOpen size={15} /></Button>
+            <Tooltip><TooltipTrigger asChild><span className="inline-flex" tabIndex={isBusy ? 0 : undefined}><Button variant="outline" size="icon" aria-label="选择目录" disabled={isBusy} onClick={chooseDirectory}><FolderOpen size={15} /></Button></span></TooltipTrigger><TooltipContent>选择目录</TooltipContent></Tooltip>
           </div>
           <p className="hint">修改目录后，此项目的对话会关联到新目录。当前有任务运行时，目录切换会在任务结束后生效。</p>
         </div>
@@ -65,7 +66,7 @@ export function ProjectEditDialog({ root, name, directory, prompt, isBusy, error
       </div>
       <div className="project-edit-actions">
         <Button disabled={isBusy} onClick={onClose}>取消</Button>
-        <Button className="project-edit-save" disabled={isBusy || !draftDirectory.trim()} onClick={() => onSave({ name: draftName, directory: draftDirectory.trim(), prompt: draftPrompt })}>保存</Button>
+        <Button className="project-edit-save primary" disabled={isBusy || !draftDirectory.trim()} onClick={() => onSave({ name: draftName, directory: draftDirectory.trim(), prompt: draftPrompt })}>保存</Button>
       </div>
       {isBusy && <p className="hint" role="status">正在保存项目信息…</p>}
   </Modal>

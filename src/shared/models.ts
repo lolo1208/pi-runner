@@ -89,6 +89,8 @@ export function tokenCountLabel(value: number | null | undefined): string | null
 export interface ModelSettings {
   profiles: ModelProfileView[]
   activeProfileId: string | null
+  /** 审核模型：空表示跟随默认模型；用于工具权限第二层自动审核。 */
+  reviewProfileId?: string | null
   encryptionAvailable: boolean
   providers?: ModelProviderConnection[]
 }
@@ -119,6 +121,18 @@ export interface ChatgptUsage { windows: SubscriptionWindow[]; fetchedAt: number
 export interface ModelReply { text: string; elapsedMs: number; model: string; truncated: boolean; usage?: ModelUsage; roundUsage?: ModelUsage; rateLimits?: ModelRateLimit[]; compaction?: import('./context').ContextCompaction; messages?: ChatMessage[]; warnings?: string[] }
 export type PermissionMode = 'default' | 'auto' | 'full'
 export const PERMISSION_MODES: PermissionMode[] = ['default', 'auto', 'full']
+/** 工具权限第二层自动审核的结论：放行 / 交给用户 / 拒绝。 */
+export type ReviewDecision = 'allow' | 'ask' | 'deny'
+export interface ToolReviewRequest {
+  tool: string
+  args: Record<string, unknown>
+  cwd: string
+  mode: PermissionMode
+  project?: string
+  reason?: string
+  userPrompt: string
+  signal: AbortSignal
+}
 export interface ToolApproval {
   id: string
   toolCallId: string
@@ -126,9 +140,10 @@ export interface ToolApproval {
   args: Record<string, unknown>
   cwd: string
   reason: string
+  mustConfirm?: boolean
 }
 /** “每次询问”模式下命令审批的默认说明；命令弹窗不重复展示这条模式说明，只保留真正的扩权原因。 */
-export const DEFAULT_COMMAND_APPROVAL_REASON = '“每次询问”模式下，终端命令需要逐次确认。未隔离的 Shell 命令获准后可能访问项目外文件或网络'
+export const DEFAULT_COMMAND_APPROVAL_REASON = '“每次询问”模式下，终端命令需要逐次确认。命令获准后可能读写项目外文件或访问网络'
 export interface ToolApprovalPreview { before: string; after: string; path: string }
 export type IntentMode = 'plan' | 'execute'
 export interface PlanQuestion { id: string; header: string; question: string; options: { label: string; description?: string; recommended?: boolean }[] }

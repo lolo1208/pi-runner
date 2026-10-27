@@ -15,7 +15,6 @@
 @import './styles/plan.css';
 @import './styles/code-preview.css';
 @import './styles/syntax.css';
-@import './styles/sandbox.css';
 @import './styles/settings.css';
 @import './styles/skills.css';
 @import './styles/project-picker.css';
@@ -33,7 +32,7 @@ body {
   .chat-markdown, .plan-document, .chat-message.user,
   pre, code, .syntax-code, .markdown-code-block pre,
   .chat-work-detail pre, .file-preview-text,
-  .tool-approval-diff, .tool-approval-operation, .command-approval-original pre,
+  .tool-approval-diff, .tool-approval-operation,
   .code-preview-scroll, .code-preview-lines, .code-preview-gap,
   .error, .success) {
   -webkit-user-select: text;

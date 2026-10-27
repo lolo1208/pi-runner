@@ -32,7 +32,7 @@ export function ConversationEditDialog({ task, onClose, onSave }: ConversationEd
       </div>
       <div className="modal-actions">
         <Button type="button" variant="outline" onClick={onClose}>取消</Button>
-        <Button type="submit" disabled={!title.trim()}>保存</Button>
+        <Button type="submit" className="primary" disabled={!title.trim()}>保存</Button>
       </div>
     </form>
   </Modal>

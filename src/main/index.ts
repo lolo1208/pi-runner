@@ -12,7 +12,8 @@ import { closeAllNotifications } from './notifications'
 import { ChatgptCredentials } from './models/chatgpt-credentials'
 import { ChatgptService } from './models/chatgpt-service'
 import { OpenrouterClient } from './models/openrouter-client'
-import { SandboxService } from './models/sandbox-service'
+import { ToolReviewService } from './models/tool-review-service'
+import { anonymousDownloadFetch } from './models/download-fetch'
 import { SleepBlocker } from './sleep-blocker'
 
 let mainWindow: BrowserWindow | null = null
@@ -25,7 +26,6 @@ let modelSettings: ModelSettingsStore
 let modelService: ModelService
 let chatgptService: ChatgptService
 let piRunnerDirectory: string
-let sandboxService: SandboxService
 const sleepBlocker = new SleepBlocker()
 const mainDirectory = path.dirname(fileURLToPath(import.meta.url))
 const rendererFile = path.join(mainDirectory, '../renderer/index.html')
@@ -69,7 +69,6 @@ function prepareToQuit(): void {
   tray?.destroy()
   tray = null
   modelService?.cancelAll()
-  sandboxService?.stop()
   void chatgptService?.cancel()
 }
 // 托盘在应用启动时就创建并常驻，与窗口显示/隐藏无关。
@@ -116,7 +115,7 @@ function createWindow(): void {
   // Windows 注销或关机不会保证触发 before-quit，确认结束系统会话时也要清理后台任务。
   mainWindow.on('session-end', prepareToQuit)
   mainWindow.on('closed', () => {
-    if (!isQuitting) { modelService.cancelAll(); sandboxService?.stop(); void chatgptService.cancel() }
+    if (!isQuitting) { modelService.cancelAll(); void chatgptService.cancel() }
     mainWindow = null
     snapshotManager = undefined
   })
@@ -140,12 +139,14 @@ if (hasSingleInstanceLock) void app.whenReady().then(() => {
   modelSettings = new ModelSettingsStore(path.join(app.getPath('userData'), 'model-settings.json'), cipher)
   // 订阅网络沿用 Electron 的系统代理；不向授权接口或模型接口发送浏览器 Cookie。
   const subscriptionFetch: typeof fetch = (input, init) => net.fetch(input instanceof URL ? input.href : input, { ...init, credentials: 'omit' })
+  const modelFetch: typeof fetch = (input, init) => new URL(input instanceof Request ? input.url : String(input)).hostname === 'openrouter.ai' ? subscriptionFetch(input, init) : fetch(input, init)
   chatgptService = new ChatgptService(new ChatgptCredentials(path.join(app.getPath('userData'), 'chatgpt-auth.enc'), cipher), modelSettings, subscriptionFetch)
-  const sandboxRuntimeDirectory = path.join(app.isPackaged ? process.resourcesPath : path.join(app.getAppPath(), 'resources'), 'sandbox-runtime')
-  sandboxService = new SandboxService({ runtimeDirectory: sandboxRuntimeDirectory, dataDirectory: path.join(piRunnerDirectory, 'command-sandbox'), protectedDirectories: [piRunnerDirectory, app.getPath('userData')], emit: state => { mainWindow?.webContents.send(IPC_CHANNELS.sandboxState, state) } })
-  modelService = new ModelService(modelSettings, new PiAgentService({ dataDirectory: piRunnerDirectory, protectedDirectories: [app.getPath('userData')], sandboxRuntimeDirectory: path.join(app.isPackaged ? process.resourcesPath : path.join(app.getAppPath(), 'resources'), 'sandbox-runtime'), chatgpt: chatgptService,
-    fetchRequest: (input, init) => new URL(input instanceof Request ? input.url : String(input)).hostname === 'openrouter.ai' ? subscriptionFetch(input, init) : fetch(input, init),
-    sandbox: sandboxService,
+  const reviewService = new ToolReviewService(modelSettings, modelFetch)
+  modelService = new ModelService(modelSettings, new PiAgentService({ dataDirectory: piRunnerDirectory, protectedDirectories: [app.getPath('userData')], chatgpt: chatgptService,
+    fetchRequest: modelFetch,
+    // 下载仅发匿名 GET，不继承模型认证头、Cookie 或订阅请求配置。
+    downloadFetch: anonymousDownloadFetch,
+    review: request => reviewService.review(request),
     getProject: () => snapshotManager?.getRoot(), emit: event => { mainWindow?.webContents.send(IPC_CHANNELS.agentEvent, event) } }), undefined, new OpenrouterClient(subscriptionFetch))
   registerIpcHandlers({
     getMainWindow: () => mainWindow,
@@ -153,7 +154,6 @@ if (hasSingleInstanceLock) void app.whenReady().then(() => {
     getModelSettings: () => modelSettings,
     getModelService: () => modelService,
     getChatgptService: () => chatgptService,
-    getSandboxService: () => sandboxService,
     setSnapshotManager: manager => { snapshotManager = manager },
     getSleepBlocker: () => sleepBlocker,
     dataDirectory: piRunnerDirectory,

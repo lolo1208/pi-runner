@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Check, ChevronRight, CirclePause, Clock, Layers, LoaderCircle, Sparkles, X } from 'lucide-react'
 import type { ChatExecution, ChatMessage, ChatWorkItem } from '../../../../shared/models'
-import type { SandboxState } from '../../../../shared/sandbox'
 import { Button } from '../ui/button'
 import { ExecutionLabel, formatExecutionDuration } from './ExecutionLabel'
 import { ChatMarkdown } from './ChatMarkdown'
@@ -9,7 +8,7 @@ import { TranscriptScope, useTranscriptState } from './TranscriptState'
 import { TranscriptPagedList } from './TranscriptPagedList'
 import { hasPlanResult, PlanResultCard } from './PlanResultCard'
 
-const toolLabels: Record<string, string> = { bash: '运行命令', powershell: '运行命令', read: '读取文件', write: '写入文件', edit: '编辑文件', delete: '删除文件', mkdir: '创建目录', rmdir: '删除目录', move: '移动或重命名', copy: '复制文件或目录', stat: '查看文件或目录信息', ls: '查看目录', find: '查找文件或目录', grep: '搜索内容', read_skill_file: '读取技能文件', report_skill_usage: '说明技能用途', ask_user_question: '确认需求', submit_plan: '提交计划' }
+const toolLabels: Record<string, string> = { bash: '运行命令', powershell: '运行命令', read: '读取文件', write: '写入文件', download: '下载文件', edit: '编辑文件', delete: '删除文件', mkdir: '创建目录', rmdir: '删除目录', move: '移动或重命名', copy: '复制文件或目录', stat: '查看文件或目录信息', ls: '查看目录', find: '查找文件或目录', grep: '搜索内容', read_skill_file: '读取技能文件', report_skill_usage: '说明技能用途', ask_user_question: '确认需求', submit_plan: '提交计划' }
 
 function WorkItem({ item, busy = false }: { item: ChatWorkItem; busy?: boolean }): React.JSX.Element {
   const [open, setOpen] = useTranscriptState('work-open', false)
@@ -34,19 +33,6 @@ function WorkItem({ item, busy = false }: { item: ChatWorkItem; busy?: boolean }
 
 interface CallGroup { start: number; messages: ChatMessage[] }
 
-/** 沙箱准备属于当前调用的执行进度，不计作额外的模型调用或工具调用。 */
-function SandboxCheckItem({ state }: { state: SandboxState }): React.JSX.Element {
-  const step = state.steps.find(item => item.status === 'running')
-  const labels = { passed: '已通过', running: '正在检测', failed: '失败', warning: '受限', waiting: '等待检测' }
-  const item: ChatWorkItem = {
-    id: 'sandbox-check', kind: 'tool', name: '正在检测项目沙箱环境',
-    args: { path: step?.label ?? state.message },
-    content: state.steps.map(entry => `${entry.label}：${labels[entry.status]}${entry.detail ? `\n${entry.detail}` : ''}`).join('\n') || state.message,
-    completed: false
-  }
-  return <div role="status" aria-live="polite"><TranscriptScope id="sandbox-check"><WorkItem item={item} busy /></TranscriptScope></div>
-}
-
 /** 正文输出结束当前组；跨分页先分组，避免连续调用被页边界拆开。 */
 function groupCalls(messages: ChatMessage[]): CallGroup[] {
   const groups: CallGroup[] = []
@@ -58,7 +44,7 @@ function groupCalls(messages: ChatMessage[]): CallGroup[] {
   return groups
 }
 
-function CallActivity({ group, executing = false, sandboxState, status }: { group: CallGroup; executing?: boolean; sandboxState?: SandboxState | null; status?: string }): React.JSX.Element {
+function CallActivity({ group, executing = false, status }: { group: CallGroup; executing?: boolean; status?: string }): React.JSX.Element {
   const [open, setOpen] = useTranscriptState('call-open', false)
   const activeIndex = executing ? group.start + group.messages.length - 1 : undefined
   // 执行中的调用尚无耗时记录，从成为当前调用起本地计时，避免显示上一次调用的耗时。
@@ -84,15 +70,14 @@ function CallActivity({ group, executing = false, sandboxState, status }: { grou
     {open && <div className="chat-work-list"><TranscriptPagedList preferLatest={executing} items={group.messages} label="组内调用记录">{(page, start) => page.map((message, offset) => <TranscriptScope key={start + offset} id={`call:${group.start + start + offset}`}>
       {message.call?.work.length ? <TranscriptPagedList preferLatest={executing && start + offset === group.messages.length - 1} items={message.call.work} label="工具记录">{work => work.map(item => <TranscriptScope key={item.id} id={`work:${item.id}`}><WorkItem item={item} busy={executing && start + offset === group.messages.length - 1} /></TranscriptScope>)}</TranscriptPagedList> : !(executing && start + offset === group.messages.length - 1) && <p className="chat-call-empty">{message.call ? '本次调用仅生成回复，没有工具执行或可展示的思考记录。' : '此历史调用未保存工作详情。'}</p>}
     </TranscriptScope>)}</TranscriptPagedList>
-      {executing && sandboxState?.phase === 'running' && <SandboxCheckItem state={sandboxState} />}
-      {executing && sandboxState?.phase !== 'running' && <div className="chat-work-item" role="status" aria-live="polite">
+      {executing && <div className="chat-work-item" role="status" aria-live="polite">
         <div className="chat-work-progress"><LoaderCircle size={14} className="chat-execution-spinner" aria-hidden="true" /><span>{currentStatus}</span></div>
       </div>}
     </div>}
   </div>
 }
 
-export function RoundActivity({ project, messages, execution, startedAt, status, busy = false, sandboxState, initiallyOpen = true }: { project?: string | null; messages: ChatMessage[]; execution?: ChatExecution; startedAt?: number; status?: string; busy?: boolean; sandboxState?: SandboxState | null; initiallyOpen?: boolean }): React.JSX.Element {
+export function RoundActivity({ project, messages, execution, startedAt, status, busy = false, initiallyOpen = true }: { project?: string | null; messages: ChatMessage[]; execution?: ChatExecution; startedAt?: number; status?: string; busy?: boolean; initiallyOpen?: boolean }): React.JSX.Element {
   const [disclosure, setDisclosure] = useTranscriptState('round-open', { busy, open: busy && initiallyOpen })
   const open = disclosure.busy === busy ? disclosure.open : busy && initiallyOpen
   useEffect(() => {
@@ -101,16 +86,15 @@ export function RoundActivity({ project, messages, execution, startedAt, status,
   const final = messages.at(-1)
   const groups = groupCalls(messages)
   const hasPlanCards = messages.some(message => message.call?.work.some(hasPlanResult))
-  const activeSandbox = status?.includes('等待你') || status?.includes('停止') ? null : sandboxState
   return <>
     <Button variant="ghost" className="chat-round-toggle" aria-expanded={open} onClick={() => setDisclosure({ busy, open: !open })}>
-      <ExecutionLabel execution={execution ?? final?.execution} startedAt={startedAt} status={busy && activeSandbox?.phase === 'running' ? '正在检测项目沙箱环境…' : status} busy={busy} /><ChevronRight size={14} className={open ? 'chat-disclosure-chevron open' : 'chat-disclosure-chevron'} />
+      <ExecutionLabel execution={execution ?? final?.execution} startedAt={startedAt} status={status} busy={busy} /><ChevronRight size={14} className={open ? 'chat-disclosure-chevron open' : 'chat-disclosure-chevron'} />
     </Button>
     {open && busy && !groups.length && <div className="chat-round-calls">
-      {activeSandbox?.phase === 'running' ? <SandboxCheckItem state={activeSandbox} /> : <div className="chat-work-item" role="status" aria-live="polite"><div className="chat-work-progress"><LoaderCircle size={14} className="chat-execution-spinner" aria-hidden="true" /><span>{status || '正在等待模型回复…'}</span></div></div>}
+      <div className="chat-work-item" role="status" aria-live="polite"><div className="chat-work-progress"><LoaderCircle size={14} className="chat-execution-spinner" aria-hidden="true" /><span>{status || '正在等待模型回复…'}</span></div></div>
     </div>}
     {open && groups.length > 0 && <div className="chat-round-calls"><TranscriptPagedList preferLatest={busy} items={groups} label="调用记录">{page => page.map(group => { const message = group.messages.at(-1)!; const index = group.start + group.messages.length - 1; return <TranscriptScope id={`call:${group.start}`} key={group.start}><div className="chat-call-section">
-      <CallActivity group={group} executing={busy && index === messages.length - 1} sandboxState={activeSandbox} status={status} />
+      <CallActivity group={group} executing={busy && index === messages.length - 1} status={status} />
       {!hasPlanCards && message.content && (busy || index < messages.length - 1) && <ChatMarkdown project={project} content={message.content} snapshotId={message.codeSnapshotId} />}
     </div></TranscriptScope> })}</TranscriptPagedList></div>}
     {hasPlanCards ? <div className="chat-round-result plan-round-results">{messages.map((message, index) => <TranscriptScope key={index} id={`plan-call:${index}`}>

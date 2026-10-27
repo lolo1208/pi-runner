@@ -24,11 +24,6 @@ export interface PiRunnerApi {
   performFileAction(project: string, path: string, action: FileAction): Promise<void>
   copyText(text: string): Promise<void>
   saveAttachment(name: string, dataUrl: string): Promise<string | null>
-  getSandboxStatus(): Promise<ModelResult<import('./sandbox').SandboxState>>
-  ensureSandbox(): Promise<ModelResult<import('./sandbox').SandboxState>>
-  startSandbox(action: 'configure' | 'diagnose' | 'check'): Promise<ModelResult<import('./sandbox').SandboxState>>
-  stopSandbox(): Promise<ModelResult<void>>
-  onSandboxState(callback: (state: import('./sandbox').SandboxState) => void): () => void
   respondPlanInteraction(requestId: string, conversationId: string, interactionId: string, response: import('./models').PlanResponse): Promise<ModelResult<void>>
   getToolApprovalPreview(requestId: string, conversationId: string, approvalId: string): Promise<ModelResult<import('./models').ToolApprovalPreview>>
   setPermissionMode(conversationId: string, mode: import('./models').PermissionMode): Promise<ModelResult<import('./models').PermissionMode>>
@@ -64,6 +59,7 @@ export interface PiRunnerApi {
   getModelSettings(): Promise<ModelResult<ModelSettings>>
   saveModelProfile(input: SaveModelProfile): Promise<ModelResult<ModelSettings>>
   setActiveModel(id: string): Promise<ModelResult<ModelSettings>>
+  setReviewModel(id: string | null): Promise<ModelResult<ModelSettings>>
   testModel(id: string, requestId: string): Promise<ModelResult<ModelReply>>
   chatWithModel(id: string, requestId: string, messages: ChatMessage[], customPrompt?: string, context?: import('./context').ContextOptions, agent?: AgentRequestOptions): Promise<ModelResult<ModelReply>>
   onAgentEvent(callback: (event: AgentEvent) => void): () => void
@@ -89,7 +85,6 @@ export const IPC_CHANNELS = {
   copyText: 'clipboard:copy-text',
   notification: 'app:notification', notificationActivate: 'app:notification-activate', closeNotifications: 'app:close-notifications',
   saveAttachment: 'files:save-attachment',
-  sandboxStatus: 'models:sandbox-status', sandboxEnsure: 'models:sandbox-ensure', sandboxStart: 'models:sandbox-start', sandboxStop: 'models:sandbox-stop', sandboxState: 'sandbox:state',
   planInteraction: 'models:plan-interaction',
   toolApprovalPreview: 'models:tool-approval-preview',
   permissionMode: 'models:permission-mode', toolApproval: 'models:tool-approval',
@@ -103,6 +98,7 @@ export const IPC_CHANNELS = {
   rollback: 'snapshot:rollback', agentEvent: 'models:agent-event', agentHistory: 'models:agent-history', agentDeleteRound: 'models:agent-delete-round',
   modelSettings: 'models:list', modelSave: 'models:save',
   modelActivate: 'models:activate', modelTest: 'models:test', modelChat: 'models:chat', modelCancel: 'models:cancel',
+  modelReview: 'models:review-model',
   ollamaConnect: 'models:ollama-connect', ollamaInfo: 'models:ollama-info',
   openrouterConnect: 'models:openrouter-connect',
   openrouterUsage: 'models:openrouter-usage',

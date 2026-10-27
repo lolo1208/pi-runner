@@ -41,9 +41,9 @@ export function ToolSidebar({ project, isBusy, activeTool, checkpoints, onToolCh
   const [history, setHistory] = useState<{ project: string; checkpoints: Checkpoint[] } | null>(null)
   const [historyError, setHistoryError] = useState('')
   useEffect(() => {
+    setHistoryError('')
     if (!project || activeTool !== 'snapshots') return
     let active = true
-    setHistoryError('')
     void window.piRunner.listCheckpoints(project).then(items => {
       if (active) setHistory({ project, checkpoints: items })
     }).catch(() => {

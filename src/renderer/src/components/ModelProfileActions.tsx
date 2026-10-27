@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { CircleCheck, CircleX, PlugZap, Square } from 'lucide-react'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 export type TestStatus = 'idle' | 'running' | 'success' | 'failure'
 
@@ -24,10 +25,10 @@ export function ModelProfileActions({ canSave = true, savedFlash = false, testSt
   return <div className="model-profile-actions">
     <Separator />
     <div className="model-profile-actions-buttons">
-      {testStatus === 'running' && <Button variant="outline" size="icon" className="model-test-stop" aria-label="终止测试" title="终止测试" onClick={onCancelTest}><Square size={14} /></Button>}
-      {testStatus === 'idle' && <Button variant="outline" size="icon" aria-label="测试连接" title="测试连接" onClick={onSaveAndTest}><PlugZap size={17} /></Button>}
-      {testStatus === 'success' && <span className="test-status success" role="status" title="连接成功"><CircleCheck size={17} /></span>}
-      {testStatus === 'failure' && <span className="test-status failure" role="status" title="连接失败"><CircleX size={17} /></span>}
+      {testStatus === 'running' && <Tooltip><TooltipTrigger asChild><Button variant="outline" size="icon" className="model-test-stop" aria-label="终止测试" onClick={onCancelTest}><Square size={14} /></Button></TooltipTrigger><TooltipContent>终止测试</TooltipContent></Tooltip>}
+      {testStatus === 'idle' && <Tooltip><TooltipTrigger asChild><Button variant="outline" size="icon" aria-label="测试连接" onClick={onSaveAndTest}><PlugZap size={17} /></Button></TooltipTrigger><TooltipContent>测试连接</TooltipContent></Tooltip>}
+      {testStatus === 'success' && <Tooltip><TooltipTrigger asChild><span className="test-status success" role="status" aria-label="连接成功"><CircleCheck size={17} /></span></TooltipTrigger><TooltipContent>连接成功</TooltipContent></Tooltip>}
+      {testStatus === 'failure' && <Tooltip><TooltipTrigger asChild><span className="test-status failure" role="status" aria-label="连接失败"><CircleX size={17} /></span></TooltipTrigger><TooltipContent>连接失败</TooltipContent></Tooltip>}
       <p className={`hint test-hint${testStatus === 'success' ? ' test-success' : testStatus === 'failure' ? ' test-failure' : ''}`} aria-live="polite">{hint}</p>
     </div>
     <div className="model-profile-actions-save"><Button className="primary" disabled={!canSave} onClick={onSave}>保存配置</Button>{savedFlash && <span aria-live="polite" className="saved-flash">已保存</span>}</div>

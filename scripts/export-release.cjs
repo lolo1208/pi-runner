@@ -3,8 +3,6 @@ const path = require('node:path')
 const { build, createTargets, Platform } = require('electron-builder')
 const { packageWindows, assertX64, getCompiler } = require('./native-windows.cjs')
 const { verifyPackagedRuntime } = require('./verify-packaged-runtime.cjs')
-const { buildAppContainer } = require('./build-appcontainer.cjs')
-const { verifySandboxRuntime } = require('./prepare-sandbox-runtime.cjs')
 const { getSevenZip, compressDirectory } = require('./seven-zip.cjs')
 
 const projectDir = path.resolve(__dirname, '..')
@@ -51,9 +49,6 @@ async function exportRelease(mode) {
   const nativeWindows = windowsRelease && mode !== 'win-zip'
   const config = { directories: { output: stagingDir }, afterPack: verifyPackagedRuntime }
   if (option.platform === Platform.WINDOWS) {
-    // 从当前源码重建宿主与校验清单，在复制资源前确认完整运行时可用。
-    await buildAppContainer()
-    await verifySandboxRuntime(path.join(projectDir, 'resources', 'sandbox-runtime'))
     // 直接使用已安装的 Electron，避免依赖下载缓存或联网获取运行时。
     const electronDist = path.join(path.dirname(require.resolve('electron/package.json')), 'dist')
     await assertX64(path.join(electronDist, 'electron.exe'))
@@ -62,11 +57,13 @@ async function exportRelease(mode) {
     config.electronDist = electronDist
     config.npmRebuild = false
     // 图标与版本信息仍由本地资源编辑器处理，不查询签名证书或下载签名工具。
-    config.win = { signExecutable: false }
+    config.win = {
+      signExecutable: false,
+    }
   }
   let artifacts = await build({
     projectDir,
-    targets: createTargets([option.platform], windowsRelease ? 'dir' : option.target, 'x64'),
+    targets: createTargets([option.platform], windowsRelease ? 'dir' : option.target, option.platform === Platform.MAC ? process.arch : 'x64'),
     publish: 'never',
     config,
   })

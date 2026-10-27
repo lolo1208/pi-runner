@@ -1,6 +1,5 @@
 const path = require('node:path')
 const { spawnSync } = require('node:child_process')
-const { verifySandboxRuntime } = require('./prepare-sandbox-runtime.cjs')
 
 // 使用包内 Electron 和 app.asar 验证依赖，避免开发机 node_modules 掩盖打包缺失。
 const verificationCode = `
@@ -35,7 +34,6 @@ function verifyRuntime(executable, main) {
 }
 
 async function verifyPackagedRuntime({ appOutDir, electronPlatformName, packager }) {
-  if (electronPlatformName === 'win32') await verifySandboxRuntime(path.join(packager.getResourcesDir(appOutDir), 'sandbox-runtime'))
   const product = packager.appInfo.productFilename
   const executable = electronPlatformName === 'darwin'
     ? path.join(appOutDir, `${product}.app`, 'Contents', 'MacOS', product)

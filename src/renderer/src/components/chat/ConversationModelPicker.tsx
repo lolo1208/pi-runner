@@ -1,9 +1,10 @@
 import { useId, useLayoutEffect, useRef, useState } from 'react'
-import { Popover, Tooltip } from 'radix-ui'
+import { Popover, Tooltip as TooltipPrimitive } from 'radix-ui'
 import { ChevronDown, ChevronRight, Eye, Search, Settings2 } from 'lucide-react'
 import { ModelIcon } from './ModelIcon'
 import { ModelPriceTag } from '../ModelPriceTag'
 import { Button } from '@/components/ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { PagedList } from '../PagedList'
 import { findModelDescriptor, PROVIDER_PRESETS, selectedModelThinking, thinkingLabel, tokenCountLabel, type ModelProfileView, type ModelProviderConnection } from '../../../../shared/models'
@@ -26,10 +27,10 @@ function ModelName({ text, className }: { text: string; className: string }): Re
     observer?.observe(element)
     return () => observer?.disconnect()
   }, [text, className])
-  return <Tooltip.Root open={truncated && open} onOpenChange={setOpen}>
-    <Tooltip.Trigger asChild><span ref={ref} className={className} onPointerEnter={measure} onFocus={measure} tabIndex={truncated ? 0 : undefined}>{text}</span></Tooltip.Trigger>
-    {truncated && <Tooltip.Portal><Tooltip.Content className="conversation-model-name-tooltip" side="top" sideOffset={6} collisionPadding={12}>{text}</Tooltip.Content></Tooltip.Portal>}
-  </Tooltip.Root>
+  return <TooltipPrimitive.Root open={truncated && open} onOpenChange={setOpen}>
+    <TooltipPrimitive.Trigger asChild><span ref={ref} className={className} onPointerEnter={measure} onFocus={measure} tabIndex={truncated ? 0 : undefined}>{text}</span></TooltipPrimitive.Trigger>
+    {truncated && <TooltipPrimitive.Portal><TooltipPrimitive.Content className="conversation-model-name-tooltip" side="top" sideOffset={6} collisionPadding={12}>{text}</TooltipPrimitive.Content></TooltipPrimitive.Portal>}
+  </TooltipPrimitive.Root>
 }
 
 interface Props {
@@ -69,24 +70,24 @@ export function ConversationModelPicker({ profile, profiles, providers, disabled
     finally { setThinkingSaving(false) }
   }
 
-  return <Tooltip.Provider delayDuration={250}><Popover.Root open={open && !disabled} onOpenChange={next => {
+  return <Popover.Root open={open && !disabled} onOpenChange={next => {
     setOpen(next)
     if (next) setQuery('')
   }}>
-    <Popover.Trigger asChild>
-      <Button type="button" className="model-picker" disabled={disabled} aria-label={`切换模型：${profile?.model || '选择模型'}`} title="切换本次会话的模型，并可在此设置推理强度">
+    <Tooltip><TooltipTrigger asChild><Popover.Trigger asChild>
+      <Button type="button" className="model-picker" disabled={disabled} aria-label={`切换模型：${profile?.model || '选择模型'}`}>
         <ModelIcon model={profile?.model} provider={profile?.provider} size={14} /><span className="model-price-name-text">{profile?.model || '选择模型'}</span>
         {profile && <ModelPriceTag descriptor={descriptor} />}
         {showThinking && configuredThinkingLabel && <span className="model-picker-thinking">· {configuredThinkingLabel}</span>}
         <ChevronDown size={14} />
       </Button>
-    </Popover.Trigger>
+    </Popover.Trigger></TooltipTrigger><TooltipContent side="top" sideOffset={6}>切换本次会话的模型，并可在此设置推理强度</TooltipContent></Tooltip>
     <Popover.Portal>
       <Popover.Content className="conversation-model-picker" side="top" align="end" sideOffset={10} collisionPadding={12} aria-label="本次会话模型" onOpenAutoFocus={event => event.preventDefault()}>
         <div className="conversation-model-search">
           <Search size={16} aria-hidden="true" />
           <input aria-label="搜索会话模型" placeholder="搜索模型" value={query} onChange={event => setQuery(event.target.value)} />
-          <Button type="button" variant="ghost" size="icon" className="conversation-model-config" aria-label="配置模型" title="打开模型设置" onClick={() => { close(); onOpenSettings() }}><Settings2 size={16} /></Button>
+          <Tooltip><TooltipTrigger asChild><Button type="button" variant="ghost" size="icon" className="conversation-model-config" aria-label="配置模型" onClick={() => { close(); onOpenSettings() }}><Settings2 size={16} /></Button></TooltipTrigger><TooltipContent side="top" sideOffset={6}>打开模型设置</TooltipContent></Tooltip>
         </div>
         <div className="conversation-model-list">
           {groups.map(({ preset, models }) => {
@@ -109,9 +110,9 @@ export function ConversationModelPicker({ profile, profiles, providers, disabled
                     <ModelIcon model={model.model} provider={model.provider} size={16} />
                     <span className="conversation-model-priced-name"><ModelName className={model.id === profile?.id ? 'conversation-model-name is-current' : 'conversation-model-name'} text={`${model.name}${model.available === false ? ' · 当前不可用' : ''}`} /><ModelPriceTag descriptor={info} /></span>
                     <span className="conversation-model-meta">
-                      {modelThinking && <span title={`推理强度：${modelThinking}`}>{modelThinking}</span>}
-                      {info?.capabilities.includes('vision') && <span title="支持图片输入"><Eye size={13} aria-hidden="true" /></span>}
-                      {context && <span title={`上下文上限 ${info?.maxContextTokens ?? model.contextTokens} Token`}>{context}</span>}
+                      {modelThinking && <Tooltip><TooltipTrigger asChild><span>{modelThinking}</span></TooltipTrigger><TooltipContent>推理强度：{modelThinking}</TooltipContent></Tooltip>}
+                      {info?.capabilities.includes('vision') && <Tooltip><TooltipTrigger asChild><span><Eye size={13} aria-hidden="true" /></span></TooltipTrigger><TooltipContent>支持图片输入</TooltipContent></Tooltip>}
+                      {context && <Tooltip><TooltipTrigger asChild><span>{context}</span></TooltipTrigger><TooltipContent>上下文上限 {info?.maxContextTokens ?? model.contextTokens} Token</TooltipContent></Tooltip>}
                     </span>
                   </Button>
                 })}</PagedList>}
@@ -135,5 +136,5 @@ export function ConversationModelPicker({ profile, profiles, providers, disabled
         </footer>
       </Popover.Content>
     </Popover.Portal>
-  </Popover.Root></Tooltip.Provider>
+  </Popover.Root>
 }

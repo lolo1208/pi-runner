@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Check, Copy } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 export function CopyMessageButton({ text }: { text: string }): React.JSX.Element {
   const [status, setStatus] = useState<'idle' | 'copying' | 'copied' | 'error'>('idle')
@@ -15,8 +16,8 @@ export function CopyMessageButton({ text }: { text: string }): React.JSX.Element
     try { await window.piRunner.copyText(text); setStatus('copied') }
     catch { setStatus('error') }
   }
-  return <Button type="button" variant="ghost" size="icon" className="message-copy" aria-label={label} title={label} disabled={status === 'copying'} onClick={() => void copy()}>
+  return <Tooltip><TooltipTrigger asChild><span className="inline-flex" tabIndex={status === 'copying' ? 0 : undefined}><Button type="button" variant="ghost" size="icon" className="message-copy" aria-label={label} disabled={status === 'copying'} onClick={() => void copy()}>
     {status === 'copied' ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
     <span className="sr-only" role="status">{status === 'copied' || status === 'error' ? label : ''}</span>
-  </Button>
+  </Button></span></TooltipTrigger><TooltipContent>{label}</TooltipContent></Tooltip>
 }

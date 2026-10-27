@@ -3,6 +3,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { ArrowUp, Check, LoaderCircle, Square } from 'lucide-react'
 import { ComposerAddMenu, ComposerSkillTags, useLocalSkills } from './ComposerAddMenu'
 import { useSlashSkillPicker } from './SlashSkillPicker'
@@ -154,9 +155,9 @@ function ChatComposerView({ active = true, queue = [], editingId, queuePaused, o
         <ConversationModelPicker profile={profile} profiles={profiles ?? (profile ? [profile] : [])} providers={providers} disabled={isBusy || settingsDisabled} onSelect={onSelectModel ?? (() => undefined)} onThinkingChange={onThinkingChange} onOpenSettings={onOpenSettings} />
         {isBusy && <>
           {stopping && <span className="composer-stop-status" role="status">正在停止任务…</span>}
-          <Button type="button" className="send-button stop-button" aria-label={stopping ? '正在停止任务' : '取消请求'} title={stopping ? '正在停止任务…' : '停止任务'} disabled={stopping} onClick={onCancel}>{stopping ? <LoaderCircle size={14} className="animate-spin" aria-hidden="true" /> : <Square size={14} aria-hidden="true" />}</Button>
+          <Tooltip><TooltipTrigger asChild><Button type="button" className="send-button stop-button" aria-label={stopping ? '正在停止任务' : '取消请求'} disabled={stopping} onClick={onCancel}>{stopping ? <LoaderCircle size={14} className="animate-spin" aria-hidden="true" /> : <Square size={14} aria-hidden="true" />}</Button></TooltipTrigger><TooltipContent side="top">{stopping ? '正在停止任务…' : '停止任务'}</TooltipContent></Tooltip>
         </>}
-        <Button type="submit" className={`send-button${editingId ? ' queue-save-button' : ''}`} aria-label={editingId ? '保存队列消息' : '发送消息'} title={`${editingId ? '保存队列消息' : isBusy ? '加入队列' : '发送消息'}（${sendWithCtrlEnter ? sendShortcut : 'Enter'}）`} disabled={(!editingId && (!profile || settingsDisabled)) || reading || (!prompt.trim() && !images.length)}>{editingId ? <><Check size={15} />保存</> : <ArrowUp size={19} />}</Button>
+        <Tooltip><TooltipTrigger asChild><Button type="submit" className={`send-button${editingId ? ' queue-save-button' : ''}`} aria-label={editingId ? '保存队列消息' : '发送消息'} disabled={(!editingId && (!profile || settingsDisabled)) || reading || (!prompt.trim() && !images.length)}>{editingId ? <><Check size={15} />保存</> : <ArrowUp size={19} />}</Button></TooltipTrigger><TooltipContent side="top">{`${editingId ? '保存队列消息' : isBusy ? '加入队列' : '发送消息'}（${sendWithCtrlEnter ? sendShortcut : 'Enter'}）`}</TooltipContent></Tooltip>
       </div>
     </div>}
   </form>

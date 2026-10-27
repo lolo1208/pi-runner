@@ -94,6 +94,7 @@ export class ModelService {
     const models = await this.ollama.list(baseUrl)
     return this.store.syncOllama(baseUrl, models)
   }
+  setReviewModel(id: unknown): Promise<ModelSettings> { return this.store.setReviewModel(id) }
   async getOllamaModelInfo(baseUrl: unknown, model: unknown): Promise<ModelDescriptor> {
     const descriptor = await this.ollama.info(baseUrl, model)
     await this.store.rememberOllamaInfo(baseUrl, descriptor)

@@ -11,7 +11,7 @@ interface SlashQuery { start: number; end: number; query: string }
 /** 仅在独立词开头识别斜杠，避免网址和文件路径触发技能菜单。 */
 function slashQuery(prompt: string, caret: number): SlashQuery | null {
   if (caret < 0) return null
-  const match = /(?:^|\s)\/([^/\r\n]*)$/.exec(prompt.slice(0, caret))
+  const match = /(?:^|\s)\/([^/\s]*)$/.exec(prompt.slice(0, caret))
   if (!match) return null
   return { start: caret - match[1].length - 1, end: caret, query: match[1] }
 }
@@ -29,9 +29,10 @@ export function useSlashSkillPicker({ prompt, textareaRef, available, skillIds, 
   const [caret, setCaret] = useState(0)
   const [focused, setFocused] = useState(false)
   const [composing, setComposing] = useState(false)
-  const [dismissed, setDismissed] = useState(false)
+  const [dismissedStart, setDismissedStart] = useState<number | null>(null)
   const [highlight, setHighlight] = useState({ query: '', index: 0 })
-  const query = focused && !composing && !dismissed && !disabled ? slashQuery(prompt, caret) : null
+  const candidate = focused && !composing && !disabled ? slashQuery(prompt, caret) : null
+  const query = candidate?.start === dismissedStart ? null : candidate
   const key = query ? `${query.start}:${query.query.toLocaleLowerCase()}` : ''
   const skills = query ? available.skills.filter(skill => skill.enabled && skill.name.toLocaleLowerCase().includes(query.query.toLocaleLowerCase()) && (skillIds.includes(skill.id) || skillIds.length < 32)) : []
   const activeIndex = highlight.query === key ? Math.min(highlight.index, Math.max(0, skills.length - 1)) : 0
@@ -49,7 +50,7 @@ export function useSlashSkillPicker({ prompt, textareaRef, available, skillIds, 
     if (!query) return
     if (!skillIds.includes(skill.id)) onSkillsChange([...skillIds, skill.id])
     onPromptChange(prompt.slice(0, query.start) + prompt.slice(query.end))
-    setCaret(query.start); setDismissed(true)
+    setCaret(query.start); setDismissedStart(query.start)
     requestAnimationFrame(() => {
       textareaRef.current?.focus({ preventScroll: true })
       textareaRef.current?.setSelectionRange(query.start, query.start)
@@ -57,7 +58,7 @@ export function useSlashSkillPicker({ prompt, textareaRef, available, skillIds, 
   }
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): boolean => {
     if (!query || event.nativeEvent.isComposing || event.keyCode === 229) return false
-    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setDismissed(true); return true }
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setDismissedStart(query.start); return true }
     if (event.key === 'Enter') { event.preventDefault(); if (activeSkill) select(activeSkill); return true }
     if ((event.key === 'Tab' || event.key === 'ArrowDown' || event.key === 'ArrowUp') && skills.length && !event.ctrlKey && !event.metaKey && !event.altKey) {
       event.preventDefault()
@@ -75,12 +76,17 @@ export function useSlashSkillPicker({ prompt, textareaRef, available, skillIds, 
       'aria-autocomplete': 'list' as const,
       'aria-activedescendant': open && activeSkill ? `${listId}-${activeSkill.id}` : undefined,
       onFocus: () => { setFocused(true); updateCaret() },
-      onBlur: () => { setFocused(false); setDismissed(false) },
+      onBlur: () => setFocused(false),
       onSelect: updateCaret,
       onCompositionStart: () => setComposing(true),
       onCompositionEnd: () => { setComposing(false); updateCaret() }
     },
-    onChange: () => { setFocused(document.activeElement === textareaRef.current); setDismissed(false); updateCaret() },
+    onChange: () => {
+      const textarea = textareaRef.current
+      setFocused(document.activeElement === textarea)
+      if (textarea && dismissedStart !== null && textarea.value[dismissedStart] !== '/') setDismissedStart(null)
+      updateCaret()
+    },
     onKeyDown
   }
 }

@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Modal } from '@/components/ui/modal'
 import { Switch } from '@/components/ui/switch'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { PROVIDER_PRESETS, selectedModelThinking, thinkingLabel, type ModelDescriptor, type ModelProfile, type ModelProfileView, type ModelSettings, type ProviderId } from '../../shared/models'
 import { ModelProfileFields } from './components/ModelProfileFields'
 import { ModelProfileActions } from './components/ModelProfileActions'
@@ -202,7 +203,7 @@ export default function ModelSettingsPanel({ settings, onChange, onBusyChange }:
       <aside className="provider-sidebar" aria-label="已配置的模型供应商">
         <p className="provider-sidebar-label">已配置的供应商</p>
         <nav aria-label="供应商列表">{providers.map(provider => { const count = settings.profiles.filter(item => item.provider === provider).length; return <Button key={provider} variant="ghost" disabled={isBusy} className="provider-nav-item" aria-current={provider === currentProvider ? 'page' : undefined} onClick={() => { setSelected(provider); setQuery(''); setError(''); setNotice('') }}>
-          <ProviderIcon provider={provider} /><span className="provider-nav-name">{providerName(provider)}</span><small aria-label={`${count} 个模型`} title={`${count} 个模型`}>{count}</small>
+          <ProviderIcon provider={provider} /><span className="provider-nav-name">{providerName(provider)}</span><Tooltip><TooltipTrigger asChild><small aria-label={`${count} 个模型`}>{count}</small></TooltipTrigger><TooltipContent>{count} 个模型</TooltipContent></Tooltip>
         </Button> })}</nav>
         {!providers.length && <p className="hint provider-sidebar-empty">添加供应商后，将在这里显示。</p>}
         <Button variant="outline" className="provider-add" disabled={isBusy} onClick={() => { setEditing(false); setDialog('choose'); setProviderQuery(''); setError(''); setNotice('') }}><Plus size={16} />添加供应商</Button>
@@ -216,7 +217,7 @@ export default function ModelSettingsPanel({ settings, onChange, onBusyChange }:
           <div className="search-field provider-model-search"><Search size={15} /><Input aria-label="搜索模型" placeholder="搜索模型名称或 ID" value={query} onChange={event => setQuery(event.target.value)} /></div>
           {currentProvider === 'openrouter' ? <><p className="hint">展示所有支持文字输出和工具调用的模型。已启用模型按名称排序，未启用模型按厂商分组，默认收起。</p><OpenrouterCatalog settings={settings} query={query} busy={isBusy} getThinkingLabel={modelThinkingLabel} onConfigure={item => configure('openrouter', item)} onToggle={toggleModel} /></> : <><PagedList items={filteredModels} label="供应商模型" resetKey={`${currentProvider}:${query}`}>{page => <ul className="provider-model-list">{page.map(item => { const thinking = modelThinkingLabel(item); return <li key={item.id}>
             <ProviderIcon provider={item.provider} model={item.model} /><div className="provider-model-name model-priced-name" title={item.available === false ? `${item.name}（当前不可用）` : item.enabled === false ? `${item.name}（已停用）` : item.name}><strong>{item.name}{item.available === false ? ' · 当前不可用' : ''}</strong><ModelPriceTag descriptor={descriptors.get(`${item.provider}:${item.model}`)} /></div>
-            <div className="provider-model-actions">{thinking && <span className="provider-model-thinking" title={`当前推理强度：${thinking}`}>{thinking}</span>}<Button size="icon" variant="ghost" disabled={isBusy} aria-label={`配置 ${item.name}`} title="模型高级设置" onClick={() => configure(item.provider, item)}><SlidersHorizontal size={16} /></Button>
+            <div className="provider-model-actions">{thinking && <Tooltip><TooltipTrigger asChild><span className="provider-model-thinking">{thinking}</span></TooltipTrigger><TooltipContent>当前推理强度：{thinking}</TooltipContent></Tooltip>}<Tooltip><TooltipTrigger asChild><span className="inline-flex" tabIndex={isBusy ? 0 : undefined}><Button size="icon" variant="ghost" disabled={isBusy} aria-label={`配置 ${item.name}`} onClick={() => configure(item.provider, item)}><SlidersHorizontal size={16} /></Button></span></TooltipTrigger><TooltipContent>模型高级设置</TooltipContent></Tooltip>
               <Switch aria-label={`启用 ${item.name}`} checked={item.enabled !== false} disabled={isBusy || item.available === false} onCheckedChange={() => toggleModel(item)} /></div>
           </li> })}</ul>}</PagedList>
           {!filteredModels.length && <p className="provider-no-results">{query ? '没有匹配的模型，请尝试其他关键词。' : currentProvider === 'ollama' ? '本地还没有模型。请使用 ollama pull 下载模型，再点击“刷新模型”。' : '暂无模型。'}</p>}

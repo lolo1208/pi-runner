@@ -11,7 +11,6 @@ import { ModelSettingsStore } from './models/model-settings-store'
 import { ModelService, modelResult } from './models/model-service'
 import type { ChatgptService } from './models/chatgpt-service'
 import { ModelError } from './models/model-validation'
-import type { SandboxService } from './models/sandbox-service'
 import { performFileAction } from './file-actions'
 import { SleepBlocker } from './sleep-blocker'
 import type { FileAction } from '../shared/api'
@@ -28,7 +27,6 @@ interface IpcHandlerDependencies {
   getModelSettings: () => ModelSettingsStore
   getModelService: () => ModelService
   getChatgptService?: () => ChatgptService
-  getSandboxService?: () => SandboxService
   setSnapshotManager: (manager: ShadowGitManager | undefined) => void
   getSleepBlocker?: () => SleepBlocker
   dataDirectory: string
@@ -166,21 +164,6 @@ export function registerIpcHandlers(dependencies: IpcHandlerDependencies): void 
   handle(IPC_CHANNELS.codePreview, (project, file, ranges, snapshotId) => snapshotId === undefined
     ? readCodePreview(parseString(project), parseString(file), ranges)
     : readCodePreviewSnapshot(dependencies.dataDirectory, parseString(project), parseString(file), ranges, parseString(snapshotId)))
-  const sandbox = (): SandboxService => {
-    const service = dependencies.getSandboxService?.()
-    if (!service) throw new ModelError('安全执行环境尚未初始化')
-    return service
-  }
-  handle(IPC_CHANNELS.sandboxStatus, () => modelResult(async () => sandbox().status(requireSnapshotManager().getRoot())))
-  handle(IPC_CHANNELS.sandboxEnsure, () => modelResult(async () => {
-    return sandbox().ensure(requireSnapshotManager().getRoot())
-  }))
-  handle(IPC_CHANNELS.sandboxStart, action => modelResult(async () => {
-    if (!['configure', 'diagnose', 'check'].includes(String(action))) throw new ModelError('安全执行操作无效')
-    if (dependencies.getModelService().isBusy()) throw new ModelError('请先停止当前任务，再配置或排查安全执行环境')
-    return sandbox().start(requireSnapshotManager().getRoot(), action as 'configure' | 'diagnose' | 'check')
-  }))
-  handle(IPC_CHANNELS.sandboxStop, () => modelResult(async () => { sandbox().stop() }))
   handle(IPC_CHANNELS.planInteraction, (requestId, conversationId, interactionId, response) => modelResult(async () => dependencies.getModelService().respondPlanInteraction(requestId, conversationId, interactionId, response)))
   handle(IPC_CHANNELS.permissionMode, (id, mode) => modelResult(async () => {
     const conversationId = parseString(id)
@@ -254,9 +237,7 @@ export function registerIpcHandlers(dependencies: IpcHandlerDependencies): void 
     const previous = parseString(previousValue), next = parseString(nextValue)
     if (!path.isAbsolute(previous) || !path.isAbsolute(next)) throw new Error('项目路径必须是绝对路径')
     if (dependencies.getModelService().isBusy()) throw new Error('请结束当前任务后再修改项目路径')
-    if (dependencies.getSandboxService?.()?.busy) throw new Error('安全执行环境正在准备，请完成后再修改项目路径')
     const manager = await ShadowGitManager.open(next, dependencies.dataDirectory)
-    await dependencies.getSandboxService?.()?.rebindProject(previous, manager.getRoot())
     dependencies.setSnapshotManager(manager)
     return manager.getRoot()
   })
@@ -334,6 +315,7 @@ export function registerIpcHandlers(dependencies: IpcHandlerDependencies): void 
   handle(IPC_CHANNELS.chatgptUsage, () => modelResult(() => chatgpt().usage()))
   handle(IPC_CHANNELS.modelSave, input => modelResult(() => dependencies.getModelSettings().save(input)))
   handle(IPC_CHANNELS.modelActivate, id => modelResult(() => dependencies.getModelSettings().setActive(id)))
+  handle(IPC_CHANNELS.modelReview, id => modelResult(() => dependencies.getModelService().setReviewModel(id)))
   handle(IPC_CHANNELS.modelTest, (id, requestId) => modelResult(() => dependencies.getModelService().request(id, requestId, null, true)))
   handle(IPC_CHANNELS.modelChat, (id, requestId, messages, customPrompt, context, agent) => modelResult(() => { if (restoringFiles) throw new ModelError('正在恢复文件，请完成后再发送消息'); loadPermissions(); return dependencies.getModelService().request(id, requestId, messages, false, customPrompt, context, agent) }))
   handle(IPC_CHANNELS.agentHistory, id => modelResult(() => dependencies.getModelService().history(id)))

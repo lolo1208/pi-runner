@@ -13,7 +13,7 @@ export interface CredentialCipher {
   decrypt(value: Buffer): string
 }
 interface StoredProfile { profile: ModelProfile; encryptedApiKey?: string }
-interface SettingsFile { version: 1; activeProfileId: string | null; profiles: StoredProfile[]; providers?: ModelProviderConnection[]; encryptedOpenrouterApiKey?: string }
+interface SettingsFile { version: 1; activeProfileId: string | null; reviewProfileId: string | null; profiles: StoredProfile[]; providers?: ModelProviderConnection[]; encryptedOpenrouterApiKey?: string }
 
 export class ModelSettingsStore {
   private queue: Promise<unknown> = Promise.resolve()
@@ -28,7 +28,7 @@ export class ModelSettingsStore {
   private async read(): Promise<SettingsFile> {
     let text: string
     try { text = await readFile(this.filePath, 'utf8') } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { version: 1, activeProfileId: null, profiles: [] }
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { version: 1, activeProfileId: null, reviewProfileId: null, profiles: [] }
       throw new ModelError('无法读取模型配置，请检查应用数据目录权限')
     }
     try {
@@ -43,6 +43,11 @@ export class ModelSettingsStore {
       if (new Set(profiles.map(item => item.profile.id)).size !== profiles.length) throw new Error()
       const activeProfileId = raw.activeProfileId === null ? null : profileId(raw.activeProfileId)
       if (activeProfileId && !profiles.some(item => item.profile.id === activeProfileId)) throw new Error()
+      let reviewProfileId: string | null = null
+      if (raw.reviewProfileId !== undefined && raw.reviewProfileId !== null) {
+        try { reviewProfileId = profileId(raw.reviewProfileId) } catch { reviewProfileId = null }
+        if (reviewProfileId && !profiles.some(item => item.profile.id === reviewProfileId)) reviewProfileId = null
+      }
       const providers: ModelProviderConnection[] = []
       if (raw.providers !== undefined) {
         if (!Array.isArray(raw.providers) || raw.providers.length > 20) throw new Error()
@@ -69,7 +74,7 @@ export class ModelSettingsStore {
           providers.push({ provider: entry.provider as ModelProviderConnection['provider'], baseUrl: entry.provider === 'ollama' ? normalizeOllamaUrl(entry.baseUrl) : entry.provider === 'openrouter' ? OPENROUTER_BASE_URL : 'https://chatgpt.com/backend-api', models })
         }
       }
-      const settings: SettingsFile = { version: 1, profiles, activeProfileId, providers, encryptedOpenrouterApiKey: raw.encryptedOpenrouterApiKey as string | undefined }
+      const settings: SettingsFile = { version: 1, profiles, activeProfileId, reviewProfileId, providers, encryptedOpenrouterApiKey: raw.encryptedOpenrouterApiKey as string | undefined }
       this.reconcileActive(settings)
       return settings
     } catch { throw new ModelError('模型配置损坏或版本不支持，已停止读取；请备份应用数据后检查 model-settings.json') }
@@ -86,7 +91,7 @@ export class ModelSettingsStore {
   }
 
   private view(settings: SettingsFile): ModelSettings {
-    return { activeProfileId: settings.activeProfileId, encryptionAvailable: this.cipher.isAvailable(),
+    return { activeProfileId: settings.activeProfileId, reviewProfileId: settings.reviewProfileId, encryptionAvailable: this.cipher.isAvailable(),
       providers: (settings.providers ?? []).map(connection => ({ ...connection, ...(connection.provider === 'openrouter' ? { hasApiKey: Boolean(settings.encryptedOpenrouterApiKey) } : {}) })),
       profiles: settings.profiles.map(item => ({ ...this.resolvedOutput(settings, item.profile), hasApiKey: Boolean(item.profile.provider === 'openrouter' ? settings.encryptedOpenrouterApiKey : item.encryptedApiKey), available: this.available(settings, item.profile) })) }
   }
@@ -102,6 +107,7 @@ export class ModelSettingsStore {
   private reconcileActive(settings: SettingsFile): void {
     const usable = settings.profiles.filter(item => item.profile.enabled !== false && this.available(settings, item.profile))
     if (!usable.some(item => item.profile.id === settings.activeProfileId)) settings.activeProfileId = usable[0]?.profile.id ?? null
+    if (settings.reviewProfileId && !usable.some(item => item.profile.id === settings.reviewProfileId)) settings.reviewProfileId = null
   }
 
   syncOllama(baseUrl: unknown, models: ModelDescriptor[]): Promise<ModelSettings> {
@@ -217,6 +223,45 @@ export class ModelSettingsStore {
       settings.activeProfileId = selectedId
       await this.write(settings)
       return this.view(settings)
+    })
+  }
+
+  setReviewModel(id: unknown): Promise<ModelSettings> {
+    return this.serialized(async () => {
+      const settings = await this.read()
+      if (id === null || id === undefined || id === '') {
+        settings.reviewProfileId = null
+      } else {
+        const selectedId = profileId(id)
+        const entry = settings.profiles.find(item => item.profile.id === selectedId)
+        if (!entry) throw new ModelError('模型配置不存在')
+        if (entry.profile.enabled === false || !this.available(settings, entry.profile)) throw new ModelError('该模型已停用或不在本地服务中，请先启用或刷新模型列表')
+        settings.reviewProfileId = selectedId
+      }
+      await this.write(settings)
+      return this.view(settings)
+    })
+  }
+
+  /** 审核模型解析：未单独指定时跟随默认模型；不可用时返回 null，调用方回退到逐次询问。 */
+  reviewProfile(): Promise<{ profile: ModelProfile; apiKey: string } | null> {
+    return this.serialized(async () => {
+      const settings = await this.read()
+      const id = settings.reviewProfileId ?? settings.activeProfileId
+      if (!id) return null
+      const entry = settings.profiles.find(item => item.profile.id === id)
+      if (!entry || entry.profile.enabled === false || !this.available(settings, entry.profile)) return null
+      let apiKey = ''
+      const encryptedKey = entry.profile.provider === 'openrouter' ? settings.encryptedOpenrouterApiKey : entry.encryptedApiKey
+      if (encryptedKey) {
+        if (!this.cipher.isAvailable()) return null
+        try { apiKey = this.cipher.decrypt(Buffer.from(encryptedKey, 'base64')) }
+        catch { return null }
+      }
+      if (!apiKey && ['openai', 'anthropic', 'deepseek', 'openrouter'].includes(entry.profile.provider)) return null
+      const descriptor = settings.providers?.find(item => item.provider === entry.profile.provider && item.baseUrl === entry.profile.baseUrl)?.models.find(item => item.id === entry.profile.model)
+      const profile = { ...this.resolvedOutput(settings, entry.profile), contextTokens: entry.profile.contextTokens ?? descriptor?.maxContextTokens }
+      return { profile, apiKey }
     })
   }
 

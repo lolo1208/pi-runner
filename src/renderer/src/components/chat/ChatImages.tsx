@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Check, Copy, Download, File, FileText, Music, Video, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Modal } from '@/components/ui/modal'
 import type { ChatImage } from '../../../../shared/models'
 import { attachmentKind, attachmentSize, attachmentText, formatAttachmentSize } from '../../../../shared/attachments'
@@ -47,7 +48,7 @@ function AttachmentPreview({ image: preview, onClose, onUnreadable }: { image: C
     catch { setSaveError('附件保存失败，请检查保存位置的访问权限和剩余空间后重试') }
     finally { setSaving(false) }
   }
-  const saveButton = <Button type="button" variant="ghost" size="icon" className={`modal-close attachment-save${kind === 'image' ? ' image-preview-save' : ''}`} aria-label="另存为" title="另存为" disabled={saving} onClick={() => void save()}><Download size={16} aria-hidden="true" /></Button>
+  const saveButton = <Tooltip><TooltipTrigger asChild><span className="inline-flex" tabIndex={saving ? 0 : undefined}><Button type="button" variant="ghost" size="icon" className={`modal-close attachment-save${kind === 'image' ? ' image-preview-save' : ''}`} aria-label="另存为" disabled={saving} onClick={() => void save()}><Download size={16} aria-hidden="true" /></Button></span></TooltipTrigger><TooltipContent>另存为</TooltipContent></Tooltip>
   const errorMessage = saveError && <p className="attachment-save-error" role="alert">{saveError}</p>
   const markUnreadable = (): void => { setUnreadable(true); onUnreadable() }
   // 图片使用沉浸灯箱，其余附件沿用通用弹窗（标题栏、关闭按钮与遮罩一致）。
@@ -104,8 +105,8 @@ function CopyAttachmentText({ text }: { text: string }): React.JSX.Element {
     }
   }
   const label = status === 'copied' ? '已复制' : status === 'error' ? '复制失败，请重试' : '复制内容'
-  return <Button type="button" variant="ghost" size="sm" className="file-preview-copy" aria-label={label} title={label} disabled={status === 'copying'} onClick={() => void copy()}>
+  return <Tooltip><TooltipTrigger asChild><span className="inline-flex" tabIndex={status === 'copying' ? 0 : undefined}><Button type="button" variant="ghost" size="sm" className="file-preview-copy" aria-label={label} disabled={status === 'copying'} onClick={() => void copy()}>
     {status === 'copied' ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
     <span role="status" aria-live="polite">{status === 'copied' || status === 'error' ? label : ''}</span>
-  </Button>
+  </Button></span></TooltipTrigger><TooltipContent>{label}</TooltipContent></Tooltip>
 }

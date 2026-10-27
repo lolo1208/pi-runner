@@ -1,6 +1,6 @@
 import type { ChatImage, ChatMessage } from './models'
 
-/** 根据同项目已有会话选择项目沙箱模式；内部仍使用 auto，不继承完全访问。 */
+/** 根据同项目已有会话选择项目自审模式；内部仍使用 auto，不继承完全访问。 */
 export function defaultConversationPermission(project: string | null, tasks: readonly Conversation[]): import('./models').PermissionMode {
   return project && tasks.some(task => task.project === project && (task.permissionMode === 'auto' || task.permissionMode === 'full')) ? 'auto' : 'default'
 }

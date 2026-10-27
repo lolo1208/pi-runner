@@ -8,13 +8,11 @@
   "scripts": {
     "dev": "pnpm electron:install && electron-vite dev",
     "icons:generate": "node scripts/generate-icons.cjs",
-    "sandbox:prepare": "node scripts/prepare-sandbox-runtime.cjs",
-    "sandbox:build-appcontainer": "node scripts/build-appcontainer.cjs",
     "electron:install": "node scripts/install-electron.cjs",
     "typecheck": "tsc --noEmit",
     "build": "pnpm typecheck && electron-vite build",
     "preview": "pnpm electron:install && electron-vite preview",
-    "test": "vitest run --config tests/vitest.config.ts",
+    "test": "vitest run",
     "dist:win": "pnpm build && node scripts/export-release.cjs win",
     "dist:win:all": "pnpm build && node scripts/export-release.cjs win-all",
     "dist:win:portable": "pnpm build && node scripts/export-release.cjs win-portable",
@@ -58,7 +56,7 @@
     "@types/react-dom": "^19.0.0",
     "@types/unzipper": "^0.10.11",
     "@vitejs/plugin-react": "^5.0.0",
-    "electron": "^44.5.1",
+    "electron": "^44.9.3",
     "electron-builder": "^26.0.0",
     "electron-vite": "^4.0.0",
     "jsdom": "^30.1.1",
@@ -89,6 +87,10 @@
       "en-US"
     ],
     "asar": true,
+    "asarUnpack": [
+      "**/node_modules/koffi/**",
+      "**/node_modules/node-pty/**"
+    ],
     "extraResources": [
       {
         "from": "resources/icons",
@@ -100,15 +102,6 @@
       }
     ],
     "win": {
-      "extraResources": [
-        {
-          "from": "resources/sandbox-runtime",
-          "to": "sandbox-runtime",
-          "filter": [
-            "**/*"
-          ]
-        }
-      ],
       "icon": "resources/icons/icon.ico",
       "target": [
         {

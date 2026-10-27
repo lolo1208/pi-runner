@@ -31,15 +31,6 @@ const api: PiRunnerApi = {
     return () => ipcRenderer.removeListener(IPC_CHANNELS.notificationActivate, listener)
   },
   saveAttachment: (name, dataUrl) => ipcRenderer.invoke(IPC_CHANNELS.saveAttachment, name, dataUrl),
-  getSandboxStatus: () => ipcRenderer.invoke(IPC_CHANNELS.sandboxStatus),
-  ensureSandbox: () => ipcRenderer.invoke(IPC_CHANNELS.sandboxEnsure),
-  startSandbox: action => ipcRenderer.invoke(IPC_CHANNELS.sandboxStart, action),
-  stopSandbox: () => ipcRenderer.invoke(IPC_CHANNELS.sandboxStop),
-  onSandboxState: callback => {
-    const listener = (_event: Electron.IpcRendererEvent, state: import('../shared/sandbox').SandboxState): void => callback(state)
-    ipcRenderer.on(IPC_CHANNELS.sandboxState, listener)
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.sandboxState, listener)
-  },
   respondPlanInteraction: (requestId, conversationId, interactionId, response) => ipcRenderer.invoke(IPC_CHANNELS.planInteraction, requestId, conversationId, interactionId, response),
   getToolApprovalPreview: (requestId, conversationId, approvalId) => ipcRenderer.invoke(IPC_CHANNELS.toolApprovalPreview, requestId, conversationId, approvalId),
   setPermissionMode: (id, mode) => ipcRenderer.invoke(IPC_CHANNELS.permissionMode, id, mode),
@@ -72,6 +63,7 @@ const api: PiRunnerApi = {
   getModelSettings: () => ipcRenderer.invoke(IPC_CHANNELS.modelSettings),
   saveModelProfile: input => ipcRenderer.invoke(IPC_CHANNELS.modelSave, input),
   setActiveModel: id => ipcRenderer.invoke(IPC_CHANNELS.modelActivate, id),
+  setReviewModel: id => ipcRenderer.invoke(IPC_CHANNELS.modelReview, id),
   testModel: (id, requestId) => ipcRenderer.invoke(IPC_CHANNELS.modelTest, id, requestId),
   chatWithModel: (id, requestId, messages, customPrompt, context, agent) => ipcRenderer.invoke(IPC_CHANNELS.modelChat, id, requestId, messages, customPrompt, context, agent),
   getAgentHistory: id => ipcRenderer.invoke(IPC_CHANNELS.agentHistory, id),

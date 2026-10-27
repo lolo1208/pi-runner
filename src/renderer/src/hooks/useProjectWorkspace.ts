@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useConversationPersistence } from './useConversationPersistence'
 import type { ChangedFile, Checkpoint, FileDiff } from '../../../shared/api'
 import type { Task } from '../app-types'
+import { UNLINKED_PROJECT_LABEL } from '../app-types'
 import { defaultConversationPermission } from '../../../shared/conversations'
 import { readProjectMetaMap, writeProjectMetaMap, defaultProjectName, type ProjectMetaMap } from '../project-meta'
 
@@ -29,7 +30,7 @@ function readProjectList(): string[] {
   }
 }
 
-function createTask(project: string, tasks: Task[]): Task {
+function createTask(project: string | null, tasks: Task[]): Task {
   return { id: crypto.randomUUID(), title: '新建对话', preview: '开始一段新的对话', project, updatedAt: Date.now(), permissionMode: defaultConversationPermission(project, tasks) }
 }
 
@@ -114,7 +115,7 @@ export function useProjectWorkspace() {
   useConversationPersistence(loaded, tasks, selectedId, setError)
 
   const currentTask = tasks.find(item => item.id === selectedId) ?? tasks[0]
-  const snapshotKey = currentTask?.project ?? project ?? 'unlinked'
+  const snapshotKey = currentTask ? currentTask.project ?? 'unlinked' : project ?? 'unlinked'
   const projectSnapshot = snapshotsByProject[snapshotKey] ?? emptySnapshotState
   const isChatBusy = busyTasks.length > 0
 
@@ -163,15 +164,23 @@ export function useProjectWorkspace() {
     }
   }
 
-  const addTask = (root: string): void => {
+  const addTask = (root: string | null): void => {
     const task = createTask(root, tasks)
     setTasks(items => [task, ...items])
     setSelectedId(task.id)
     setComposerFocusTaskId(task.id)
     // 新建对话时自动展开所属项目
-    setCollapsedProjects(items => items.includes(root) ? items.filter(item => item !== root) : items)
+    const group = root ?? UNLINKED_PROJECT_LABEL
+    setCollapsedProjects(items => items.includes(group) ? items.filter(item => item !== group) : items)
     setQuery('')
     setError('')
+  }
+
+  const createOrdinaryTask = (): void => {
+    if (!loaded || isBusy) return
+    setProject(null)
+    setProjectPickerOpen(false)
+    addTask(null)
   }
 
   const createProjectTask = (): void => {
@@ -199,6 +208,7 @@ export function useProjectWorkspace() {
 
   const selectTask = (task: Task): void => {
     if (!task.project || task.project === project) {
+      if (!task.project) setProject(null)
       setSelectedId(task.id)
       return
     }
@@ -219,9 +229,10 @@ export function useProjectWorkspace() {
     const finishRemoval = (): void => {
       setTasks(items => items.filter(item => item.id !== task.id))
       if (isCurrent) {
+        if (!fallback?.project) setProject(null)
         setSelectedId(fallback?.id ?? null)
         setQuery('')
-        if (fallback?.project) setCollapsedProjects(items => items.filter(root => root !== fallback.project))
+        setCollapsedProjects(items => items.filter(root => root !== (fallback?.project ?? UNLINKED_PROJECT_LABEL)))
       }
     }
     if (isCurrent && fallback?.project && fallback.project !== project) {
@@ -261,8 +272,9 @@ export function useProjectWorkspace() {
           setSelectedId(fallback.id)
         } else {
           setProject(null)
-          setSelectedId(null)
+          setSelectedId(fallback?.id ?? null)
         }
+        setCollapsedProjects(items => items.filter(item => item !== (fallback?.project ?? UNLINKED_PROJECT_LABEL)))
       } else if (project === root) {
         setProject(null)
       }
@@ -396,6 +408,7 @@ export function useProjectWorkspace() {
     updateProjectSnapshot,
     runAction,
     createProjectTask,
+    createOrdinaryTask,
     chooseExistingProject,
     saveProjectEdit,
     selectTask,

@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState, type ReactNode } from 'react'
 import { Check, Copy } from 'lucide-react'
 import { Button } from '../ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 import { useSyntaxHighlight } from '../../hooks/useSyntaxHighlight'
 import type { SyntaxResult, SyntaxToken } from '../../lib/syntax-types'
 
@@ -38,9 +39,9 @@ function CopyableCodeBlock({ code, children }: { code: string; children: ReactNo
   const label = status === 'copied' ? '已复制' : status === 'error' ? '复制失败，请重试' : '复制内容'
   return <div className="markdown-code-block">
     {children}
-    <Button type="button" variant="ghost" size="sm" className="markdown-code-copy" aria-label={label} title={label} disabled={status === 'copying'} onClick={() => void copy()}>
+    <Tooltip><TooltipTrigger asChild><span className="inline-flex" tabIndex={status === 'copying' ? 0 : undefined}><Button type="button" variant="ghost" size="sm" className="markdown-code-copy" aria-label={label} disabled={status === 'copying'} onClick={() => void copy()}>
       {status === 'copied' ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
       <span role="status" aria-live="polite">{status === 'copied' || status === 'error' ? label : ''}</span>
-    </Button>
+    </Button></span></TooltipTrigger><TooltipContent>{label}</TooltipContent></Tooltip>
   </div>
 }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Check, ChevronRight, FilePlus, Plus, Puzzle, Settings2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent } from '@/components/ui/dropdown-menu'
 import type { LocalSkill } from '../../../../shared/skills'
 import { unwrapModelResult } from '../../model-result'
@@ -39,14 +40,14 @@ export function ComposerAddMenu({ available, ids, onChange, onAddFiles, onConfig
   const enabled = available.skills.filter(skill => skill.enabled)
   const pages = Math.max(1, Math.ceil(enabled.length / 40))
   const page = Math.min(selectedPage, pages - 1)
-  return <DropdownMenu onOpenChange={open => { if (open) { available.refresh(); setPage(0) } }}><DropdownMenuTrigger asChild><Button type="button" className="attach-image-button" aria-label="添加附件" title="添加图片、其他文件或技能" disabled={disabled}><Plus size={17} /></Button></DropdownMenuTrigger>
+  return <Tooltip><DropdownMenu onOpenChange={open => { if (open) { available.refresh(); setPage(0) } }}><TooltipTrigger asChild><DropdownMenuTrigger asChild><Button type="button" className="attach-image-button" aria-label="添加附件" disabled={disabled}><Plus size={17} /></Button></DropdownMenuTrigger></TooltipTrigger>
     <DropdownMenuContent side="top" align="start" sideOffset={8}>
       <DropdownMenuItem disabled={filesDisabled} onSelect={onAddFiles}><FilePlus size={16} />添加图片或其他文件</DropdownMenuItem>
       <DropdownMenuSub><DropdownMenuSubTrigger><Puzzle size={16} />选择技能<ChevronRight className="skill-menu-chevron" size={14} /></DropdownMenuSubTrigger><DropdownMenuSubContent sideOffset={4} className="composer-skills-menu">
-        {available.error ? <><div className="file-context-menu-error" role="alert">{available.error}</div><DropdownMenuItem onSelect={event => { event.preventDefault(); available.refresh() }}>重新读取</DropdownMenuItem></> : enabled.length ? enabled.slice(page * 40, (page + 1) * 40).map(skill => <DropdownMenuItem key={skill.id} title={skill.description} onSelect={() => onChange(ids.includes(skill.id) ? ids.filter(id => id !== skill.id) : [...ids, skill.id])} disabled={!ids.includes(skill.id) && ids.length >= 32}><Puzzle size={14} /><span className="skill-menu-name">{skill.name}</span>{ids.includes(skill.id) && <Check size={14} aria-label="已选择" />}</DropdownMenuItem>) : <DropdownMenuItem disabled>{available.loading ? '正在读取技能…' : '暂无已启用的技能，请在设置中安装或启用'}</DropdownMenuItem>}
+        {available.error ? <><div className="file-context-menu-error" role="alert">{available.error}</div><DropdownMenuItem onSelect={event => { event.preventDefault(); available.refresh() }}>重新读取</DropdownMenuItem></> : enabled.length ? enabled.slice(page * 40, (page + 1) * 40).map(skill => <Tooltip key={skill.id}><TooltipTrigger asChild><DropdownMenuItem onSelect={() => onChange(ids.includes(skill.id) ? ids.filter(id => id !== skill.id) : [...ids, skill.id])} disabled={!ids.includes(skill.id) && ids.length >= 32}><Puzzle size={14} /><span className="skill-menu-name">{skill.name}</span>{ids.includes(skill.id) && <Check size={14} aria-label="已选择" />}</DropdownMenuItem></TooltipTrigger>{skill.description && <TooltipContent side="right">{skill.description}</TooltipContent>}</Tooltip>) : <DropdownMenuItem disabled>{available.loading ? '正在读取技能…' : '暂无已启用的技能，请在设置中安装或启用'}</DropdownMenuItem>}
         {pages > 1 && <><DropdownMenuItem disabled={page === 0} onSelect={event => { event.preventDefault(); setPage(page - 1) }}>上一页技能</DropdownMenuItem><div className="hint" role="status">第 {page + 1} / {pages} 页 · 输入 / 可搜索全部技能</div><DropdownMenuItem disabled={page === pages - 1} onSelect={event => { event.preventDefault(); setPage(page + 1) }}>下一页技能</DropdownMenuItem></>}
         <DropdownMenuItem onSelect={onConfigureSkills}><Settings2 size={14} />配置技能</DropdownMenuItem>
       </DropdownMenuSubContent></DropdownMenuSub>
     </DropdownMenuContent>
-  </DropdownMenu>
+  </DropdownMenu><TooltipContent side="top" sideOffset={6}>添加图片、其他文件或技能</TooltipContent></Tooltip>
 }

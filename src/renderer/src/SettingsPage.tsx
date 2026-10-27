@@ -16,11 +16,11 @@ interface Props {
   initialSection: string
 }
 const sections = [
-  { id: 'general', label: '通用', icon: Settings, keywords: '默认 模型 全局 提示词 指令 压缩 阈值 差异 对比 内联 分栏 快照 快捷键 Ctrl Enter 换行 发送' },
+  { id: 'general', label: '通用', icon: Settings, keywords: '默认 模型 审核 自审 全局 提示词 指令 压缩 阈值 差异 对比 内联 分栏 快照 快捷键 Ctrl Enter 换行 发送' },
   { id: 'appearance', label: '外观', icon: Palette, keywords: '主题 浅色 深色 跟随系统 字体' },
   { id: 'models', label: '模型供应商', icon: Boxes, keywords: 'API Key 模型 参数 服务商 配置 超时 Temperature Token Base URL 协议' },
   { id: 'skills', label: '技能', icon: Puzzle, keywords: 'Skill 本地 安装 启用 禁用' },
-  { id: 'about', label: '关于', icon: Info, keywords: '版本 存储 工具 安全 沙箱 差异 快照' }
+  { id: 'about', label: '关于', icon: Info, keywords: '版本 存储 工具 安全 自审 差异 快照' }
 ]
 export default function SettingsPage(props: Props): React.JSX.Element {
   const [section, setSection] = useState(props.initialSection)
