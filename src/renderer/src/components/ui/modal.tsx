@@ -21,6 +21,7 @@ interface ModalProps {
   /** 简易模式：不渲染面板标题栏，仅保留无障碍标题和关闭按钮，内容由调用方完全接管（如图片预览灯箱） */
   bare?: boolean
   contentClassName?: string
+  onOpenAutoFocus?: (event: Event) => void
   onCloseAutoFocus?: (event: Event) => void
   children: ReactNode
 }
@@ -29,7 +30,7 @@ interface ModalProps {
  * 通用模态弹窗：统一的背景遮罩、居中面板、标题栏和关闭按钮。
  * 默认点击遮罩不会关闭，可通过 closeOnBackdropClick 启用；Escape 关闭（busy 时可通过 closeDisabled 阻止）。
  */
-export function Modal({ open, onOpenChange, title, description, headingExtra, closeExtra, closeLabel = '关闭', closeDisabled = false, closeOnBackdropClick = false, closeClassName, bare = false, contentClassName, onCloseAutoFocus, children }: ModalProps): React.JSX.Element {
+export function Modal({ open, onOpenChange, title, description, headingExtra, closeExtra, closeLabel = '关闭', closeDisabled = false, closeOnBackdropClick = false, closeClassName, bare = false, contentClassName, onOpenAutoFocus, onCloseAutoFocus, children }: ModalProps): React.JSX.Element {
   const previousElementRef = useRef<HTMLElement | null>(null)
   useEffect(() => {
     if (open) previousElementRef.current = document.activeElement as HTMLElement | null
@@ -46,6 +47,7 @@ export function Modal({ open, onOpenChange, title, description, headingExtra, cl
         onEscapeKeyDown={event => { if (closeDisabled) event.preventDefault() }}
         onPointerDownOutside={event => { if (!closeOnBackdropClick || closeDisabled) event.preventDefault() }}
         onFocusOutside={event => event.preventDefault()}
+        onOpenAutoFocus={onOpenAutoFocus}
         onClick={event => {
           if (bare && closeOnBackdropClick && !closeDisabled && event.target === event.currentTarget) onOpenChange(false)
         }}

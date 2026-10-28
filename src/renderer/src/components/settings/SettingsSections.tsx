@@ -8,7 +8,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { ArrowRightToLine, Check, Copy, GitCompare, Lock, Monitor, Moon, RotateCcw, ShieldCheck, Sliders, Sun } from 'lucide-react'
 import type { Preferences, ThemePreference } from '../../preferences'
 import { useLayoutEffect, useRef, useState } from 'react'
-import { findModelDescriptor, MAX_CUSTOM_PROMPT_LENGTH, PROVIDER_PRESETS, type ModelSettings } from '../../../../shared/models'
+import { findModelDescriptor, MAX_CUSTOM_PROMPT_LENGTH, PROVIDER_PRESETS, REVIEW_MODEL_OFF, type ModelSettings } from '../../../../shared/models'
 import { unwrapModelResult } from '../../model-result'
 import { ModelIcon } from '../chat/ModelIcon'
 import { ModelPriceTag } from '../ModelPriceTag'
@@ -40,6 +40,7 @@ export function GeneralSettingsSection({ preferences, onPreferences, isMac, sett
   const [promptFocused, setPromptFocused] = useState(false)
   const showPromptSuggestion = promptFocused && preferences.customPrompt === ''
   const usableProfiles = settings?.profiles.filter(item => item.enabled !== false && item.available !== false) ?? []
+  const reviewValue = usableProfiles.some(item => item.id === settings?.reviewProfileId) ? settings!.reviewProfileId! : settings?.reviewDisabled ? REVIEW_MODEL_OFF : 'follow-default'
   const changeDefault = async (id: string): Promise<void> => {
     if (savingRef.current || id === settings?.activeProfileId) return
     savingRef.current = true; setSaving(true); onBusyChange(true); setError('')
@@ -48,7 +49,7 @@ export function GeneralSettingsSection({ preferences, onPreferences, isMac, sett
     finally { savingRef.current = false; setSaving(false); onBusyChange(false) }
   }
   const changeReviewModel = async (id: string): Promise<void> => {
-    if (savingRef.current || id === (settings?.reviewProfileId ?? 'follow-default')) return
+    if (savingRef.current || id === reviewValue) return
     savingRef.current = true; setSaving(true); onBusyChange(true); setError('')
     try { onModelSettingsChange(unwrapModelResult(await window.piRunner.setReviewModel(id === 'follow-default' ? null : id))) }
     catch (e) { setError(e instanceof Error ? e.message : '审核模型保存失败，请重试。') }
@@ -84,14 +85,13 @@ export function GeneralSettingsSection({ preferences, onPreferences, isMac, sett
           <SelectContent>{usableProfiles.map(item => <SelectItem key={item.id} value={item.id} textValue={`${item.name} · ${PROVIDER_PRESETS.find(provider => provider.id === item.provider)?.label ?? item.provider}`}><span className="model-name-with-icon model-priced-name"><span aria-hidden="true"><ModelIcon model={item.model} provider={item.provider} /></span><span className="model-price-name-text">{item.name} · {PROVIDER_PRESETS.find(provider => provider.id === item.provider)?.label ?? item.provider}</span><ModelPriceTag descriptor={findModelDescriptor(settings?.providers, item)} /></span></SelectItem>)}</SelectContent>
         </Select></div>
       </div>
-      {saving && <p className="hint" role="status">正在保存模型设置…</p>}
       {error && <p className="error" role="alert">{error}</p>}
       <div className="settings-divider" />
       <div className="setting-row">
-        <div><h3>默认审核模型</h3><p>项目自审模式下审核文件修改与命令；可跟随默认模型。模型不可用、审核超时或使用 ChatGPT 订阅时转交你确认。</p></div>
-        <div className="settings-select-control settings-model-select"><Select value={usableProfiles.some(item => item.id === settings?.reviewProfileId) ? settings!.reviewProfileId! : 'follow-default'} disabled={saving || !settings} onValueChange={id => { void changeReviewModel(id) }}>
-          <SelectTrigger aria-label="默认审核模型"><SelectValue placeholder="跟随默认模型" /></SelectTrigger>
-          <SelectContent><SelectItem value="follow-default">跟随默认模型</SelectItem>{usableProfiles.map(item => <SelectItem key={item.id} value={item.id} textValue={`${item.name} · ${PROVIDER_PRESETS.find(provider => provider.id === item.provider)?.label ?? item.provider}`}><span className="model-name-with-icon model-priced-name"><span aria-hidden="true"><ModelIcon model={item.model} provider={item.provider} /></span><span className="model-price-name-text">{item.name} · {PROVIDER_PRESETS.find(provider => provider.id === item.provider)?.label ?? item.provider}</span><ModelPriceTag descriptor={findModelDescriptor(settings?.providers, item)} /></span></SelectItem>)}</SelectContent>
+        <div><h3>审核模型</h3><p>项目自审模式下辅助审核文件修改与命令，审核结果存疑或模型不可用时交由用户确认。</p></div>
+        <div className="settings-select-control settings-model-select"><Select value={reviewValue} disabled={saving || !settings} onValueChange={id => { void changeReviewModel(id) }}>
+          <SelectTrigger aria-label="审核模型"><SelectValue placeholder="使用默认模型" /></SelectTrigger>
+          <SelectContent><SelectItem value={REVIEW_MODEL_OFF}>关闭</SelectItem><SelectItem value="follow-default">使用默认模型</SelectItem>{usableProfiles.map(item => <SelectItem key={item.id} value={item.id} textValue={`${item.name} · ${PROVIDER_PRESETS.find(provider => provider.id === item.provider)?.label ?? item.provider}`}><span className="model-name-with-icon model-priced-name"><span aria-hidden="true"><ModelIcon model={item.model} provider={item.provider} /></span><span className="model-price-name-text">{item.name} · {PROVIDER_PRESETS.find(provider => provider.id === item.provider)?.label ?? item.provider}</span><ModelPriceTag descriptor={findModelDescriptor(settings?.providers, item)} /></span></SelectItem>)}</SelectContent>
         </Select></div>
       </div>
       <div className="settings-divider" />

@@ -3,12 +3,13 @@ import path from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import { createAgentSession, createExtensionRuntime, estimateTokens as estimatePiTokens, SessionManager, SettingsManager, type AgentSession, type ResourceLoader, type ToolDefinition } from '@earendil-works/pi-coding-agent'
 import type { AssistantMessage, Usage } from '@earendil-works/pi-ai'
-import type { ChatExecution, ChatMessage, ChatWorkItem, ModelProfile, ModelReply, ModelRateLimit, AgentRequestOptions, AgentEvent, OutputSpeed, ReviewDecision, ToolReviewRequest } from '../../shared/models'
+import type { ChatExecution, ChatMessage, ChatWorkItem, ModelProfile, ModelReply, ModelRateLimit, AgentRequestOptions, AgentEvent, OutputSpeed, ToolReviewResult, ToolReviewRequest } from '../../shared/models'
 import { systemOutputTokens } from '../../shared/output-tokens'
 import { estimateContextTokens, estimateTextTokens, normalizeCompressionThreshold, type ContextOptions } from '../../shared/context'
 import { ShadowGitManager, type PendingCheckpoint } from '../snapshot/shadow-git-manager'
 import { PiAttachments } from './pi-attachments'
 import { createPiProvider } from './pi-provider'
+import { thinkingText } from './pi-thinking'
 import { piProjectTools } from './pi-tools'
 import { emptyReplyMessage } from './model-empty-reply'
 import { ModelError, profileId } from './model-validation'
@@ -19,7 +20,7 @@ import os from 'node:os'
 import { ToolApprovalManager } from './tool-permissions'
 import { PERMISSION_MODES, type PermissionMode } from '../../shared/models'
 import { PlanInteractionManager } from './plan-interactions'
-import { PLAN_INSTRUCTION, planTools } from './plan-tools'
+import { PLAN_INSTRUCTION, PLAN_READ_TOOLS, planTools } from './plan-tools'
 import { SkillStore } from '../skill-store'
 import { saveCodePreviewSnapshot } from '../code-preview-snapshots'
 import { collectCodeReferences } from '../../shared/code-preview'
@@ -30,6 +31,8 @@ const toolActions: Record<string, string> = {
   bash: '运行命令',
   powershell: '运行命令',
   read: '读取',
+  read_many: '批量读取文件',
+  download_many: '批量下载文件',
   write: '写入',
   download: '下载文件',
   edit: '编辑',
@@ -58,7 +61,7 @@ export interface PiAgentDependencies {
   chatgpt?: ChatgptService
   protectedDirectories?: string[]
   /** 工具权限第二层自动审核；未提供时回退到逐次询问。 */
-  review?(request: ToolReviewRequest): Promise<ReviewDecision>
+  review?(request: ToolReviewRequest): Promise<ToolReviewResult>
 }
 
 export class PiAgentService {
@@ -243,7 +246,8 @@ export class PiAgentService {
           usage: { inputTokens: message.usage.input + message.usage.cacheRead + message.usage.cacheWrite, outputTokens: message.usage.output }
         } : {}),
         work: message.content.flatMap((block, index): import('../../shared/models').ChatWorkItem[] => {
-          if (block.type === 'thinking') return [{ id: `${entry.id}-${index}`, kind: 'thinking', content: block.thinking }]
+          // 原生历史中的消息已结束；部分模型只返回加密推理，不提供可展示文本。
+          if (block.type === 'thinking') return [{ id: `${entry.id}-${index}`, kind: 'thinking', content: thinkingText(block), completed: true }]
           if (block.type !== 'toolCall') return []
           const result = results.get(block.id)
           const skillName = skills.get(String(block.arguments.skillId ?? ''))?.name ?? skillCallNames.get(block.id)
@@ -365,6 +369,7 @@ export class PiAgentService {
     const waitingTools = new Map<string, string>()
     const liveWork = new Map<string, Partial<ChatWorkItem>>()
     let outputTimer: ReturnType<typeof setTimeout> | undefined
+    let liveAssistant: AssistantMessage | undefined
     const currentTranscript = (): ChatMessage[] => {
       const messages = this.transcript(manager, displaySkills).map<ChatMessage>(message => !message.call || previousEntries.has(message.historyId ?? '') ? message : {
       ...message, call: { ...message.call, work: message.call.work.map(item => {
@@ -373,6 +378,15 @@ export class PiAgentService {
         const waiting = waitingTools.get(item.id) ?? (['ask_user_question', 'submit_plan'].includes(item.name ?? '') ? waitingTools.get('plan-interaction') : undefined)
         return { ...item, state: 'queued', ...live, ...(waiting ? { state: 'waiting', stateText: waiting } : {}) }
       }) }
+      })
+      // 流式思考尚未写入原生历史，同时发布正文快照，避免刷新详情时清掉流式正文。
+      if (liveAssistant) messages.push({
+        role: 'assistant', historyId: `live-thinking:${requestId}:${liveAssistant.timestamp}`,
+        content: liveAssistant.content.filter(block => block.type === 'text').map(block => block.text).join('\n'),
+        execution: { model: profile.model, provider: profile.provider },
+        call: { work: liveAssistant.content.flatMap((block, index): ChatWorkItem[] => block.type === 'thinking'
+          ? [{ id: `live-thinking:${liveAssistant!.timestamp}:${index}`, kind: 'thinking', content: thinkingText(block), completed: false }]
+          : []) }
       })
       // 工具开始事件已经给出了参数；即使原生历史尚未保存，也立即提供可展开的记录。
       const recorded = new Set(messages.flatMap(message => message.call?.work.map(item => item.id) ?? []))
@@ -433,21 +447,23 @@ export class PiAgentService {
       mode, project: snapshot?.getRoot(), workspace: !project ? cwd : undefined, protectedDirectories: [this.dependencies.dataDirectory, ...(this.dependencies.protectedDirectories ?? [])], downloadFetch: this.dependencies.downloadFetch,
       approve: async (id, tool, args, reason, toolSignal, mustConfirm) => {
         // 第二层：项目自审模式下先做规则/AI 自动审核，再决定是否弹出问询框。
+        let aiReviewed: true | undefined
         if (mode === 'auto' && !mustConfirm && this.dependencies.review) {
           const reviewSignal = toolSignal ?? signal
-          const decision = await this.dependencies.review({ tool, args: structuredClone(args), cwd, mode, project, reason, userPrompt: [...messages].reverse().find(message => message.role === 'user')?.content ?? '', signal: reviewSignal }).catch((): ReviewDecision => 'ask')
+          const result = await this.dependencies.review({ tool, args: structuredClone(args), cwd, mode, project, reason, userPrompt: [...messages].reverse().find(message => message.role === 'user')?.content ?? '', signal: reviewSignal }).catch((): ToolReviewResult => ({ decision: 'ask', source: 'fallback' }))
           reviewSignal.throwIfAborted()
-          if (decision === 'allow') return
-          if (decision === 'deny') throw new ModelError('自动审核拒绝了该操作，请调整方案后重试')
+          if (result.decision === 'allow') return
+          if (result.decision === 'deny') throw new ModelError('自动审核拒绝了该操作，请调整方案后重试')
+          if (result.decision === 'ask' && result.source === 'ai') aiReviewed = true
         }
-        await this.approvals.ask(requestId, options.conversationId, { toolCallId: id, tool, args: structuredClone(args), cwd, reason, mustConfirm }, toolSignal ?? signal, waitingFor(id, `等待你批准${toolActions[tool] ?? '操作'}…`))
+        await this.approvals.ask(requestId, options.conversationId, { toolCallId: id, tool, args: structuredClone(args), cwd, reason, mustConfirm, aiReviewed }, toolSignal ?? signal, waitingFor(id, `等待你批准${toolActions[tool] ?? '操作'}…`))
       }
     })
     let session: AgentSession | undefined
-    const planningTools = (): string[] => ['read', 'ls', 'find', 'grep', 'stat', ...skillTools.map(tool => tool.name), 'ask_user_question', ...(clarified ? ['submit_plan'] : [])]
+    const planningTools = (): string[] => [...PLAN_READ_TOOLS, ...skillTools.map(tool => tool.name), 'ask_user_question', ...(clarified ? ['submit_plan'] : [])]
     const guardedTools = projectTools.map(tool => ({ ...tool, execute: async (...args: Parameters<typeof tool.execute>) => {
       await Promise.all(pendingCodeSnapshots)
-      if (planning && !['read', 'ls', 'find', 'grep', 'stat'].includes(tool.name)) {
+      if (planning && !(PLAN_READ_TOOLS as readonly string[]).includes(tool.name)) {
         planningMutationAttempted = true
         throw new ModelError('计划尚未批准，不能修改文件或执行终端命令。请先澄清需求并提交计划。')
       }
@@ -516,6 +532,7 @@ export class PiAgentService {
       unsubscribe = session.subscribe(event => {
         if (event.type === 'turn_start') { modelStatus = '正在连接模型…'; refreshStatus() }
         if (event.type === 'message_end' && event.message.role === 'assistant') {
+          liveAssistant = undefined
           if (project && options) {
             const message = event.message
             const source = message.content.filter(block => block.type === 'text').map(block => block.text).join('\n')
@@ -558,6 +575,10 @@ export class PiAgentService {
           refreshStatus()
           if (update.type === 'text_delta') { publish({ type: 'text', text: update.delta }); trackOutputDelta(update.delta) }
           if (update.type === 'thinking_delta') trackOutputDelta(update.delta)
+          if ('partial' in update && update.partial.content.some(block => block.type === 'thinking')) {
+            liveAssistant = update.partial
+            outputTimer ??= setTimeout(() => { outputTimer = undefined; publishTranscript() }, 150)
+          }
         }
         if (event.type === 'message_start' && event.message.role === 'assistant') { completedResponse = false; callStarted = performance.now(); modelStatus = '正在等待模型回复…'; status(modelStatus, true) }
         // SDK 先通知订阅者，再同步保存消息；等当前调用栈结束后读取，

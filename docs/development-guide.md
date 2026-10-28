@@ -96,7 +96,7 @@ Windows 安装包与便携版首次打包时才自动下载固定版本的 NSIS�
 
 当前自动测试文件随被测代码放在 `src/`，`pnpm test` 使用 Vitest 默认发现规则。手动探测数据、日志和测试脚本产物放在已忽略的 `.tmp/` 或 `tests/.artifacts/`，不要写到项目根目录。Electron 冒烟脚本的截图与测试数据也属于忽略的测试产物。
 
-文件与终端工具的权限逻辑位于 `security-paths.ts`、`pi-tools.ts`、`tool-permissions.ts` 和 `tool-review-service.ts`。审核模型通过设置、IPC 和模型配置存储传递，选项为空时跟随默认模型。
+文件与终端工具的权限逻辑位于 `security-paths.ts`、`pi-tools.ts`、`tool-permissions.ts` 和 `tool-review-service.ts`。审核模型通过设置、IPC 和模型配置存储传递，选项为空时使用默认模型，选择“关闭”（`REVIEW_MODEL_OFF`）时存储 `reviewDisabled` 并停止 AI 审核。
 
 ## 交付与文档维护
 

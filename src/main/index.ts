@@ -146,7 +146,7 @@ if (hasSingleInstanceLock) void app.whenReady().then(() => {
     fetchRequest: modelFetch,
     // 下载仅发匿名 GET，不继承模型认证头、Cookie 或订阅请求配置。
     downloadFetch: anonymousDownloadFetch,
-    review: request => reviewService.review(request),
+    review: request => reviewService.reviewWithSource(request),
     getProject: () => snapshotManager?.getRoot(), emit: event => { mainWindow?.webContents.send(IPC_CHANNELS.agentEvent, event) } }), undefined, new OpenrouterClient(subscriptionFetch))
   registerIpcHandlers({
     getMainWindow: () => mainWindow,

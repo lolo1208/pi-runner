@@ -7,6 +7,7 @@ import { chatgptReferencePricing } from '../../shared/model-pricing'
 import type { ModelSettingsStore } from './model-settings-store'
 import { ModelError, requiredString } from './model-validation'
 import { requestPiStream } from './pi-stream'
+import { requestThinkingSummary } from './pi-thinking'
 import type { OllamaCallInfo } from './pi-ollama'
 import { modelResponseError } from './model-request-error'
 import type { PiAttachments } from './pi-attachments'
@@ -261,7 +262,7 @@ export class ChatgptService {
             }
             return response
           },
-          onPayload: async (payload, target) => attachments.replacePayload(await options?.onPayload?.(payload, target) ?? payload, profile, true)
+          onPayload: async (payload, target) => attachments.replacePayload(requestThinkingSummary(await options?.onPayload?.(payload, target) ?? payload), profile, true)
         }), options?.apiKey ?? '', () => controller.abort(), onModelRequestActive, () => responseError)
       }
     })

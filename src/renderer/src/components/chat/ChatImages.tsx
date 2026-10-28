@@ -48,19 +48,19 @@ function AttachmentPreview({ image: preview, onClose, onUnreadable }: { image: C
     catch { setSaveError('附件保存失败，请检查保存位置的访问权限和剩余空间后重试') }
     finally { setSaving(false) }
   }
-  const saveButton = <Tooltip><TooltipTrigger asChild><span className="inline-flex" tabIndex={saving ? 0 : undefined}><Button type="button" variant="ghost" size="icon" className={`modal-close attachment-save${kind === 'image' ? ' image-preview-save' : ''}`} aria-label="另存为" disabled={saving} onClick={() => void save()}><Download size={16} aria-hidden="true" /></Button></span></TooltipTrigger><TooltipContent>另存为</TooltipContent></Tooltip>
+  const saveButton = <Tooltip><TooltipTrigger asChild><span className={`inline-flex${kind === 'image' ? ' image-preview-save-anchor' : ''}`} tabIndex={saving ? 0 : undefined}><Button type="button" variant="ghost" size="icon" className={`modal-close attachment-save${kind === 'image' ? ' image-preview-save' : ''}`} aria-label="另存为" disabled={saving} onClick={() => void save()}><Download size={16} aria-hidden="true" /></Button></span></TooltipTrigger><TooltipContent>另存为</TooltipContent></Tooltip>
   const errorMessage = saveError && <p className="attachment-save-error" role="alert">{saveError}</p>
   const markUnreadable = (): void => { setUnreadable(true); onUnreadable() }
   // 图片使用沉浸灯箱，其余附件沿用通用弹窗（标题栏、关闭按钮与遮罩一致）。
   if (kind === 'image') return <Modal open onOpenChange={open => { if (!open) onClose() }} title={`图片预览：${preview.name}`}
-    bare closeOnBackdropClick closeExtra={saveButton} contentClassName="image-preview-content" closeClassName="image-preview-close" closeLabel="关闭图片预览">
+    bare closeOnBackdropClick closeExtra={saveButton} contentClassName="image-preview-content" onOpenAutoFocus={event => { event.preventDefault(); (event.currentTarget as HTMLElement).focus() }} closeClassName="image-preview-close" closeLabel="关闭图片预览">
     {errorMessage}
     {unreadable ? <p className="file-preview-error" role="alert">此文件无法预览，请检查文件格式或内容。</p>
       : <img src={preview.dataUrl} alt={preview.name} onError={markUnreadable} />}
   </Modal>
   const text = kind === 'text' ? attachmentText(preview) : ''
   const Icon = kind === 'audio' ? Music : kind === 'video' ? Video : FileText
-  return <Modal open onOpenChange={open => { if (!open) onClose() }} closeLabel="关闭附件预览" closeExtra={saveButton}
+  return <Modal open onOpenChange={open => { if (!open) onClose() }} closeLabel="关闭附件预览" closeExtra={saveButton} onOpenAutoFocus={event => { event.preventDefault(); (event.currentTarget as HTMLElement).focus() }}
     title={<span className="file-preview-title"><Icon size={17} aria-hidden="true" />
       <span className="file-preview-name">{preview.name}</span>
       {kind === 'text' && <span className="file-preview-subtitle">{textAttachmentMeta(text, preview)}</span>}

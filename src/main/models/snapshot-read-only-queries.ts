@@ -3,7 +3,7 @@ import { queryOptions } from './command-query-options'
 import { developerToolPolicy } from './developer-tool-policy'
 
 const versionPrograms = new Set([
-  'node', 'nodejs', 'npm', 'pnpm', 'yarn', 'corepack', 'bun', 'deno',
+  'node', 'nodejs', 'npm', 'pnpm', 'yarn', 'corepack', 'bun', 'deno', 'electron', 'electron-vite', 'electron-builder',
   'python', 'python3', 'pip', 'pip3', 'uv', 'poetry', 'ruby', 'gem', 'perl', 'php', 'composer',
   'cargo', 'rustc', 'rustup', 'dotnet', 'swift', 'gcc', 'g++', 'clang', 'clang++',
   'cmake', 'ninja', 'make', 'meson', 'git', 'docker', 'kubectl', 'terraform',
@@ -70,7 +70,7 @@ queries('netstat', '-a -n -o -b -r -s -e -t -u -l -p -c -an -ano -ant -antp -tul
 
 // PowerShell 参数名称不区分大小写；仅支持完整参数名，缩写及未知参数进入审核。
 queries('get-location gl get-host get-culture get-uiculture get-tpm', '', '', false)
-queries('get-childitem gci', '-force -recurse -file -directory -hidden -name', '-path -literalpath -filter -include -exclude -depth')
+queries('get-childitem gci', '-force -recurse -file -directory -hidden -name', '-path -literalpath -filter -include -exclude -depth -erroraction -ea')
 queries('get-content gc', '-raw -wait', '-path -literalpath -encoding -totalcount -tail -delimiter -stream -readcount')
 queries('get-item gi get-itemproperty get-itempropertyvalue', '-force', '-path -literalpath -name -filter -include -exclude')
 queries('test-path', '-isvalid', '-path -literalpath -pathtype -filter -include -exclude')
@@ -100,6 +100,8 @@ queries('write-output', '-noenumerate', '-inputobject')
 queries('write-host', '-nonewline', '-object -separator -foregroundcolor -backgroundcolor')
 queries('format-list fl format-table ft format-wide fw', '-autosize -wrap -force -hidetableheaders -showerror -displayerror', '-property -view -groupby -column')
 queries('out-string', '-stream', '-width -inputobject')
+queries('convertfrom-json', '-ashashtable -noenumerate', '-depth -inputobject')
+queries('convertto-json', '-compress -enumsasstrings -asarray', '-depth -inputobject')
 queries('select-object select', '-unique -last -wait', '-property -excludeproperty -expandproperty -first -last -skip -skiplast -index')
 queries('measure-object measure', '-allstats -average -sum -maximum -minimum -standarddeviation -line -word -character -ignorewhitespace', '-property')
 queries('compare-object compare', '-includeequal -excludeDifferent -passthru -casesensitive', '-referenceobject -differenceobject -property -syncwindow -culture')
@@ -117,7 +119,7 @@ function basicReadOnlyQuery(program: string, args: string[]): boolean {
   const spec = querySpecs[program]
   if (!spec) return false
   if (['compare', 'measure', 'select', 'fl', 'ft', 'fw'].includes(program) && process.platform !== 'win32') return false
-  const powershell = /^(?:get-|test-|resolve-|select-|write-|format-|out-|measure-|compare-)/.test(program)
+  const powershell = /^(?:get-|test-|resolve-|select-|write-|format-|out-|measure-|compare-|convertfrom-|convertto-)/.test(program)
     || ['gl', 'gci', 'gc', 'gi', 'gps', 'gsv', 'gal', 'gcm', 'sls', 'fl', 'ft', 'fw', 'select', 'measure', 'compare'].includes(program)
   const parameters = powershell ? args.map(value => value.startsWith('-') ? value.toLowerCase() : value) : args
   if (powershell && args.includes('--')) return false
@@ -157,8 +159,10 @@ function additionalReadOnlyQuery(program: string, args: string[]): boolean {
   if (program === 'zig') return args.length === 1 && args[0] === 'env'
   if (program === 'corepack') return args.length === 1 && ['--version', '-v', '--help', '-h'].includes(args[0])
   if (program === 'gem') return ['list', 'environment', 'env', 'outdated'].includes(args[0]) && queryOptions(args.slice(1), ['--local', '-l', '--remote', '-r', '--all', '-a', '--no-versions', '--versions', '--quiet', '-q'])
-  if (program === 'npm') {
-    if (['view', 'info', 'search', 'outdated'].includes(args[0])) return queryOptions(args.slice(1), ['--json', '--parseable', '--long', '--all'])
+  if (['npm', 'pnpm'].includes(program)) {
+    if (['view', 'info', 'show', 'v', 'search', 'outdated'].includes(args[0])) return queryOptions(args.slice(1), ['--json', '--parseable', '--long', '--all'])
+    if (args[0] === 'audit') return queryOptions(args.slice(1), ['--json', '--production', '--prod', '--dev', '--offline'], ['--audit-level', '--omit', '--include'], false)
+    if (program === 'pnpm' && args[0] === 'help') return args.length <= 2 && args.slice(1).every(value => /^[a-z][\w-]*$/i.test(value))
     if (args[0] === 'config' && ['get', 'list', 'ls'].includes(args[1])) return queryOptions(args.slice(2), ['--json', '--long', '-l', '--global', '-g'])
   }
   if (program === 'pnpm') return args.length === 2 && args[0] === 'store' && args[1] === 'path'
@@ -213,20 +217,23 @@ export function knownReadOnlyQuery(program: string, args: string[]): boolean {
   return false
 }
 
-const gitLogFlags = ['--oneline', '--all', '--branches', '--tags', '--remotes', '--graph', '--decorate', '--no-decorate', '--stat', '--shortstat', '--numstat', '--name-only', '--name-status', '--patch', '-p', '--no-patch', '-s', '--raw', '--reverse', '--first-parent', '--no-merges', '--merges', '--date-order', '--topo-order', '--abbrev-commit', '--no-abbrev', '--no-color', '--no-ext-diff', '--no-textconv', '--relative', '--follow', '--no-notes', '-1', '-2', '-3', '-5', '-10', '-20', '-50', '-100']
+const gitLogFlags = ['--oneline', '--all', '--branches', '--tags', '--remotes', '--graph', '--decorate', '--no-decorate', '--stat', '--shortstat', '--numstat', '--name-only', '--name-status', '--patch', '-p', '--no-patch', '-s', '--raw', '--reverse', '--first-parent', '--no-merges', '--merges', '--date-order', '--topo-order', '--abbrev-commit', '--no-abbrev', '--no-color', '--no-ext-diff', '--no-textconv', '--relative', '--follow', '--no-notes', '-1', '-2', '-3', '-4', '-5', '-6', '-7', '-8', '-9', '-10', '-20', '-50', '-100']
 const gitLogValues = ['-n', '--max-count', '--skip', '--since', '--until', '--after', '--before', '--author', '--committer', '--grep', '--format', '--pretty', '--date', '--decorate', '--abbrev', '--encoding', '--diff-filter', '--relative', '-L']
 const gitDiffFlags = ['--stat', '--shortstat', '--numstat', '--name-only', '--name-status', '--patch', '-p', '--no-patch', '-s', '--raw', '--cached', '--staged', '--check', '--quiet', '--exit-code', '--no-index', '--no-color', '--no-ext-diff', '--no-textconv', '--relative', '--binary', '--full-index', '--compact-summary', '--summary', '--word-diff', '--ignore-all-space', '-w', '--ignore-space-change', '-b', '--ignore-blank-lines', '--minimal', '--patience', '--histogram', '--no-renames', '-z', '-M', '-C', '--no-commit-id', '--root', '-r']
 const gitDiffValues = ['--diff-filter', '--relative', '--src-prefix', '--dst-prefix', '--line-prefix', '--unified', '-U', '--word-diff', '--word-diff-regex', '--inter-hunk-context']
 
 /** 查询不满足只读规则时，不能回退到“开发工具”程序名放行。 */
 export function readOnlyQueryInvocation(program: string, args: string[]): boolean {
+  // 执行器即使转发查询也可能安装包，按开发操作处理，而非只读；子命令仍先接受风险检查。
+  if (['npm', 'pnpm', 'yarn'].includes(program) && args[0] === 'exec' && args[1]
+    && knownReadOnlyQuery(args[1], args.slice(2))) return false
   if (args.some(value => ['--version', '--help', '-h'].includes(value))) return true
   if (program === 'corepack' && ['npm', 'pnpm', 'yarn'].includes(args[0])) return readOnlyQueryInvocation(args[0], args.slice(1))
   if ((/^python(?:\d+(?:\.\d+)?)?$/.test(program) || program === 'py') && args[0] === '-m' && ['pip', 'pip3'].includes(args[1])) return readOnlyQueryInvocation('pip', args.slice(2))
   if (program === 'uv' && args[0] === 'pip') return readOnlyQueryInvocation('pip', args.slice(1))
   const families: Record<string, string[]> = {
-    npm: ['ls', 'list', 'why', 'explain', 'view', 'info', 'search', 'outdated', 'config', 'pkg', 'query', 'help'],
-    pnpm: ['ls', 'list', 'why', 'store', 'config', 'help'],
+    npm: ['ls', 'list', 'why', 'explain', 'view', 'info', 'show', 'v', 'search', 'outdated', 'audit', 'config', 'pkg', 'query', 'help'],
+    pnpm: ['ls', 'list', 'why', 'view', 'info', 'show', 'v', 'search', 'outdated', 'audit', 'store', 'config', 'help'],
     yarn: ['info', 'list', 'why', 'config', 'help'],
     pip: ['show', 'list', 'check', 'inspect', 'config', 'cache', 'help'],
     pip3: ['show', 'list', 'check', 'inspect', 'config', 'cache', 'help'],

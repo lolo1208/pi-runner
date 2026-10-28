@@ -12,6 +12,7 @@ describe('command risk routing', () => {
   it('blocks shell file mutation via redirection and file cmdlets', () => {
     expect(commandRisk('echo hi > out.txt').risk).toBe('block')
     expect(commandRisk('npm run build >> log.txt').risk).toBe('block')
+    expect(commandRisk('sort -ooutput input').risk).toBe('block')
     expect(blockShellFileMutation('Set-Content file.txt hello')).toBeTruthy()
     expect(blockShellFileMutation('rm -rf node_modules')).toBeTruthy()
     expect(blockShellFileMutation('pwd; rm file.txt')).toBeTruthy()
@@ -184,6 +185,18 @@ describe('file tool permission boundaries', () => {
   it('asks before even a read-only terminal command in default mode', async () => {
     await expect(execute(process.platform === 'win32' ? 'powershell' : 'bash', 'default', { command: 'git --version' })).rejects.toThrow('approval requested')
   })
+
+  it.skipIf(process.platform !== 'win32')('executes a PowerShell query pipeline without approval or a mutation snapshot', async () => {
+    await writeFile(path.join(root, 'query.txt'), 'hello')
+    const beforeMutation = vi.fn(async () => {})
+    const terminal = piProjectTools(root, beforeMutation, { mode: 'auto', project: root, protectedDirectories: [], approve }).find(item => item.name === 'powershell')!
+    const response = await terminal.execute('query-pipeline', {
+      command: `$files=Get-ChildItem -File; $files | Where-Object { $_.Extension -eq '.txt' } | Group-Object Extension | Select-Object Name,Count | ConvertTo-Json`,
+    }, undefined, undefined, undefined as never)
+    expect(JSON.stringify(response)).toContain('.txt')
+    expect(approve).not.toHaveBeenCalled()
+    expect(beforeMutation).not.toHaveBeenCalled()
+  })
   it('marks ACL changes as requiring human confirmation', async () => {
     await expect(execute(process.platform === 'win32' ? 'powershell' : 'bash', 'auto', { command: 'chmod 777 folder' })).rejects.toThrow('approval requested')
     expect(approve.mock.calls[0]?.[5]).toBe(true)
@@ -205,7 +218,20 @@ describe('file tool permission boundaries', () => {
 })
 
 describe('conservative command classification', () => {
-  it.each(['node --eval=process.exit()', 'node -eprocess.exit()', 'python -cprint(1)', 'deno eval "1"', 'bun --eval=1', 'git reset --hard', 'git clean -fd', 'git push --force', 'git unknown-alias', 'git -c alias.x=!danger x', 'sed "w file" source', 'sort -ooutput input', 'uniq input output', 'date 010100002026', 'hostname renamed-host', 'diff --output=out.txt a b'])('reviews %s', command => {
+  it('allows Node type stripping without treating script execution as read-only', () => {
+    const command = 'node --experimental-strip-types tools/check-schedule.mts'
+    expect(commandRisk(command).risk).toBe('safe')
+    expect(readOnlyCommand(command)).toBe(false)
+  })
+  it.each([
+    'node --experimental-strip-types',
+    'node --experimental-strip-types --unknown tools/check-schedule.mts',
+    'node --experimental-strip-types --eval=process.exit()',
+    'node --experimental-strip-types --import=hook.mjs tools/check-schedule.mts'
+  ])('reviews unsafe or ambiguous type stripping invocation %s', command => {
+    expect(commandRisk(command).risk).toBe('approve')
+  })
+  it.each(['node --eval=process.exit()', 'node -eprocess.exit()', 'python -cprint(1)', 'deno eval "1"', 'bun --eval=1', 'git reset --hard', 'git clean -fd', 'git push --force', 'git unknown-alias', 'git -c alias.x=!danger x', 'sed "w file" source', 'uniq input output', 'date 010100002026', 'hostname renamed-host', 'diff --output=out.txt a b'])('reviews %s', command => {
     expect(commandRisk(command).risk).toBe('approve')
   })
   it.each(['git --no-pager diff --stat', 'pnpm typecheck && pnpm test', 'pwd; git status', 'whoami', 'date -u', 'node --version', 'python script.py'])('allows common command %s', command => {

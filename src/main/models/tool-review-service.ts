@@ -2,7 +2,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { ModelClient } from './model-client'
 import type { ModelSettingsStore } from './model-settings-store'
-import type { ReviewDecision, ToolReviewRequest } from '../../shared/models'
+import type { ReviewDecision, ToolReviewRequest, ToolReviewResult } from '../../shared/models'
 import { canonicalToolPath, within } from './security-paths'
 
 /** 从用户提示词中提取明确提到的路径，供规则审核做“用户已授权该目录”匹配。 */
@@ -69,23 +69,29 @@ function parseReviewDecision(text: string): ReviewDecision | undefined {
 export class ToolReviewService {
   constructor(private readonly store: ModelSettingsStore, private readonly fetchRequest: typeof fetch = fetch) {}
   async review(request: ToolReviewRequest): Promise<ReviewDecision> {
-    if (request.signal.aborted) return 'ask'
+    return (await this.reviewWithSource(request)).decision
+  }
+  /** 保留来源，区分 AI 明确要求询问与模型不可用等回退。 */
+  async reviewWithSource(request: ToolReviewRequest): Promise<ToolReviewResult> {
+    const fallback: ToolReviewResult = { decision: 'ask', source: 'fallback' }
+    if (request.signal.aborted) return fallback
     try {
       const rule = await ruleBasedDecision(request)
       request.signal.throwIfAborted()
-      if (rule) return rule
+      if (rule) return { decision: rule, source: 'rule' }
       const selected = await this.store.reviewProfile()
-      if (!selected || selected.profile.provider === 'chatgpt') return 'ask'
+      if (!selected || selected.profile.provider === 'chatgpt') return fallback
       // 不发送被截断的操作给审核器；内容过长时由用户确认完整调用。
-      if (JSON.stringify(request.args).length > 2000 || request.userPrompt.length > 2000) return 'ask'
+      if (JSON.stringify(request.args).length > 2000 || request.userPrompt.length > 2000) return fallback
       request.signal.throwIfAborted()
       const client = new ModelClient(this.fetchRequest)
       const signal = AbortSignal.any([request.signal, AbortSignal.timeout(30000)])
       const reply = await client.complete(selected.profile, selected.apiKey, [{ role: 'user', content: reviewPrompt(request) }], signal)
       signal.throwIfAborted()
-      return parseReviewDecision(reply.text) ?? 'ask'
+      const decision = parseReviewDecision(reply.text)
+      return decision ? { decision, source: 'ai' } : fallback
     } catch {
-      return 'ask'
+      return fallback
     }
   }
 }

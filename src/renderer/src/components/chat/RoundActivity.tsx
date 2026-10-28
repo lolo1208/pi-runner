@@ -8,16 +8,21 @@ import { TranscriptScope, useTranscriptState } from './TranscriptState'
 import { TranscriptPagedList } from './TranscriptPagedList'
 import { hasPlanResult, PlanResultCard } from './PlanResultCard'
 
-const toolLabels: Record<string, string> = { bash: '运行命令', powershell: '运行命令', read: '读取文件', write: '写入文件', download: '下载文件', edit: '编辑文件', delete: '删除文件', mkdir: '创建目录', rmdir: '删除目录', move: '移动或重命名', copy: '复制文件或目录', stat: '查看文件或目录信息', ls: '查看目录', find: '查找文件或目录', grep: '搜索内容', read_skill_file: '读取技能文件', report_skill_usage: '说明技能用途', ask_user_question: '确认需求', submit_plan: '提交计划' }
+const toolLabels: Record<string, string> = { bash: '运行命令', powershell: '运行命令', read: '读取文件', read_many: '批量读取文件', download_many: '批量下载文件', write: '写入文件', download: '下载文件', edit: '编辑文件', delete: '删除文件', mkdir: '创建目录', rmdir: '删除目录', move: '移动或重命名', copy: '复制文件或目录', stat: '查看文件或目录信息', ls: '查看目录', find: '查找文件或目录', grep: '搜索内容', read_skill_file: '读取技能文件', report_skill_usage: '说明技能用途', ask_user_question: '确认需求', submit_plan: '提交计划' }
 
 function WorkItem({ item, busy = false }: { item: ChatWorkItem; busy?: boolean }): React.JSX.Element {
   const [open, setOpen] = useTranscriptState('work-open', false)
   const label = item.kind === 'thinking' ? '思考' : toolLabels[item.name ?? ''] ?? item.name ?? '工具调用'
-  const preview = item.kind === 'thinking' ? item.content : String(item.args?.command ?? item.args?.path ?? item.args?.file ?? JSON.stringify(item.args ?? {}))
+  const batchItems = ['read_many', 'download_many'].includes(item.name ?? '') && Array.isArray(item.args?.items) ? item.args.items : undefined
+  const preview = item.kind === 'thinking' ? item.content : batchItems ? `${batchItems.length} 个文件` : String(item.args?.command ?? item.args?.path ?? item.args?.file ?? JSON.stringify(item.args ?? {}))
   const interrupted = item.state === 'interrupted' || (!busy && !item.completed && item.kind === 'tool')
   const waiting = busy && !item.completed && (item.state === 'queued' || item.state === 'waiting')
   const stateText = item.isError ? '执行失败' : interrupted ? '未完成' : waiting ? item.stateText ?? (item.state === 'queued' ? '等待执行' : '等待确认') : ''
   const command = item.name === 'bash' || item.name === 'powershell'
+  // 兼容未记录 completed 的旧思考记录，不将空文本误报为工具仍在执行。
+  const emptyContent = item.kind === 'thinking'
+    ? busy && item.completed === false ? '正在思考，等待可展示的文本…' : '模型未返回可展示的思考文本。'
+    : item.completed ? '无文本输出' : stateText || '正在执行，等待结果…'
   return <div className="chat-work-item">
     <Button variant="ghost" className="chat-work-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
       {item.kind === 'thinking' ? <Sparkles size={14} /> : item.isError ? <X size={14} /> : item.completed ? <Check size={14} /> : interrupted ? <CirclePause size={14} aria-label="未完成" /> : waiting ? <Clock size={14} aria-label={stateText} /> : <LoaderCircle size={14} className="chat-execution-spinner" aria-label="正在执行" />}
@@ -26,7 +31,7 @@ function WorkItem({ item, busy = false }: { item: ChatWorkItem; busy?: boolean }
     </Button>
     {open && <div className="chat-work-detail">
       {item.kind === 'tool' && <><div className="chat-work-detail-label">{command ? '命令' : '输入参数'}</div><pre>{command ? String(item.args?.command ?? '') : JSON.stringify(item.args, null, 2)}</pre><div className="chat-work-detail-label">执行结果</div></>}
-      <pre>{item.content || (item.completed ? '无文本输出' : stateText || '正在执行，等待结果…')}</pre>
+      <pre>{item.content || emptyContent}</pre>
     </div>}
   </div>
 }

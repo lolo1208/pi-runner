@@ -3,6 +3,7 @@ import { FileCode2, LockKeyhole, ShieldQuestion, Terminal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Modal } from '@/components/ui/modal'
 import { PagedList } from '../PagedList'
+import { AiReviewBadge } from './AiReviewBadge'
 import { baseName, DiffFileHeader, DiffStat, DiffView, DiffViewSwitch, fileIcon, initialDiffViewMode, type DiffViewMode } from './DiffView'
 import { isCommandApproval, isFileChangeApproval } from '../../lib/tool-approval'
 import type { ToolApproval, ToolApprovalPreview } from '../../../../shared/models'
@@ -74,7 +75,7 @@ export function ToolApprovalDiffDialog({ open, onOpenChange, approvals, getPrevi
   // 终端命令有自己的审批弹窗，这里只保留文件改动和其他普通操作。
   const operations = approvals.filter(approval => !isCommandApproval(approval))
   const fileCount = operations.filter(isFileChangeApproval).length
-  return <Modal open={open} onOpenChange={onOpenChange} title={<span className="tool-approval-file-title"><FileCode2 size={18} aria-hidden="true" /><span>{fileCount > 0 ? `${fileCount} 个文件` : '执行操作'}</span></span>}
+  return <Modal open={open} onOpenChange={onOpenChange} title={<span className="tool-approval-file-title"><FileCode2 size={18} aria-hidden="true" /><span>{fileCount > 0 ? `${fileCount} 个文件` : '执行操作'}</span><AiReviewBadge show={operations.some(approval => approval.aiReviewed)} /></span>}
     description={<span>本次请求批准的操作共 {operations.length} 项，确认后将按权限执行</span>}
     headingExtra={<DiffViewSwitch mode={mode} onChange={setMode} />}
     contentClassName="tool-approval-preview tool-approval-multi">

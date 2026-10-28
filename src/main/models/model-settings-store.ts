@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
-import { parseThinkingControls, selectedModelThinking, type ModelDescriptor, type ModelProfile, type ModelProviderConnection, type ModelSettings } from '../../shared/models'
+import { parseThinkingControls, REVIEW_MODEL_OFF, selectedModelThinking, type ModelDescriptor, type ModelProfile, type ModelProviderConnection, type ModelSettings } from '../../shared/models'
 import { parseModelPricing } from '../../shared/model-pricing'
 import { asRecord, ModelError, normalizeOllamaUrl, parseProfile, parseSaveProfile, profileId, requiredString } from './model-validation'
 import { OPENROUTER_BASE_URL } from '../../shared/openrouter'
@@ -13,7 +13,7 @@ export interface CredentialCipher {
   decrypt(value: Buffer): string
 }
 interface StoredProfile { profile: ModelProfile; encryptedApiKey?: string }
-interface SettingsFile { version: 1; activeProfileId: string | null; reviewProfileId: string | null; profiles: StoredProfile[]; providers?: ModelProviderConnection[]; encryptedOpenrouterApiKey?: string }
+interface SettingsFile { version: 1; activeProfileId: string | null; reviewProfileId: string | null; reviewDisabled?: boolean; profiles: StoredProfile[]; providers?: ModelProviderConnection[]; encryptedOpenrouterApiKey?: string }
 
 export class ModelSettingsStore {
   private queue: Promise<unknown> = Promise.resolve()
@@ -48,6 +48,7 @@ export class ModelSettingsStore {
         try { reviewProfileId = profileId(raw.reviewProfileId) } catch { reviewProfileId = null }
         if (reviewProfileId && !profiles.some(item => item.profile.id === reviewProfileId)) reviewProfileId = null
       }
+      const reviewDisabled = raw.reviewDisabled === true && !reviewProfileId
       const providers: ModelProviderConnection[] = []
       if (raw.providers !== undefined) {
         if (!Array.isArray(raw.providers) || raw.providers.length > 20) throw new Error()
@@ -74,7 +75,7 @@ export class ModelSettingsStore {
           providers.push({ provider: entry.provider as ModelProviderConnection['provider'], baseUrl: entry.provider === 'ollama' ? normalizeOllamaUrl(entry.baseUrl) : entry.provider === 'openrouter' ? OPENROUTER_BASE_URL : 'https://chatgpt.com/backend-api', models })
         }
       }
-      const settings: SettingsFile = { version: 1, profiles, activeProfileId, reviewProfileId, providers, encryptedOpenrouterApiKey: raw.encryptedOpenrouterApiKey as string | undefined }
+      const settings: SettingsFile = { version: 1, profiles, activeProfileId, reviewProfileId, reviewDisabled, providers, encryptedOpenrouterApiKey: raw.encryptedOpenrouterApiKey as string | undefined }
       this.reconcileActive(settings)
       return settings
     } catch { throw new ModelError('模型配置损坏或版本不支持，已停止读取；请备份应用数据后检查 model-settings.json') }
@@ -91,7 +92,7 @@ export class ModelSettingsStore {
   }
 
   private view(settings: SettingsFile): ModelSettings {
-    return { activeProfileId: settings.activeProfileId, reviewProfileId: settings.reviewProfileId, encryptionAvailable: this.cipher.isAvailable(),
+    return { activeProfileId: settings.activeProfileId, reviewProfileId: settings.reviewProfileId, reviewDisabled: Boolean(settings.reviewDisabled), encryptionAvailable: this.cipher.isAvailable(),
       providers: (settings.providers ?? []).map(connection => ({ ...connection, ...(connection.provider === 'openrouter' ? { hasApiKey: Boolean(settings.encryptedOpenrouterApiKey) } : {}) })),
       profiles: settings.profiles.map(item => ({ ...this.resolvedOutput(settings, item.profile), hasApiKey: Boolean(item.profile.provider === 'openrouter' ? settings.encryptedOpenrouterApiKey : item.encryptedApiKey), available: this.available(settings, item.profile) })) }
   }
@@ -229,24 +230,30 @@ export class ModelSettingsStore {
   setReviewModel(id: unknown): Promise<ModelSettings> {
     return this.serialized(async () => {
       const settings = await this.read()
-      if (id === null || id === undefined || id === '') {
+      if (id === REVIEW_MODEL_OFF) {
         settings.reviewProfileId = null
+        settings.reviewDisabled = true
+      } else if (id === null || id === undefined || id === '') {
+        settings.reviewProfileId = null
+        settings.reviewDisabled = false
       } else {
         const selectedId = profileId(id)
         const entry = settings.profiles.find(item => item.profile.id === selectedId)
         if (!entry) throw new ModelError('模型配置不存在')
         if (entry.profile.enabled === false || !this.available(settings, entry.profile)) throw new ModelError('该模型已停用或不在本地服务中，请先启用或刷新模型列表')
         settings.reviewProfileId = selectedId
+        settings.reviewDisabled = false
       }
       await this.write(settings)
       return this.view(settings)
     })
   }
 
-  /** 审核模型解析：未单独指定时跟随默认模型；不可用时返回 null，调用方回退到逐次询问。 */
+  /** 审核模型解析：未单独指定时使用默认模型；关闭或不可用时返回 null，调用方回退到逐次询问。 */
   reviewProfile(): Promise<{ profile: ModelProfile; apiKey: string } | null> {
     return this.serialized(async () => {
       const settings = await this.read()
+      if (settings.reviewDisabled) return null
       const id = settings.reviewProfileId ?? settings.activeProfileId
       if (!id) return null
       const entry = settings.profiles.find(item => item.profile.id === id)

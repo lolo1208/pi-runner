@@ -3,7 +3,7 @@ import { MAX_CUSTOM_PROMPT_LENGTH } from '../../shared/models'
 import { normalizeCompressionThreshold } from '../../shared/context'
 export type ThemePreference = 'light' | 'dark' | 'system'
 export interface Preferences { theme: ThemePreference; inlineDiff: boolean; sendWithCtrlEnter: boolean; systemNotifications: boolean; preventSleep: boolean; font: InterfaceFont; fontSize: number; customPrompt: string; compressionThreshold: number }
-export const defaultPreferences: Preferences = { theme: 'light', inlineDiff: false, sendWithCtrlEnter: true, systemNotifications: true, preventSleep: true, font: 'inter', fontSize: 14, customPrompt: '', compressionThreshold: 80 }
+export const defaultPreferences: Preferences = { theme: 'light', inlineDiff: false, sendWithCtrlEnter: true, systemNotifications: true, preventSleep: true, font: 'inter', fontSize: 14, customPrompt: '', compressionThreshold: 90 }
 export function readPreferences(): Preferences {
   try {
     const value = JSON.parse(localStorage.getItem('pi-runner.preferences') ?? '{}')

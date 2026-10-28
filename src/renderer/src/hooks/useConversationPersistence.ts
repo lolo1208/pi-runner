@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import type { ConversationState } from '../../../shared/conversations'
 import { BufferedSave, FLUSH_DRAFTS_EVENT } from '../lib/buffered-updates'
+import { conversationSaveError, persistentConversationState } from '../lib/conversation-persistence'
 
 export function useConversationPersistence(loaded: boolean, tasks: ConversationState['tasks'], selectedId: string | null,
   onError: (message: string) => void): void {
@@ -10,8 +11,8 @@ export function useConversationPersistence(loaded: boolean, tasks: ConversationS
   const errorCallback = useRef(onError)
   errorCallback.current = onError
   const mounted = useRef(true)
-  const [save] = useState(() => new BufferedSave<ConversationState>(state => window.piRunner.saveConversations(state), () => {
-    if (mounted.current) errorCallback.current('会话未能保存到本地，请检查磁盘空间和访问权限。')
+  const [save] = useState(() => new BufferedSave<ConversationState>(state => window.piRunner.saveConversations(persistentConversationState(state)), error => {
+    if (mounted.current) errorCallback.current(conversationSaveError(error))
   }))
   useLayoutEffect(() => {
     if (loaded) save.schedule({ version: 1, tasks, selectedId })
@@ -25,7 +26,7 @@ export function useConversationPersistence(loaded: boolean, tasks: ConversationS
       flushSync(() => window.dispatchEvent(new Event(FLUSH_DRAFTS_EVENT)))
       try { await save.flush() }
       catch (error) {
-        errorCallback.current('会话未能保存到本地，请检查磁盘空间和访问权限后重试退出。')
+        errorCallback.current(conversationSaveError(error, true))
         throw error
       }
     }

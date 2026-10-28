@@ -35,6 +35,9 @@
 .tool-approval-file-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .tool-approval-file-title > svg { flex-shrink: 0; color: var(--muted); }
 .tool-approval-file-title > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-approval-ai-badge { display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0; padding: 2px 5px; border: 1px solid var(--border); border-radius: 5px; color: var(--muted); background: var(--hover); font-size: calc(10rem / 14); font-weight: 500; line-height: 1.2; vertical-align: middle; }
+.tool-approval-ai-badge > svg { flex-shrink: 0; }
+.tool-approval-summary strong > .tool-approval-ai-badge { margin-left: 7px; }
 .tool-approval-preview .modal-close { top: 17px; right: 17px; border-radius: 6px; }
 .tool-approval-preview .modal-description { margin: 0; padding: 0 56px 17px 52px; font-size: calc(12rem / 14); line-height: 1.5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 对比视图切换：胶囊分段控件，选中项浮起 */
@@ -84,7 +87,7 @@
 .command-approval-dialog .modal-heading { margin: 0; padding: 18px 24px 4px; }
 .command-approval-dialog .modal-title { min-width: 0; width: 100%; font-size: calc(15rem / 14); }
 .command-approval-dialog .modal-close { top: 15px; right: 15px; border-radius: 6px; }
-.command-approval-dialog .modal-description { margin: 0; padding: 0 52px 14px; font-size: calc(12rem / 14); line-height: 1.6; color: var(--muted); white-space: normal; overflow-wrap: anywhere; }
+.command-approval-dialog .modal-description { margin: 0; padding: 12px 52px 14px; font-size: calc(12rem / 14); line-height: 1.6; color: var(--muted); white-space: normal; overflow-wrap: anywhere; }
 .command-approval-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; padding: 10px 16px 16px; overflow: auto; }
 .command-approval-meta { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--muted); font-family: var(--font-mono); font-size: calc(11.5rem / 14); }
 .command-approval-meta > span:first-child { flex-shrink: 0; }
@@ -93,6 +96,8 @@
 .command-approval-command { min-width: 0; }
 .command-approval-dialog .markdown-code-block { margin: 0; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
 .command-approval-dialog .markdown-code-block > pre { margin: 0; padding: 14px 48px 14px 14px; max-height: 46dvh; overflow: auto; }
+/* 命令区域的复制按钮常显于右上角，不依赖悬停。 */
+.command-approval-dialog .markdown-code-copy { opacity: 1; pointer-events: auto; }
 .command-approval-dialog .syntax-code { font-size: calc(12.5rem / 14); line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
 .command-approval-footer { display: flex; align-items: center; gap: 16px; flex-shrink: 0; padding: 12px 16px; border-top: 1px solid var(--border); }
 .command-approval-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
@@ -100,7 +105,7 @@
 .command-approval-actions .tool-approval-approve { border-color: transparent; background: var(--accent); color: var(--accent-foreground); }
 .command-approval-actions .tool-approval-approve:hover { background: color-mix(in srgb, var(--accent) 88%, var(--text)); }
 .command-approval-actions .tool-approval-approve:disabled { background: var(--hover); color: var(--muted); }
-@media (max-width: 600px) { .command-approval-dialog.modal-panel { width: calc(100vw - 24px); } .command-approval-dialog .modal-heading { padding-left: 16px; } .command-approval-dialog .modal-description { padding: 0 44px 12px 16px; } .command-approval-footer { flex-wrap: wrap; } }
+@media (max-width: 600px) { .command-approval-dialog.modal-panel { width: calc(100vw - 24px); } .command-approval-dialog .modal-heading { padding-left: 16px; } .command-approval-dialog .modal-description { padding: 10px 44px 12px 16px; } .command-approval-footer { flex-wrap: wrap; } }
 .full-access-dialog { display: grid; gap: 12px; width: min(460px, calc(100vw - 32px)); border: 0; }
 .full-access-dialog .alert-dialog-title, .full-access-dialog .alert-dialog-description { margin: 0; }
 .full-access-dialog .alert-dialog-footer { margin-top: 10px; }
@@ -802,9 +807,17 @@ button.chat-round-dot:focus-visible { outline: 1px solid var(--accent); outline-
   background: color-mix(in srgb, var(--text) 12%, transparent);
   color: var(--text);
 }
-.modal-close.image-preview-save {
+/* 锚点 span 承担定位，tooltip 才会以按钮位置为参照（否则会锚定到文档流中的左侧位置）。 */
+.image-preview-content > .image-preview-save-anchor {
+  position: absolute;
   top: 16px;
   right: calc(24px + 36rem / 14);
+  width: calc(36rem / 14);
+  height: calc(36rem / 14);
+}
+.modal-close.image-preview-save {
+  top: 0;
+  right: 0;
   width: calc(36rem / 14);
   height: calc(36rem / 14);
   background: #0008;

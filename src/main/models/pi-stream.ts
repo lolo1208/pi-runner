@@ -2,6 +2,7 @@ import type { AssistantMessage, AssistantMessageEventStream } from '@earendil-wo
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai/utils/event-stream'
 import { modelRequestError } from './model-request-error'
 import { ModelError } from './model-validation'
+import { thinkingText } from './pi-thinking'
 
 /** 同步启动失败也必须停止计时，避免清理期间被误报为超时。 */
 export function requestPiStream(start: () => AssistantMessageEventStream, apiKey: string, abortSource: () => void, onActive: (active: boolean) => void, responseError: () => string | undefined = () => undefined): AssistantMessageEventStream {
@@ -19,9 +20,12 @@ export function safePiStream(source: AssistantMessageEventStream, apiKey: string
     const copy = structuredClone(message)
     if (copy.stopReason === 'error') copy.errorMessage = responseError() ?? modelRequestError(copy.errorMessage ?? '', apiKey)
     else if (copy.stopReason === 'aborted') copy.errorMessage = '模型响应已中断，请重试'
-    if (apiKey) for (const block of copy.content) {
-      if (block.type === 'text') block.text = block.text.split(apiKey).join('[已隐藏密钥]')
-      if (block.type === 'thinking') block.thinking = block.thinking.split(apiKey).join('[已隐藏密钥]')
+    for (const block of copy.content) {
+      if (apiKey && block.type === 'text') block.text = block.text.split(apiKey).join('[已隐藏密钥]')
+      if (block.type === 'thinking') {
+        const text = thinkingText(block)
+        block.thinking = apiKey ? text.split(apiKey).join('[已隐藏密钥]') : text
+      }
     }
     return copy
   }

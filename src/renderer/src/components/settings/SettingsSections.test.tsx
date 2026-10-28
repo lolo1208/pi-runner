@@ -15,11 +15,12 @@ const settings: ModelSettings = { profiles: [], activeProfileId: null, reviewPro
 const props = { preferences: { customPrompt: '', compressionThreshold: 90 } as Preferences, onPreferences: vi.fn(), isMac: false, settings, onModelSettingsChange: vi.fn(), onBusyChange: vi.fn() }
 
 describe('review model setting', () => {
-  it('renders and opens the follow-default choice even without models', async () => {
+  it('renders and opens the off and default-model choices even without models', async () => {
     render(<GeneralSettingsSection {...props} />)
-    const select = screen.getByRole('combobox', { name: '默认审核模型' })
+    const select = screen.getByRole('combobox', { name: '审核模型' })
     expect(select.hasAttribute('disabled')).toBe(false)
     fireEvent.keyDown(select, { key: 'ArrowDown' })
-    await waitFor(() => expect(screen.getByRole('option', { name: '跟随默认模型' })).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('option', { name: '关闭' })).toBeTruthy())
+    expect(screen.getByRole('option', { name: '使用默认模型' })).toBeTruthy()
   })
 })

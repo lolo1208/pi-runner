@@ -50,7 +50,10 @@
 .markdown-code-copy { border-color: transparent; background: transparent; box-shadow: none; color: var(--muted); transition: background-color 150ms ease, color 150ms ease; }
 .markdown-code-copy:hover { border-color: transparent; background: var(--hover); color: var(--text); }
 .markdown-code-copy > span:empty { display: none; }
-.markdown-code-block:hover > .markdown-code-copy,
+/* 复制按钮外层锚点 span 承担绝对定位，tooltip 才会以按钮位置为参照。 */
+.markdown-code-block > .inline-flex { position: absolute; top: 6px; right: 6px; }
+.markdown-code-block > .inline-flex > .markdown-code-copy { position: static; }
+.markdown-code-block:hover .markdown-code-copy,
 .markdown-code-copy:focus-visible { opacity: 1; pointer-events: auto; }
 @media (hover: none) { .markdown-code-copy { opacity: 1; pointer-events: auto; } }
 .plan-document strong { font-weight: 600; }

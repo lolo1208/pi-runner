@@ -9,6 +9,8 @@ import { createDeleteToolDefinition, validateDeleteFile } from './delete-tool'
 import { filesystemToolDefinitions, validateOrdinaryPath, validateOrdinaryTree } from './filesystem-tools'
 import { createDownloadToolDefinition, validateDownloadArgs } from './download-tool'
 import { canonicalToolPath, credentialBlacklist, hiddenProjectData, within } from './security-paths'
+import { dependencyReadPath } from './dependency-read-path'
+import { batchToolDefinitions, ToolApprovalStopped } from './batch-tools'
 
 const fileMutations = new Set(['edit', 'write', 'download', 'delete', 'mkdir', 'rmdir', 'move', 'copy'])
 const treeOperations = new Set(['rmdir', 'move', 'copy'])
@@ -115,12 +117,17 @@ export function piProjectTools(root: string, beforeMutation: () => Promise<void>
   const terminalOptions = (tool: ToolDefinition<any, any>) => ({
     parameters: tool.parameters,
     description: [tool.description,
-      permissions?.mode === 'auto' ? '项目自审：只读命令和常见开发命令（安装、构建、测试、Git 等）直接执行；其余命令先由应用自动审核，无法确定时询问你。禁止通过终端写文件，修改文件请使用专用文件工具，下载落盘请使用 download。网络请求无需单独审批，下载文件仍遵循写入审核。' : '',
+      permissions?.mode === 'auto' ? '项目自审：只读命令和常见开发命令（安装、构建、测试、Git 等）直接执行；其余命令先由应用自动审核，无法确定时询问你。禁止通过终端写文件，修改文件请使用专用文件工具，下载落盘请使用 download 或 download_many。网络请求无需单独审批，下载文件仍遵循写入审核。' : '',
       'partial-or-unknown 时先核对结果，只补做剩余步骤；denied 或 awaiting-approval 时不要重复申请相同授权。'
     ].filter(Boolean).join(' ')
   })
-  return definitions.map(tool => ({ ...tool,
+  const approve: ToolPermissionContext['approve'] = async (...args) => {
+    try { await permissions!.approve(...args) }
+    catch (error) { throw new ToolApprovalStopped(error instanceof Error ? error.message : String(error)) }
+  }
+  const wrapped: ToolDefinition<any, any>[] = definitions.map(tool => ({ ...tool,
     ...(['bash', 'powershell'].includes(tool.name) ? terminalOptions(tool) : {}),
+    ...(tool.name === 'read' ? { description: `${tool.description} 允许读取项目 node_modules 内、解析后仍位于该目录内的依赖链接文件（如 pnpm）；其他链接和链接写入仍禁止。` } : {}),
     ...(['find', 'grep'].includes(tool.name) ? { description: `${tool.name === 'find' ? '按 glob 查找普通文件和目录' : '按模式搜索普通文件内容'}；不跟随链接，排除 Git 元数据、应用内部数据和 node_modules。` } : {}),
     execute: async (id, args, signal, update, context) => {
     signal?.throwIfAborted()
@@ -137,14 +144,15 @@ export function piProjectTools(root: string, beforeMutation: () => Promise<void>
       const risk = commandRisk(command, root)
       if (risk.risk === 'block') throw new ModelError(risk.reason ?? '终端命令被安全策略拦截')
       if (permissions.mode === 'default') {
-        await permissions.approve(id, tool.name, input, DEFAULT_COMMAND_APPROVAL_REASON, signal)
+        await approve(id, tool.name, input, DEFAULT_COMMAND_APPROVAL_REASON, signal)
       } else if (permissions.mode === 'auto' && risk.risk === 'approve') {
-        await permissions.approve(id, tool.name, input, risk.reason ?? DEFAULT_COMMAND_APPROVAL_REASON, signal, risk.mustConfirm)
+        await approve(id, tool.name, input, risk.reason ?? DEFAULT_COMMAND_APPROVAL_REASON, signal, risk.mustConfirm)
       }
       signal?.throwIfAborted()
     } else {
       if (tool.name === 'download') validateDownloadArgs(input)
-      const requestedPath = path.resolve(root, typeof input.path === 'string' ? input.path : '.')
+      const originalPath = path.resolve(root, typeof input.path === 'string' ? input.path : '.')
+      const requestedPath = tool.name === 'read' ? await dependencyReadPath(root, originalPath) : originalPath
       if (tool.name === 'download') await validateOrdinaryPath(requestedPath)
       if (['read', 'write', 'edit', 'ls', 'find', 'grep'].includes(tool.name)) await validateOrdinaryPath(requestedPath, tool.name !== 'write')
       if (tool.name === 'delete') {
@@ -201,6 +209,7 @@ export function piProjectTools(root: string, beforeMutation: () => Promise<void>
         input.destination = destination
       }
       revalidate = async () => {
+        if (tool.name === 'read' && await dependencyReadPath(root, originalPath) !== requestedPath) throw new ModelError('依赖链接目标发生变化，请重新请求读取')
         if (tool.name === 'download') await validateOrdinaryPath(target)
         if (['read', 'write', 'edit', 'ls', 'find', 'grep'].includes(tool.name)) await validateOrdinaryPath(target, tool.name !== 'write')
         if (tool.name === 'delete') await validateDeleteFile(target)
@@ -213,7 +222,7 @@ export function piProjectTools(root: string, beforeMutation: () => Promise<void>
         if (destination) { await validateOrdinaryPath(destination); await checkPath(destination, true) }
       }
       await revalidate()
-      if (reason) await permissions.approve(id, tool.name, { ...input, path: target }, reason, signal, forceApproval)
+      if (reason) await approve(id, tool.name, { ...input, path: target }, reason, signal, forceApproval)
       signal?.throwIfAborted()
       if (await canonicalToolPath(target) !== target) throw new ModelError('审批期间目标路径发生变化，请重新请求操作')
       // 固定已校验的规范路径，不再使用原始链接路径。
@@ -235,4 +244,5 @@ export function piProjectTools(root: string, beforeMutation: () => Promise<void>
     if (revalidate) await revalidate()
     return tool.execute(id, input, signal, update, context)
   } }))
+  return [...wrapped, ...batchToolDefinitions(root, wrapped, permissions?.mode === 'default' ? 1 : 4)]
 }

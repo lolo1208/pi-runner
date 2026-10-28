@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { FilePenLine, FilePlus2, FileSearch, ShieldQuestion, Terminal, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import { AiReviewBadge } from './AiReviewBadge'
 import type { ToolApproval } from '../../../../shared/models'
 
 function operation(approval: ToolApproval) {
@@ -28,7 +29,7 @@ export function ToolApprovalCard({ approval, onRespond, onViewDetails, repeat, o
   const respond = (allow: boolean): void => { if (answering) return; setAnswering(true); void onRespond(allow).finally(() => setAnswering(false)) }
   return <section className="tool-approval-card" aria-label="工具操作审批">
     <Icon size={18} aria-hidden="true" />
-    <div className="tool-approval-summary"><strong>{summary.title}</strong><small title={summary.path}>{summary.path}</small></div>
+    <div className="tool-approval-summary"><strong>{summary.title}<AiReviewBadge show={approval.aiReviewed} /></strong><small title={summary.path}>{summary.path}</small></div>
     <div className="tool-approval-actions"><Button type="button" variant="ghost" className="tool-approval-details" onClick={onViewDetails}>查看详情</Button>{!approval.mustConfirm && <label className="tool-approval-repeat"><Checkbox checked={repeat} onCheckedChange={value => onRepeatChange(value === true)} /><span>重复不再提醒</span></label>}<Button type="button" variant="outline" disabled={answering} onClick={() => respond(false)}>拒绝</Button><Button type="button" className="tool-approval-approve" disabled={answering} onClick={() => respond(true)}>批准</Button></div>
   </section>
 }

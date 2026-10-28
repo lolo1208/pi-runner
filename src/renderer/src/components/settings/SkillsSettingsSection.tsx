@@ -68,7 +68,7 @@ export function SkillsSettingsSection({ onBusyChange }: { onBusyChange(busy: boo
           <Tooltip.Trigger asChild><Button variant="outline" size="icon" disabled={busy} aria-label="查看技能目录" onClick={() => void change(async () => { unwrapModelResult(await window.piRunner.openSkillsDirectory()); return null })}><FolderOpen size={16} /></Button></Tooltip.Trigger>
           <Tooltip.Portal><Tooltip.Content className="skills-action-tooltip" side="top" sideOffset={6}>查看目录</Tooltip.Content></Tooltip.Portal>
         </Tooltip.Root>
-        <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" disabled={busy || loading}><FolderPlus size={16} />安装<ChevronDown size={14} /></Button></DropdownMenuTrigger><DropdownMenuContent align="end" sideOffset={6}>
+        <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" className="h-9 py-0" disabled={busy || loading}><FolderPlus size={16} />安装<ChevronDown size={14} /></Button></DropdownMenuTrigger><DropdownMenuContent align="end" sideOffset={6}>
           <DropdownMenuItem onSelect={() => void change(async () => unwrapModelResult(await window.piRunner.installSkill('zip')))}><FileArchive size={16} />从 ZIP 压缩包安装</DropdownMenuItem>
           <DropdownMenuItem onSelect={() => void change(async () => unwrapModelResult(await window.piRunner.installSkill('directory')))}><FolderOpen size={16} />从文件夹安装</DropdownMenuItem>
         </DropdownMenuContent></DropdownMenu>

@@ -14,6 +14,33 @@ const request = (overrides: Partial<ToolReviewRequest> = {}): ToolReviewRequest 
 })
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers() })
 
+describe('审核来源标记', () => {
+  it.each(['allow', 'ask', 'deny'] as const)('有效 AI 结论保留来源：%s', async decision => {
+    vi.spyOn(ModelClient.prototype, 'complete').mockResolvedValue({ text: JSON.stringify({ decision }) } as ModelReply)
+    expect(await new ToolReviewService(store()).reviewWithSource(request())).toEqual({ decision, source: 'ai' })
+  })
+  it('规则放行不标记为 AI', async () => {
+    const target = path.join(os.tmpdir(), 'review-target', 'a.txt')
+    expect(await new ToolReviewService(store(null)).reviewWithSource(request({ userPrompt: `请修改 "${target}"`, args: { path: target } }))).toEqual({ decision: 'allow', source: 'rule' })
+  })
+  it.each([null, { profile: { provider: 'chatgpt' }, apiKey: '' }])('模型不可用时不标记为 AI', async selected => {
+    expect(await new ToolReviewService(store(selected)).reviewWithSource(request())).toEqual({ decision: 'ask', source: 'fallback' })
+  })
+  it('调用失败不标记为 AI', async () => {
+    vi.spyOn(ModelClient.prototype, 'complete').mockRejectedValue(new Error('offline'))
+    expect(await new ToolReviewService(store()).reviewWithSource(request())).toEqual({ decision: 'ask', source: 'fallback' })
+  })
+  it('无效模型输出不标记为 AI', async () => {
+    vi.spyOn(ModelClient.prototype, 'complete').mockResolvedValue({ text: 'ask' } as ModelReply)
+    expect(await new ToolReviewService(store()).reviewWithSource(request())).toEqual({ decision: 'ask', source: 'fallback' })
+  })
+  it('参数超长未调用模型时不标记为 AI', async () => {
+    const complete = vi.spyOn(ModelClient.prototype, 'complete')
+    expect(await new ToolReviewService(store()).reviewWithSource(request({ userPrompt: 'x'.repeat(2001) }))).toEqual({ decision: 'ask', source: 'fallback' })
+    expect(complete).not.toHaveBeenCalled()
+  })
+})
+
 describe('tool review decisions', () => {
   it('uses AI review even when no project is bound', async () => {
     const complete = vi.spyOn(ModelClient.prototype, 'complete').mockResolvedValue({ text: '{"decision":"allow"}' } as ModelReply)

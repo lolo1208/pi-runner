@@ -86,11 +86,15 @@ export function tokenCountLabel(value: number | null | undefined): string | null
   if (value >= 1000) return `${Number((value / 1000).toFixed(value >= 100_000 ? 0 : 1))}K`
   return String(value)
 }
+/** 审核模型下拉框中“关闭”选项的取值，表示不使用 AI 审核。 */
+export const REVIEW_MODEL_OFF = 'off'
 export interface ModelSettings {
   profiles: ModelProfileView[]
   activeProfileId: string | null
-  /** 审核模型：空表示跟随默认模型；用于工具权限第二层自动审核。 */
+  /** 审核模型：空表示使用默认模型；用于工具权限第二层自动审核。 */
   reviewProfileId?: string | null
+  /** 为 true 时关闭 AI 审核，工具权限直接回退到逐次询问。 */
+  reviewDisabled?: boolean
   encryptionAvailable: boolean
   providers?: ModelProviderConnection[]
 }
@@ -123,6 +127,7 @@ export type PermissionMode = 'default' | 'auto' | 'full'
 export const PERMISSION_MODES: PermissionMode[] = ['default', 'auto', 'full']
 /** 工具权限第二层自动审核的结论：放行 / 交给用户 / 拒绝。 */
 export type ReviewDecision = 'allow' | 'ask' | 'deny'
+export interface ToolReviewResult { decision: ReviewDecision; source: 'ai' | 'rule' | 'fallback' }
 export interface ToolReviewRequest {
   tool: string
   args: Record<string, unknown>
@@ -141,6 +146,8 @@ export interface ToolApproval {
   cwd: string
   reason: string
   mustConfirm?: boolean
+  /** 仅在 AI 有效返回 ask 时为 true；回退或强制人工确认不标记。 */
+  aiReviewed?: boolean
 }
 /** “每次询问”模式下命令审批的默认说明；命令弹窗不重复展示这条模式说明，只保留真正的扩权原因。 */
 export const DEFAULT_COMMAND_APPROVAL_REASON = '“每次询问”模式下，终端命令需要逐次确认。命令获准后可能读写项目外文件或访问网络'

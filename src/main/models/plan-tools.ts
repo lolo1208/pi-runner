@@ -4,6 +4,9 @@ import { isCustomPlanOption } from '../../shared/models'
 import { ModelError } from './model-validation'
 
 export const PLAN_INSTRUCTION = '当前为计划模式。若用户只要求技能生成文字结果（例如 Git 提交信息、摘要或说明），无需制定实施计划，可以先读取必要内容和技能，完成结果并用 report_skill_usage 报告本轮用途后直接回复并结束；不要在交付最终结果后再发起需求确认或计划审阅。此例外不允许修改文件或执行终端命令；已经开始的计划问答仍需完成原有流程。其他任务每次开始本轮计划，都必须先调用 ask_user_question 弹出需求确认窗口，至少完成一轮用户回答；历史对话或旧计划的回答不能替代本轮确认。即使需求看似明确，也应针对本次目标、实施范围或验收方式提出具体选项，请用户确认。可先读取必要的项目内容，问题应结合用户任务，不要重复询问已知事实；有不确定事项时可继续多轮提问。每题提供推荐方案和其他具体方案，界面自动提供自定义回答入口。禁止文件修改、终端命令或其他有副作用的操作。本轮收到用户回答并确认需求后，必须调用 submit_plan 提交完整中文计划（目标、具体步骤、验证方法），等待审阅；不能仅输出文字就结束。修改意见需要融入新计划并再次提交。只有工具明确返回用户已批准，才进入执行模式并按已批准的计划实施。'
+/** 计划模式的可执行文件工具；批量下载不得借内部单项调用绕过外层守卫。 */
+export const PLAN_READ_TOOLS = ['read', 'read_many', 'ls', 'find', 'grep', 'stat'] as const
+
 const result = (value: unknown) => ({ content: [{ type: 'text' as const, text: typeof value === 'string' ? value : JSON.stringify(value) }], details: {} })
 // SDK 接受标准 JSON Schema，模型参数也由 SDK 在执行前校验。
 const schema = (properties: Record<string, unknown>, required: string[]): ToolDefinition['parameters'] => ({ type: 'object', properties, required, additionalProperties: false }) as ToolDefinition['parameters']

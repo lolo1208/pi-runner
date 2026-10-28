@@ -12,6 +12,7 @@ import { commandReview, statementReview } from './command-review-policy'
 import { destructiveCommandReason, shellFileMutationReason } from './blocked-command-policy'
 import { developerToolPolicy, developerToolTargets, windowsDeveloperSwitch } from './developer-tool-policy'
 import { inspectedShellCommands, shellProgram } from './shell-command-words'
+import { powerShellReadOnly } from './powershell-read-only'
 
 /** 审批只授予当前工具调用；停止任务后所有待审批立即失效。 */
 export class ToolApprovalManager {
@@ -54,8 +55,17 @@ export class ToolApprovalManager {
 // 这些 Git 子命令只读取仓库状态；reflog 改写、外部 diff 与 --output 等写文件参数另行排除。
 const readOnlyGitSubcommands = new Set(['status', 'diff', 'log', 'show', 'rev-parse', 'rev-list', 'blame', 'describe', 'cat-file', 'ls-files', 'ls-tree', 'grep', 'shortlog', 'whatchanged', 'reflog', 'count-objects', 'for-each-ref', 'show-ref', 'name-rev', 'merge-base', 'version', 'help'])
 
-/** 只拆分引号外的顺序/条件连接；拒绝重定向、管道、展开和后台运行。 */
-function readOnlyStatements(command: string): string[] | undefined {
+/** 只拆分引号外的顺序/条件连接及管道；各阶段均须独立通过分类，拒绝展开和后台运行。 */
+/** Windows 下仅规整三类无副作用写法：stderr 合并到 stdout、字符串后拼接 $LASTEXITCODE 的输出语句。 */
+function scrubWindowsInertSyntax(command: string): string {
+  if (process.platform !== 'win32') return command
+  return command
+    .replace(/(^|\s)2>&1(?=\s|$|[;|])/g, '$1')
+    .replace(/(^|[;|\r\n]\s*)("[^"$`\r\n]*")\s*\+\s*\$LASTEXITCODE(?=\s*(?:$|[;|\r\n]))/gi, '$1$2')
+}
+
+function readOnlyStatements(input: string): string[] | undefined {
+  const command = scrubWindowsInertSyntax(input)
   if (!command.trim() || command.length > 16000 || /[`$\0]/.test(command)) return undefined
   const statements: string[] = []
   let start = 0, quote = ''
@@ -74,11 +84,11 @@ function readOnlyStatements(command: string): string[] | undefined {
     if (process.platform !== 'win32' && /[\\*?]/.test(character)) return undefined
     if (/[<>(){}#]/.test(character)) return undefined
     if (character === '&' && !command.slice(start, index).trim() && /\s/.test(command[index + 1] ?? '')) continue
-    if (character === ';' || character === '\n' || character === '\r' || (character === '&' || character === '|') && command[index + 1] === character) {
+    if (character === ';' || character === '\n' || character === '\r' || character === '|' || character === '&' && command[index + 1] === character) {
       const statement = command.slice(start, index).trim()
       if (!statement && character !== '\n' && character !== '\r') return undefined
       if (statement) statements.push(statement)
-      if (character === '&' || character === '|') index++
+      if ((character === '&' || character === '|') && command[index + 1] === character) index++
       start = index + 1
       if ((character === '&' || character === '|') && !command.slice(start).trim()) return undefined
     } else if (character === '&' || character === '|') return undefined
@@ -90,6 +100,8 @@ function readOnlyStatements(command: string): string[] | undefined {
 }
 
 function readOnlyStatement(command: string): boolean {
+  // Windows PowerShell 中单独的字符串字面量只输出文本，不执行命令。
+  if (process.platform === 'win32' && /^(?:"[^"$`\r\n]*"|'[^'\r\n]*')$/.test(command.trim())) return true
   const tokens = literalCommand(command)
   if (!tokens) return false
   const program = commandProgram(tokens[0])
@@ -132,7 +144,8 @@ function readOnlyStatement(command: string): boolean {
 /** 所有语句都能确认为只读时才跳过基线；未知命令仍在执行前保护文件。 */
 export function readOnlyCommand(command: string): boolean {
   if (/^\s*\$PSVersionTable(?:\.PSVersion)?\s*$/i.test(command)) return true
-  return readOnlyStatements(command)?.every(readOnlyStatement) ?? false
+  if (readOnlyStatements(command)?.every(readOnlyStatement)) return true
+  return process.platform === 'win32' && powerShellReadOnly(command, readOnlyStatement)
 }
 
 /** 每次询问或项目自审模式中的敏感路径；完全访问模式不再逐项确认。 */
@@ -291,7 +304,17 @@ function safeDeveloperStatement(command: string): boolean {
 }
 
 export function safeDeveloperCommand(command: string): boolean {
-  return readOnlyStatements(command)?.every(safeDeveloperStatement) ?? false
+  if (readOnlyStatements(command)?.every(safeDeveloperStatement)) return true
+  if (process.platform !== 'win32' || command.length > 16000) return false
+  // 从末尾逐块检查连续成功条件，不求值条件，也不允许任意脚本或嵌套块。
+  let remaining = command
+  for (let count = 0; count < 64; count++) {
+    const guarded = remaining.match(/^([\s\S]+);\s*if\s*\(\s*(?:\$LASTEXITCODE\s+-eq\s+0|\$\?)\s*\)\s*\{([^{}]+)\}\s*;?\s*$/i)
+    if (!guarded || !readOnlyStatements(guarded[2])?.every(safeDeveloperStatement)) return false
+    remaining = guarded[1]
+    if (readOnlyStatements(remaining)?.every(safeDeveloperStatement)) return true
+  }
+  return false
 }
 
 export interface CommandRisk { risk: 'block' | 'safe' | 'approve'; reason?: string; mustConfirm?: boolean }

@@ -1,4 +1,6 @@
 import { queryOptions } from './command-query-options'
+import { nodePackageDiagnostic } from './node-diagnostic-policy'
+import { nodeJsonQuery } from './node-json-query-policy'
 
 export type DeveloperToolPolicy = { kind: 'read' | 'develop' }
   | { kind: 'review' | 'block'; reason: string; mustConfirm?: boolean }
@@ -32,7 +34,8 @@ export function developerToolPolicy(program: string, args: string[]): DeveloperT
   const supported = compilers.has(program) || jsBuildTools.has(program) || nodeTools.has(program)
     || installers.has(program) || ['link', 'lib', 'llvm-lib', 'dumpbin', 'vswhere', 'devenv', 'msbuild', 'vcpkg', 'cargo', 'rustup', 'cmake', 'tauri', 'npm', 'pnpm', 'yarn', 'npx', 'bunx'].includes(program)
   if (!supported || program === 'link' && process.platform !== 'win32') return undefined
-  if (args.some(value => value.startsWith('@'))) return review('响应文件可能隐藏输出路径、插件或执行参数，需要审核。')
+  const packageExecutor = ['npm', 'pnpm', 'yarn', 'npx', 'bunx'].includes(program)
+  if (args.some(value => value.startsWith('@') && !(packageExecutor && /^@[\w.-]+\/[\w.-]+(?:@[^\s]+)?$/.test(value)))) return review('响应文件可能隐藏输出路径、插件或执行参数，需要审核。')
   if (installers.has(program)) return review('Visual Studio 安装、修改、修复或卸载会改变本机工具链，必须人工确认。', true)
   if (args.length === 1 && ['--version', '--help', '-h', '-V', '/?'].includes(args[0])) return read
   if (args.length === 1 && args[0] === '-v' && ['node', 'nodejs', 'bun'].includes(program)) return read
@@ -113,9 +116,12 @@ export function developerToolPolicy(program: string, args: string[]): DeveloperT
     return develop
   }
   if (nodeTools.has(program)) {
+    if (['node', 'nodejs'].includes(program) && nodeJsonQuery(args)) return read
+    if (['node', 'nodejs'].includes(program) && nodePackageDiagnostic(args)) return develop
     if (args.some(value => /^--(?:eval|print|require|import|loader|experimental-loader|preload|inspect(?:-brk|-wait)?|allow-[\w-]+|trust|unsafely-ignore-certificate-errors)(?:=|$)/.test(value) || /^-[^-]*[eprA]/.test(value))) return review('运行时内联代码、启动加载器、调试入口或扩大权限需要审核。')
     if (['node', 'nodejs'].includes(program)) {
       if (args.length === 2 && ['--check', '-c'].includes(args[0]) && !args[1].startsWith('-')) return read
+      if (args[0] === '--experimental-strip-types') return /\.[cm]?[jt]s$/i.test(args[1] ?? '') && !args[1].startsWith('-') ? develop : review('Node 类型剥离的执行入口不明确，需要审核。')
       if (args[0] === '--test') return develop
       if (args[0] === '--watch') return args.length > 1 && /\.[cm]?js$/i.test(args[1]) ? develop : review('Node watch 的执行入口不明确，需要审核。')
       return /\.[cm]?js$/i.test(args[0] ?? '') ? develop : review('Node 的未知选项、标准输入或交互入口需要审核。')

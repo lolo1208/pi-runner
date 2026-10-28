@@ -34,7 +34,7 @@ export function ProjectPickerDialog({ projects, projectNames, error, isBusy, onC
       {!projects.length && <p className="hint">还没有已添加的项目。</p>}
       {projects.length > 0 && !filtered.length && <p className="hint">没有匹配的项目。</p>}
     </div>}</PagedList>
-    <Button variant="ghost" className="project-picker-new-button" disabled={isBusy} onClick={onChooseProjectDirectory}><PlusCircle size={17} />新的项目</Button>
+    <Button className="project-picker-new-button" disabled={isBusy} onClick={onChooseProjectDirectory}><PlusCircle size={17} />新的项目</Button>
     {isBusy && <p className="hint" role="status">正在打开项目…</p>}
   </Modal>
 }

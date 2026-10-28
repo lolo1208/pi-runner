@@ -5,14 +5,16 @@
 }
 
 .project-picker-list {
-  gap: 10px;
+  gap: 6px;
   max-height: 330px;
   display: grid;
   overflow: auto;
 }
 
 .project-picker-ordinary {
-  margin-bottom: 10px;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
 }
 
 .project-picker-list > button {
@@ -25,7 +27,9 @@
 .project-picker-new-button {
   width: 100%;
   margin-top: 12px;
-  border: 0;
+  justify-content: flex-start;
+  text-align: left;
+  padding: 12px;
 }
 
 .project-picker-list > button > span {

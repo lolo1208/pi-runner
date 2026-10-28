@@ -30,7 +30,7 @@ export async function createPiProvider(profile: ModelProfile, apiKey: string, at
   const contextWindow = profile.provider === 'ollama' ? ollamaContextTokens(profile) : profile.contextTokens ?? Math.max(32768, profile.maxTokens * 2)
   runtime.registerProvider(provider, {
     api, baseUrl: profile.baseUrl, apiKey: apiKey || 'pi-runner-local',
-    models: [{ id: profile.model, name: profile.name, input: ['text', 'image'], reasoning: profile.provider === 'openrouter' ? profile.supportedParameters?.includes('reasoning') === true : profile.thinking === true,
+    models: [{ id: profile.model, name: profile.name, input: ['text', 'image'], reasoning: profile.provider === 'openrouter' ? profile.supportedParameters?.includes('reasoning') === true || (profile.thinkingLevel != null && profile.thinkingLevel !== 'off') : profile.thinking === true,
       contextWindow, maxTokens: profile.maxTokens,
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       ...(api === 'openai-completions' ? { compat: { maxTokensField: profile.tokenParameter, supportsDeveloperRole: profile.provider === 'openai', supportsStore: false, supportsReasoningEffort: profile.provider === 'openai' || profile.provider === 'openrouter', ...(profile.provider === 'openrouter' ? { thinkingFormat: 'openrouter' as const } : {}) } } : {}) }],
@@ -55,8 +55,8 @@ export async function createPiProvider(profile: ModelProfile, apiKey: string, at
         if (profile.provider === 'openrouter') {
           if (!profile.supportedParameters?.includes('temperature')) delete body.temperature
           delete body.reasoning_effort
-          if (profile.thinkingLevel != null) body.reasoning = profile.thinkingLevel === 'off' ? { enabled: false } : { effort: profile.thinkingLevel }
-          else delete body.reasoning
+          if (profile.thinkingLevel != null) body.reasoning = profile.thinkingLevel === 'off' ? { enabled: false } : { effort: profile.thinkingLevel, exclude: false }
+          else if (body.reasoning && typeof body.reasoning === 'object') body.reasoning = { ...body.reasoning, exclude: false }
         }
         return body
       },
@@ -76,6 +76,6 @@ export async function createPiProvider(profile: ModelProfile, apiKey: string, at
     }), apiKey, () => controller.abort(), onModelRequestActive, () => responseError)
     }
   })
-  return { runtime, model: runtime.getModel(provider, profile.model)!, thinkingLevel: profile.thinking === true || profile.ollamaThinkingLevel != null ? 'medium' as const : 'off' as const,
+  return { runtime, model: runtime.getModel(provider, profile.model)!, thinkingLevel: profile.provider === 'openrouter' ? profile.thinkingLevel ?? 'off' : profile.thinking === true || profile.ollamaThinkingLevel != null ? 'medium' as const : 'off' as const,
     ollamaCall: (): OllamaCallInfo | undefined => ollamaCall }
 }
