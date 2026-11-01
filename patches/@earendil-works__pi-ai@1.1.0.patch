@@ -1,0 +1,38 @@
+diff --git a/dist/api/google-generative-ai.js b/dist/api/google-generative-ai.js
+--- a/dist/api/google-generative-ai.js
++++ b/dist/api/google-generative-ai.js
+@@ -33,14 +33,11 @@
+             timestamp: Date.now(),
+         };
+         try {
+-            if (options?.fetch && options.fetch !== globalThis.fetch) {
+-                throw new Error("Custom fetch is not supported by the Google Generative AI adapter");
+-            }
+             const apiKey = options?.apiKey;
+             if (!apiKey) {
+                 throw new Error(`No API key for provider: ${model.provider}`);
+             }
+-            const client = createClient(model, apiKey, options?.headers);
++            const client = createClient(model, apiKey, options?.headers, options?.fetch);
+             let params = buildParams(model, normalizedContext, options);
+             const nextParams = await options?.onPayload?.(params, model);
+             if (nextParams !== undefined) {
+@@ -267,8 +264,8 @@
+         },
+     });
+ };
+-function createClient(model, apiKey, optionsHeaders) {
+-    const httpOptions = {};
++function createClient(model, apiKey, optionsHeaders, fetchRequest) {
++    const httpOptions = { fetch: fetchRequest, retryOptions: { attempts: 1 } };
+     if (model.baseUrl) {
+         httpOptions.baseUrl = model.baseUrl;
+         httpOptions.apiVersion = ""; // baseUrl already includes version path, don't append
+@@ -278,6 +275,7 @@
+         httpOptions.headers = headers;
+     }
+     return new GoogleGenAI({
++        vertexai: false,
+         apiKey,
+         httpOptions: Object.keys(httpOptions).length > 0 ? httpOptions : undefined,
+     });

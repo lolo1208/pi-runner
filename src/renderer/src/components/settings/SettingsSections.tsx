@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/button'
+import { Kbd } from '@/components/ui/kbd'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -72,7 +73,7 @@ export function GeneralSettingsSection({ preferences, onPreferences, isMac, sett
             }
           }} />
         {showPromptSuggestion && <>
-          <div className="custom-prompt-placeholder" aria-hidden="true">{CUSTOM_PROMPT_PLACEHOLDER} <kbd><ArrowRightToLine size={12} />Tab</kbd></div>
+          <div className="custom-prompt-placeholder" aria-hidden="true">{CUSTOM_PROMPT_PLACEHOLDER} <Kbd><ArrowRightToLine size={12} />Tab</Kbd></div>
           <span id="custom-prompt-shortcut" className="sr-only">按 Tab 填入示例提示词。</span>
         </>}
       </div>

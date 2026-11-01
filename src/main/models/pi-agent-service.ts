@@ -191,8 +191,17 @@ export class PiAgentService {
     const skillNotices = new Map<string, string>()
     const durations = new Map<string, number>()
     const skillCallNames = new Map<string, string>()
+    const aiReviews = new Map<string, import('../../shared/models').AiReviewDetail[]>()
     const results = new Map<string, { content: string; isError: boolean }>()
     for (const entry of manager.getBranch()) {
+      if (entry.type === 'custom' && entry.customType === 'pi-runner-ai-review') {
+        const data = entry.data as { toolCallId: string } & import('../../shared/models').AiReviewDetail
+        if (['allow', 'ask', 'deny'].includes(data.decision)) {
+          const details = aiReviews.get(data.toolCallId) ?? []
+          details.push({ decision: data.decision, ...(data.reason ? { reason: data.reason } : {}), ...(data.target ? { target: data.target } : {}) })
+          aiReviews.set(data.toolCallId, details)
+        }
+      }
       if (entry.type === 'custom' && entry.customType === 'pi-runner-skill-call') {
         const data = entry.data as { toolCallId: string; name: string }
         skillCallNames.set(data.toolCallId, data.name)
@@ -251,7 +260,9 @@ export class PiAgentService {
           if (block.type !== 'toolCall') return []
           const result = results.get(block.id)
           const skillName = skills.get(String(block.arguments.skillId ?? ''))?.name ?? skillCallNames.get(block.id)
-          return [{ id: block.id, kind: 'tool', name: block.name, ...(skillName ? { skillName } : {}), args: block.arguments, content: result?.content ?? '', completed: Boolean(result), isError: result?.isError }]
+          const details = aiReviews.get(block.id)
+          const aiReview = details?.some(item => item.decision === 'deny') ? 'deny' : details?.some(item => item.decision === 'ask') ? 'ask' : details?.length ? 'allow' : undefined
+          return [{ id: block.id, kind: 'tool', name: block.name, ...(skillName ? { skillName } : {}), ...(aiReview ? { aiReview, aiReviewDetails: details } : {}), args: block.arguments, content: result?.content ?? '', completed: Boolean(result), isError: result?.isError }]
         })
       } : undefined
       if (original || content.trim() || call?.work.length) visibleIds?.push(entry.id)
@@ -419,7 +430,11 @@ export class PiAgentService {
       publishTranscript()
     }
     status(modelStatus)
-    const provider = await createPiProvider(profile, apiKey, attachments, responses, limits => { rateLimits = limits }, this.dependencies.fetchRequest, this.dependencies.chatgpt, onModelRequestActive)
+    const provider = await createPiProvider(profile, apiKey, attachments, responses, limits => { rateLimits = limits }, this.dependencies.fetchRequest, this.dependencies.chatgpt, onModelRequestActive, attempt => {
+      onModelRequestActive(true)
+      modelStatus = `Google 服务繁忙，正在重试（${attempt}/3）…`
+      refreshStatus()
+    })
     signal.throwIfAborted()
     // 仅首次迁移导入旧聊天；之后以 pi 的完整会话（含工具结果）为准。
     if (!manager.getEntries().some(entry => entry.type === 'message')) for (const message of messages.slice(0, -1)) {
@@ -448,15 +463,20 @@ export class PiAgentService {
       approve: async (id, tool, args, reason, toolSignal, mustConfirm) => {
         // 第二层：项目自审模式下先做规则/AI 自动审核，再决定是否弹出问询框。
         let aiReviewed: true | undefined
+        let aiReviewReason: string | undefined
         if (mode === 'auto' && !mustConfirm && this.dependencies.review) {
           const reviewSignal = toolSignal ?? signal
           const result = await this.dependencies.review({ tool, args: structuredClone(args), cwd, mode, project, reason, userPrompt: [...messages].reverse().find(message => message.role === 'user')?.content ?? '', signal: reviewSignal }).catch((): ToolReviewResult => ({ decision: 'ask', source: 'fallback' }))
           reviewSignal.throwIfAborted()
+          if (result.source === 'ai') {
+            manager.appendCustomEntry('pi-runner-ai-review', { toolCallId: id, decision: result.decision, ...(result.reason ? { reason: result.reason } : {}), ...(typeof args.path === 'string' ? { target: args.path } : {}) })
+            publishTranscript()
+          }
           if (result.decision === 'allow') return
           if (result.decision === 'deny') throw new ModelError('自动审核拒绝了该操作，请调整方案后重试')
-          if (result.decision === 'ask' && result.source === 'ai') aiReviewed = true
+          if (result.decision === 'ask' && result.source === 'ai') { aiReviewed = true; aiReviewReason = result.reason }
         }
-        await this.approvals.ask(requestId, options.conversationId, { toolCallId: id, tool, args: structuredClone(args), cwd, reason, mustConfirm, aiReviewed }, toolSignal ?? signal, waitingFor(id, `等待你批准${toolActions[tool] ?? '操作'}…`))
+        await this.approvals.ask(requestId, options.conversationId, { toolCallId: id, tool, args: structuredClone(args), cwd, reason, mustConfirm, aiReviewed, aiReviewReason }, toolSignal ?? signal, waitingFor(id, `等待你批准${toolActions[tool] ?? '操作'}…`))
       }
     })
     let session: AgentSession | undefined

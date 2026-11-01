@@ -116,7 +116,7 @@
 .custom-prompt-input textarea, .custom-prompt-placeholder { font-size: calc(14rem / 14); line-height: 1.5; }
 .custom-prompt-input[data-suggestion-visible="true"] textarea::placeholder { color: transparent; }
 .custom-prompt-placeholder { position: absolute; inset: 1px 1px auto; padding: 8px 12px; color: var(--muted); overflow-wrap: anywhere; pointer-events: none; }
-.custom-prompt-placeholder kbd { display: inline-flex; align-items: center; gap: 4px; vertical-align: baseline; white-space: nowrap; padding: 0 4px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text); font-family: inherit; font-size: calc(11rem / 14); line-height: calc(17rem / 14); }
+.custom-prompt-placeholder [data-slot="kbd"] { vertical-align: baseline; white-space: nowrap; }
 
 .settings-divider {
   background: var(--border);
@@ -430,7 +430,9 @@
 @media (prefers-reduced-motion: reduce) {
   .provider-workspace *, .provider-dialog * { transition: none !important; animation: none !important; }
 }
-.chatgpt-auth-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; }
+.chatgpt-auth-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; margin: 12px 0; }
+.ui-button.chatgpt-logout-button { border-color: var(--error); color: var(--error); }
+.ui-button.chatgpt-logout-button:hover { background: var(--hover); }
 .chatgpt-authorization { min-width: 0; }
 .chatgpt-authorization .error, .chatgpt-authorization .success { overflow-wrap: anywhere; }
 

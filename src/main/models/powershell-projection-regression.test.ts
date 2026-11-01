@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { commandRisk, readOnlyCommand } from './tool-permissions'
 
 const reportedQueries = [
+  `Get-ChildItem node_modules -Directory | Where-Object { $_.Name -match 'sharp|jimp|pngjs|canvas|image' } | Select-Object -ExpandProperty Name; Get-ChildItem node_modules/.pnpm -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^(sharp|jimp|pngjs|canvas)@' } | Select-Object -ExpandProperty Name; Add-Type -AssemblyName System.Drawing; $i=[System.Drawing.Image]::FromFile((Resolve-Path 'resources/game/startmenu/background.png')); "$($i.Width)x$($i.Height)"; $i.Dispose()`,
   `$files=Get-ChildItem cocos-proj/assets -Recurse -File; $files | Where-Object Extension -in '.mp3','.wav','.ogg','.mp4','.webm','.ttf','.otf','.woff','.woff2','.skel' | Select-Object FullName; $files | Where-Object Extension -eq '.anim' | ForEach-Object { $_.FullName.Substring((Get-Location).Path.Length+1) }; $files | Where-Object Extension -eq '.json' | ForEach-Object { try { $j=Get-Content $_.FullName -Raw -Encoding UTF8 | ConvertFrom-Json; if($j.skeleton.spine){ [pscustomobject]@{Path=$_.FullName.Substring((Get-Location).Path.Length+1);Version=$j.skeleton.spine;Animations=($j.animations.PSObject.Properties.Name -join ', ')} } } catch {} } | Format-List`,
   String.raw`Get-Content node_modules/@esotericsoftware/spine-pixi-v8/dist/require-shim.js | Where-Object { $_ -notlike '//# sourceMappingURL*' }; Select-String -Path node_modules/@esotericsoftware/spine-pixi-v8/dist/Spine.js -Pattern 'static from|destroy\(' -Context 0,30 | Select-Object -First 5; Get-ChildItem node_modules/.pnpm -Directory -Filter '*spine-core*' | Select-Object Name; Get-Content node_modules/@esotericsoftware/spine-pixi-v8/dist/SpineTexture.js | Where-Object {$_ -notlike '//# sourceMappingURL*'} | Select-String -Pattern 'dispose' -Context 0,8`,
   String.raw`[System.IO.File]::ReadLines((Resolve-Path 'node_modules/@esotericsoftware/spine-pixi-v8/dist/require-shim.js')) | Where-Object { $_.Length -lt 1000 } | Select-Object -Last 30; [System.IO.File]::ReadLines((Resolve-Path 'node_modules/.pnpm/@esotericsoftware+spine-core@4.2.120/node_modules/@esotericsoftware/spine-core/dist/AnimationState.d.ts')) | Select-String -Pattern 'interface AnimationStateListener|listener:|animation:|setAnimation\(|removeListener|setMix' -Context 0,12 | Select-Object -First 12`,
@@ -23,6 +24,11 @@ describe('PowerShell 只读投影与文件读取回归', () => {
   })
 
   it.each([
+    `Add-Type -TypeDefinition 'public class X {}'`,
+    `Add-Type -AssemblyName OtherAssembly`,
+    `$i=[System.Drawing.Image]::FromFile('x'); $i.Save('x')`,
+    `$i=Get-Content x; $i.Dispose()`,
+    `[System.Drawing.Image]::FromFile((Resolve-Path 'x'; Start-Process calc))`,
     `Get-ChildItem | ForEach-Object { & $_.FullName }`,
     `Get-ChildItem | ForEach-Object { Start-Process calc }`,
     `Get-ChildItem | ForEach-Object -Parallel { $_.Name }`,

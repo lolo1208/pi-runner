@@ -70,6 +70,17 @@ export default function App(): React.JSX.Element {
     return () => document.removeEventListener('visibilitychange', markViewed)
   }, [currentTask?.id, currentTask?.unreadCompletion, settingsSection, setTasks])
   const [toolsOpen, setToolsOpen] = useState(false)
+  const [revealFile, setRevealFile] = useState<{ project: string; path: string; id: number } | null>(null)
+  useEffect(() => {
+    const reveal = (event: Event): void => {
+      const detail = (event as CustomEvent<{ project: string; path: string }>).detail
+      if (!detail || !currentTask?.project || !sameProjectPath(detail.project, currentTask.project)) return
+      setRevealFile(previous => ({ ...detail, id: (previous?.id ?? 0) + 1 }))
+      setTool('files'); setToolsOpen(true)
+    }
+    window.addEventListener('pi-runner:reveal-file', reveal)
+    return () => window.removeEventListener('pi-runner:reveal-file', reveal)
+  }, [currentTask?.project])
   const [isMaximized, setIsMaximized] = useState(false)
   const [tool, setTool] = useState<'snapshots' | 'files' | 'terminal' | 'browser'>('snapshots')
   const loadSettings = (): void => {
@@ -204,6 +215,7 @@ export default function App(): React.JSX.Element {
         isBusy={isBusy || isChatBusy}
         activeTool={tool}
         checkpoints={checkpoints}
+        revealFile={revealFile && currentTask?.project && sameProjectPath(revealFile.project, currentTask.project) ? revealFile : null}
         onToolChange={setTool}
         onClose={() => setToolsOpen(false)}
       />}

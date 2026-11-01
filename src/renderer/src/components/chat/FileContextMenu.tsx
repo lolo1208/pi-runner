@@ -4,7 +4,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator,
 import type { FileAction } from '../../../../shared/api'
 
 /** 两处文件列表共用菜单，普通点击仍由文件行处理。 */
-export function FileContextMenu({ project, path, children }: { project: string; path: string; children: ReactElement }): React.JSX.Element {
+export function FileContextMenu({ project, path, children, inSidebar = false, isDirectory = false }: { project: string; path: string; children: ReactElement; inSidebar?: boolean; isDirectory?: boolean }): React.JSX.Element {
   const [error, setError] = useState('')
   const run = async (action: FileAction): Promise<void> => {
     setError('')
@@ -15,13 +15,13 @@ export function FileContextMenu({ project, path, children }: { project: string; 
     <ContextMenu onOpenChange={open => { if (open) setError('') }}>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
       <ContextMenuContent aria-label="文件操作">
-        <ContextMenuItem onSelect={() => void run('copy-file')}><Copy aria-hidden="true" size={16} />复制文件</ContextMenuItem>
+        <ContextMenuItem onSelect={() => void run('copy-file')}><Copy aria-hidden="true" size={16} />复制{isDirectory ? '目录' : '文件'}</ContextMenuItem>
         <ContextMenuItem onSelect={() => void run('copy-path')}><Link aria-hidden="true" size={16} />复制路径</ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem onSelect={() => void run('open-directory')}><FolderOpen aria-hidden="true" size={16} />打开所在目录</ContextMenuItem>
-        <ContextMenuItem onSelect={() => void run('open-file')}><ExternalLink aria-hidden="true" size={16} />打开文件</ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem disabled><PanelRightOpen aria-hidden="true" size={16} />在侧边栏打开</ContextMenuItem>
+        <ContextMenuItem onSelect={() => void run('open-file')}><ExternalLink aria-hidden="true" size={16} />打开{isDirectory ? '目录' : '文件'}</ContextMenuItem>
+        {!inSidebar && <><ContextMenuSeparator />
+        <ContextMenuItem onSelect={() => window.dispatchEvent(new CustomEvent('pi-runner:reveal-file', { detail: { project, path } }))}><PanelRightOpen aria-hidden="true" size={16} />在侧边栏打开</ContextMenuItem></>}
       </ContextMenuContent>
     </ContextMenu>
     {error && <div className="file-context-menu-error" role="alert">{error}</div>}

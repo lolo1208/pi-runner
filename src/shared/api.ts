@@ -2,6 +2,7 @@ import type { AgentEvent, AgentRequestOptions, ChatMessage, ModelDescriptor, Mod
 export interface Checkpoint { hash: string; createdAt: string; label: string }
 export interface ChangedFile { path: string; status: 'A' | 'M' | 'D'; additions: number; deletions: number; binary: boolean }
 export interface FileDiff { path: string; before: string; after: string; binary: boolean; hunks?: string[] }
+export interface ProjectFileEntry { name: string; path: string; isDirectory: boolean }
 export type FileAction = 'copy-file' | 'copy-path' | 'open-directory' | 'open-file'
 /** 通知类型：任务成功、任务失败、等待用户输入；界面按类型使用不同图标。 */
 export type NotificationKind = 'success' | 'failure' | 'input'
@@ -21,6 +22,7 @@ export interface PiRunnerApi {
   deleteSkill(id: string): Promise<ModelResult<import('./skills').LocalSkill[]>>
   exportSkill(id: string): Promise<ModelResult<string | null>>
   refreshSkills(): Promise<ModelResult<import('./skills').LocalSkill[]>>
+  listProjectFiles(project: string, directory: string): Promise<ProjectFileEntry[]>
   performFileAction(project: string, path: string, action: FileAction): Promise<void>
   copyText(text: string): Promise<void>
   saveAttachment(name: string, dataUrl: string): Promise<string | null>
@@ -67,6 +69,8 @@ export interface PiRunnerApi {
   deleteAgentRound(conversationId: string, index: number, expectedHistoryId?: string): Promise<ModelResult<ChatMessage[] | null>>
   cancelModelRequest(requestId: string): Promise<ModelResult<void>>
   connectOllama(baseUrl: string): Promise<ModelResult<ModelSettings>>
+  connectGoogle(apiKey?: string): Promise<ModelResult<ModelSettings>>
+  connectDeepseek(apiKey?: string): Promise<ModelResult<ModelSettings>>
   connectOpenrouter(apiKey?: string): Promise<ModelResult<ModelSettings>>
   getOpenrouterUsage(): Promise<ModelResult<import('./models').OpenrouterUsage>>
   getOllamaModelInfo(baseUrl: string, model: string): Promise<ModelResult<ModelDescriptor>>
@@ -78,10 +82,12 @@ export interface PiRunnerApi {
   setSleepBlocker(active: boolean): Promise<void>
 }
 export const IPC_CHANNELS = {
+  googleConnect: 'models:google-connect',
+  deepseekConnect: 'models:deepseek-connect',
   codePreview: 'files:code-preview',
   skillsExport: 'models:skills-export',
   skillsList: 'models:skills-list', skillsInstall: 'models:skills-install', skillsEnable: 'models:skills-enable', skillsDelete: 'models:skills-delete', skillsRefresh: 'models:skills-refresh', skillsDirectory: 'models:skills-directory', skillsOpenDirectory: 'models:skills-open-directory',
-  fileAction: 'files:action',
+  fileAction: 'files:action', fileList: 'files:list',
   copyText: 'clipboard:copy-text',
   notification: 'app:notification', notificationActivate: 'app:notification-activate', closeNotifications: 'app:close-notifications',
   saveAttachment: 'files:save-attachment',

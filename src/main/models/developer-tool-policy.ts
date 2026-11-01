@@ -78,6 +78,7 @@ export function developerToolPolicy(program: string, args: string[]): DeveloperT
   if (program === 'rustup') {
     const query = ['show', 'check'].includes(args[0]) && queryOptions(args.slice(1), ['--verbose', '-v'])
       || args.length === 2 && ['toolchain', 'target', 'component'].includes(args[0]) && args[1] === 'list'
+      || args.length === 3 && ['target', 'component'].includes(args[0]) && args[1] === 'list' && args[2] === '--installed'
     return query ? read : review('Rust 工具链修改或未知查询参数需要审核。')
   }
   if (program === 'cargo') {
@@ -126,6 +127,7 @@ export function developerToolPolicy(program: string, args: string[]): DeveloperT
       if (args[0] === '--watch') return args.length > 1 && /\.[cm]?js$/i.test(args[1]) ? develop : review('Node watch 的执行入口不明确，需要审核。')
       return /\.[cm]?js$/i.test(args[0] ?? '') ? develop : review('Node 的未知选项、标准输入或交互入口需要审核。')
     }
+    if (program === 'tsx' && args[0] === '--test' && args.slice(1).every(value => /^--test-reporter=(?:dot|spec|tap|junit)$/.test(value) || /^[\w./*\\-]+\.test\.[cm]?[jt]sx?$/i.test(value))) return develop
     if (['tsx', 'ts-node', 'ts-node-esm'].includes(program)) return /\.(?:[cm]?[jt]s|[jt]sx)$/i.test(args[0] ?? '') || args[0] === 'watch' && /\.(?:[cm]?[jt]s|[jt]sx)$/i.test(args[1] ?? '') ? develop : review('TS 执行器的配置、加载器或未知入口需要审核。')
     if (['run', 'test', 'build', 'bench', 'task', 'check', 'lint', 'fmt', 'cache', 'install', 'x'].includes(args[0])) return develop
     return review('运行时未知子命令需要审核。')

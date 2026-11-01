@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState, type ComponentProps, type ReactNode } from 'react'
-import { ChevronRight, Columns2, File, FileCode2, FileJson, FileText, Image, List, Music, SquareTerminal, Video } from 'lucide-react'
+import { ChevronRight, Columns2, List } from 'lucide-react'
+export { fileIcon } from '../FileIcon'
 import { Button } from '@/components/ui/button'
 import type { CodeDiffProps } from '../../CodeDiff'
 
@@ -58,23 +59,6 @@ export function DiffFileHeader({ icon, name, path, expanded, onToggle, trailing,
     {hidden && <span className="sr-only">{hidden}</span>}
     {trailing}
   </button>
-}
-
-/**
- * 按文件后缀选图标：同类后缀共用一个图标（如 .jpg/.png 都是图片），
- * 未知类型退回通用文件图标。
- */
-export function fileIcon(path: string): React.JSX.Element {
-  const ext = path.slice(path.lastIndexOf('.') + 1).toLowerCase()
-  const size = 15
-  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'ico', 'avif'].includes(ext)) return <Image size={size} aria-hidden="true" />
-  if (['mp3', 'wav', 'flac', 'ogg', 'm4a', 'aac'].includes(ext)) return <Music size={size} aria-hidden="true" />
-  if (['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(ext)) return <Video size={size} aria-hidden="true" />
-  if (['json', 'jsonc', 'json5', 'yaml', 'yml', 'toml'].includes(ext)) return <FileJson size={size} aria-hidden="true" />
-  if (['js', 'mjs', 'cjs', 'jsx', 'ts', 'mts', 'cts', 'tsx', 'vue', 'svelte', 'py', 'rb', 'go', 'rs', 'java', 'kt', 'swift', 'c', 'h', 'cpp', 'hpp', 'cc', 'cs', 'php', 'sh', 'bat', 'ps1', 'lua', 'sql'].includes(ext)) return <FileCode2 size={size} aria-hidden="true" />
-  if (['md', 'mdx', 'txt', 'log', 'html', 'htm', 'css', 'scss', 'less', 'xml'].includes(ext)) return <FileText size={size} aria-hidden="true" />
-  if (['exe', 'dll', 'so', 'dylib', 'bin', 'dat'].includes(ext)) return <SquareTerminal size={size} aria-hidden="true" />
-  return <File size={size} aria-hidden="true" />
 }
 
 /** 取路径最后一段作为文件名。 */

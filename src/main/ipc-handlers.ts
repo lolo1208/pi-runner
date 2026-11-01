@@ -12,6 +12,7 @@ import { ModelService, modelResult } from './models/model-service'
 import type { ChatgptService } from './models/chatgpt-service'
 import { ModelError } from './models/model-validation'
 import { performFileAction } from './file-actions'
+import { listProjectFiles } from './project-files'
 import { SleepBlocker } from './sleep-blocker'
 import type { FileAction } from '../shared/api'
 import { SkillStore } from './skill-store'
@@ -127,6 +128,7 @@ export function registerIpcHandlers(dependencies: IpcHandlerDependencies): void 
       : { title: '选择包含 SKILL.md 的技能目录', properties: ['openDirectory'] })
     return result.canceled ? null : source === 'zip' ? skills.installZip(result.filePaths[0]) : skills.install(result.filePaths[0])
   }))
+  handle(IPC_CHANNELS.fileList, (project, directory) => listProjectFiles(parseString(project), typeof directory === 'string' ? directory : ''))
   handle(IPC_CHANNELS.fileAction, (project, file, action) => performFileAction(parseString(project), parseString(file), parseString(action) as FileAction))
   handle(IPC_CHANNELS.copyText, text => {
     if (typeof text !== 'string') throw new ModelError('复制内容格式无效')
@@ -322,6 +324,8 @@ export function registerIpcHandlers(dependencies: IpcHandlerDependencies): void 
   handle(IPC_CHANNELS.agentDeleteRound, (id, index, expectedHistoryId) => modelResult(() => dependencies.getModelService().deleteRound(id, index, expectedHistoryId)))
   handle(IPC_CHANNELS.modelCancel, requestId => modelResult(() => dependencies.getModelService().cancel(requestId)))
   handle(IPC_CHANNELS.ollamaConnect, baseUrl => modelResult(() => dependencies.getModelService().connectOllama(baseUrl)))
+  handle(IPC_CHANNELS.googleConnect, apiKey => modelResult(() => dependencies.getModelService().connectGoogle(apiKey)))
+  handle(IPC_CHANNELS.deepseekConnect, apiKey => modelResult(() => dependencies.getModelService().connectDeepseek(apiKey)))
   handle(IPC_CHANNELS.openrouterConnect, apiKey => modelResult(() => dependencies.getModelService().connectOpenrouter(apiKey)))
   handle(IPC_CHANNELS.openrouterUsage, () => modelResult(() => dependencies.getModelService().openrouterUsage()))
   handle(IPC_CHANNELS.ollamaInfo, (baseUrl, model) => modelResult(() => dependencies.getModelService().getOllamaModelInfo(baseUrl, model)))

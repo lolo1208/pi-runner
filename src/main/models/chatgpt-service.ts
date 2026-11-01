@@ -252,10 +252,11 @@ export class ChatgptService {
         const controller = new AbortController()
         let responseError: string | undefined
         this.invalidateUsage()
-        return requestPiStream(() => original.streamSimple(target, context, { ...options, transport: 'sse', maxTokens: Math.min(options?.maxTokens ?? configured.maxTokens, configured.maxTokens), temperature: undefined, timeoutMs: profile.timeoutSeconds * 1000, maxRetries: 0,
+        return requestPiStream(() => original.streamSimple(target, context, { ...options, transport: 'sse', maxTokens: Math.min(options?.maxTokens ?? configured.maxTokens, configured.maxTokens), temperature: undefined, timeoutMs: 0, maxRetries: 0,
           signal: options?.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal,
           fetch: async (url, init) => {
             const response = await this.fetchRequest(url, { ...init, redirect: 'error' })
+            onModelRequestActive(true)
             if (!response.ok) {
               const token = new Headers(init?.headers).get('authorization')?.replace(/^Bearer\s+/i, '') ?? options?.apiKey ?? ''
               responseError = await modelResponseError(response, token)

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { commandRisk, readOnlyCommand } from './tool-permissions'
 
 const queries = [
+  `Get-ChildItem -Path $env:USERPROFILE -Filter context.mjs -Recurse -ErrorAction SilentlyContinue | Select-Object -First 5 -ExpandProperty FullName`,
   `$p=Get-Content cocos-proj/assets/buzhiming/prefabs/matou.prefab -Raw -Encoding UTF8 | ConvertFrom-Json; for($i=0;$i -lt $p.Count;$i++){ $x=$p[$i]; if($x.__type__ -eq 'cc.Node' -and $x._name -in @('matou','bg','tiezhua','leaveBtn','matouBlur','ship')){ "index=$i"; $x | ConvertTo-Json -Depth 4; foreach($c in $x._components){ $p[$c.__id__] | ConvertTo-Json -Depth 3 } } }; $b=Get-Content cocos-proj/assets/buzhiming/prefabs/Buzhiming.prefab -Raw -Encoding UTF8 | ConvertFrom-Json; foreach($x in $b){if($x.__type__ -eq 'cc.Node' -and $x._name -in @('bg','button_matou')){$x | ConvertTo-Json -Depth 3}}`,
   `$p=Get-Content data.json -Raw | ConvertFrom-Json; for($i=0;$i -le $p.Count;$i++){ if($i -eq 0){ $p[$i] | ConvertTo-Json } elseif($i -eq 1){ "second=$i" } else { $p[$i].Name } }`,
   `$p=Get-Content data.json -Raw | ConvertFrom-Json; for($i=5;$i -ge 0;$i--){ $p[$i] | ConvertTo-Json -Depth 4 }`,
@@ -12,6 +13,8 @@ const queries = [
   `Get-ChildItem cocos-proj -Recurse -File | Where-Object { $_.Extension -ne '.meta' } | Sort-Object LastWriteTime -Descending | Select-Object -First 25 @{Name='Path';Expression={$_.FullName.Substring((Get-Location).Path.Length+1)}},LastWriteTime | Format-Table -AutoSize`,
   `$urls=@('https://registry.npmjs.org/@pixi-spine/runtime-3.8/latest','https://registry.npmjs.org/pixi-spine/latest','https://registry.npmjs.org/@esotericsoftware/spine-pixi-v8/4.2.*/'); foreach($u in $urls[0..1]) { try {$j=Invoke-RestMethod $u; $j | Select-Object name,version,peerDependencies,dependencies | ConvertTo-Json -Depth 5} catch {$_.Exception.Message} }; $u='https://raw.githubusercontent.com/pixijs-userland/spine/master/README.md'; (Invoke-WebRequest $u).Content`,
   `(Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/pixijs-userland/spine/master/README.md').Content; $j=Invoke-RestMethod 'https://registry.npmjs.org/@esotericsoftware/spine-pixi-v8'; $v=$j.versions.PSObject.Properties | Where-Object Name -like '4.2.*' | Select-Object -Last 1; $v.Value | Select-Object name,version,peerDependencies,dependencies | ConvertTo-Json -Depth 4`,
+  `$r = Invoke-WebRequest -Uri 'https://ai.google.dev/gemini-api/docs/pricing' -UseBasicParsing -TimeoutSec 30\n$text = $r.Content -replace '<script[\s\S]*?</script>', ' ' -replace '<style[\s\S]*?</style>', ' ' -replace '<[^>]+>', ' ' -replace '&nbsp;', ' ' -replace '&amp;', '&' -replace '\s+', ' '\n$ids = 'gemini-2.5-pro','gemini-2.5-flash','gemini-3.1-pro-preview'\nforeach ($id in $ids) {\n  $i = $text.IndexOf($id)\n  if ($i -lt 0) { "$id => NOT FOUND"; continue }\n  $window = $text.Substring($i, [Math]::Min(1300, $text.Length - $i))\n  $m = [regex]::Match($window, 'Input price (.{0,180}?) Output price \\(including thinking tokens\\)')\n  if ($m.Success) { "$id | IN=" + $m.Groups[1].Value.Trim() }\n  else { "$id => NO MATCH :: " + $window.Substring(0, [Math]::Min(300, $window.Length)) }\n}`,
+  `foreach ($id in 'gemini-3.8-flash','gemini-3.6-flash') {\n  $i = 'text'.IndexOf($id)\n  "=== $id ==="\n  'text'.Substring($i, 3)\n}`,
   `$d=Get-Content 'cocos-proj/assets/common/scripts/model/dialogues/buzhiming.json' -Raw -Encoding UTF8 | ConvertFrom-Json; $ids=@('Buzhiming_Intro','Matou_Begin','Tiezhua_Default','Guide_Check_Diary'); foreach($id in $ids){$r=@($d | Where-Object id -eq $id); "=== $id ($($r.Count) 行) ==="; $r | Select-Object line_index,character_id,text,begin_trigger,end_trigger,actions,choices | ConvertTo-Json -Depth 5}; Get-ChildItem 'cocos-proj/assets/buzhiming/images' -Directory | Select-Object Name; Get-ChildItem 'cocos-proj/assets/buzhiming/prefabs' -File | Where-Object Extension -eq '.prefab' | Select-Object Name`,
 ]
 
@@ -41,11 +44,18 @@ describe('PowerShell read-only query combinations', () => {
     `$u='https://example.com'; for($i=0;$i -lt 3;$i++){ Invoke-WebRequest $u; $u=Get-Content secret }`,
     `$i='https://example.com'; for($i=0;$i -lt 3;$i++){ Invoke-WebRequest $i }`,
     `for($i=0;$i -lt 3;$i++){ if($i -eq 0){ 'safe' } else { & danger } }`,
+    `$x = 'a','b'; $x.Delete()`,
+    `[regex]::Split('a','b')`,
+    `$m = [regex]::Match('a', 'b'); $m.Groups[1].Value.Remove(0)`,
     `Get-ChildItem | ForEach-Object { & $_.FullName }`,
     `Get-ChildItem | Where-Object { Start-Process calc }`,
     `Get-ChildItem | Select-Object @{Name='x';Expression={Set-Content x y}}`,
     `$x = Get-Content x; Invoke-Expression $x`,
     `$x = Get-Content x; & $x`,
+    `Get-ChildItem -Path $env:USERPROFILE/secret`,
+    `Get-ChildItem -Path $env:SECRET`,
+    `Get-Content -Path $env:USERPROFILE`,
+    `Get-ChildItem -Path $env:USERPROFILE | Remove-Item`,
     `$env:PATH='x'; Get-ChildItem`,
     `$global:x=1; Get-ChildItem`,
     `$PSDefaultParameterValues=@(); Get-ChildItem`,

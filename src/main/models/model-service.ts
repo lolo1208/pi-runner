@@ -1,4 +1,5 @@
-import { type AgentRequestOptions, type ModelDescriptor, type ModelReply, type ModelResult, type ModelSettings } from '../../shared/models'
+import { type AgentRequestOptions, type ModelDescriptor, type ModelProfile, type ModelReply, type ModelResult, type ModelSettings } from '../../shared/models'
+import { googleThinking } from '../../shared/google'
 import { PiAgentService } from './pi-agent-service'
 import { OllamaClient } from './ollama-client'
 import { ModelClient } from './model-client'
@@ -11,6 +12,8 @@ import { MAX_COMBINED_PROMPT_LENGTH } from '../../shared/prompts'
 import { OpenrouterClient } from './openrouter-client'
 import { requiredString } from './model-validation'
 import path from 'node:path'
+import { GoogleClient } from './google-client'
+import { DeepseekClient } from './deepseek-client'
 
 export async function modelResult<T>(action: () => Promise<T>): Promise<ModelResult<T>> {
   try { return { ok: true, value: await action() } }
@@ -20,13 +23,25 @@ export async function modelResult<T>(action: () => Promise<T>): Promise<ModelRes
 export class ModelService {
   private pending = new Map<string, { conversationId?: string; project?: string; controller: AbortController }>()
   private permissionPrompts = new Map<string, AbortController>()
-  constructor(private readonly store: ModelSettingsStore, private readonly client: PiAgentService | ModelClient, private readonly ollama = new OllamaClient(), private readonly openrouter = new OpenrouterClient()) {}
+  constructor(private readonly store: ModelSettingsStore, private readonly client: PiAgentService | ModelClient, private readonly ollama = new OllamaClient(), private readonly openrouter = new OpenrouterClient(), private readonly google = new GoogleClient(), private readonly deepseek = new DeepseekClient()) {}
   async connectOpenrouter(value?: unknown): Promise<ModelSettings> {
     const key = value === undefined ? await this.store.openrouterKey() : requiredString(value, 'API Key', 8192)
     if (/[^\x21-\x7e]/.test(key)) throw new ModelError('API Key 不能包含空白或非 ASCII 字符')
     if (!(await this.store.list()).encryptionAvailable) throw new ModelError('系统安全存储不可用，无法保存或读取 API Key')
     const models = await this.openrouter.list(key)
     return this.store.syncOpenrouter(models, value === undefined ? undefined : key)
+  }
+  async connectGoogle(value?: unknown): Promise<ModelSettings> {
+    const key = value === undefined ? await this.store.googleKey() : requiredString(value, 'API Key', 8192)
+    if (/[^\x21-\x7e]/.test(key)) throw new ModelError('API Key 不能包含空白或非 ASCII 字符')
+    if (!(await this.store.list()).encryptionAvailable) throw new ModelError('系统安全存储不可用，无法保存或读取 API Key')
+    return this.store.syncGoogle(await this.google.list(key), value === undefined ? undefined : key)
+  }
+  async connectDeepseek(value?: unknown): Promise<ModelSettings> {
+    const key = value === undefined ? await this.store.deepseekKey() : requiredString(value, 'API Key', 8192)
+    if (/[^\x21-\x7e]/.test(key)) throw new ModelError('API Key 不能包含空白或非 ASCII 字符')
+    if (!(await this.store.list()).encryptionAvailable) throw new ModelError('系统安全存储不可用，无法保存或读取 API Key')
+    return this.store.syncDeepseek(await this.deepseek.list(key), value === undefined ? undefined : key)
   }
   async openrouterUsage() {
     return this.openrouter.usage(await this.store.openrouterKey())
@@ -121,6 +136,18 @@ export class ModelService {
     let timedOut = false
     try {
       const config = await this.store.getForRequest(id, isTest)
+      // 连接测试只验证连通性与凭据；Google 高推理档会在思考阶段长时间不产出内容，
+      // 看起来就像“卡在正在测试连接”，因此测试时使用该模型的最低合法档位。
+      if (isTest && config.profile.provider === 'google') {
+        const lowest = googleThinking(config.profile.model)?.values.find(value => value !== 'off')
+        if (typeof lowest === 'string') config.profile.thinkingLevel = lowest as ModelProfile['thinkingLevel']
+      }
+      // 连通性测试不需要推理；避免耗尽思考额度或长时间等待，且不改变保存的模型设置。
+      if (isTest && config.profile.provider === 'deepseek') {
+        config.profile.thinkingLevel = 'off'
+        config.profile.thinking = false
+        config.profile.maxTokens = Math.min(config.profile.maxTokens, 8192)
+      }
       const conversation = isTest ? [{ role: 'user' as const, content: 'Reply with OK.' }] : parseMessages(messages)
       if (!isTest && customPrompt !== undefined && (typeof customPrompt !== 'string' || customPrompt.length > MAX_COMBINED_PROMPT_LENGTH)) throw new ModelError(`自定义提示词必须为文本且合并后不能超过 ${MAX_COMBINED_PROMPT_LENGTH} 个字符`)
       const instruction = !isTest && typeof customPrompt === 'string' ? customPrompt.trim() : ''
@@ -129,17 +156,19 @@ export class ModelService {
         if (!value || typeof value !== 'object' || !Number.isInteger(value.threshold) || value.threshold < 60 || value.threshold > 95 || (value.usage !== undefined && (!value.usage || ![value.usage.inputTokens, value.usage.outputTokens].every(count => Number.isSafeInteger(count) && count >= 0)))) throw new ModelError('上下文压缩参数无效，阈值须为 60%–95%')
       }
       controller.signal.throwIfAborted()
-      // 超时只约束一次模型调用；工具执行、用户交互和快照收尾不占模型时间。
+      // 流式模型调用在收到事件时重置空闲计时；工具执行和用户交互不占模型时间。
       const modelRequestActive = (active: boolean): void => {
         if (timer) clearTimeout(timer)
         timer = undefined
-        if (active && !controller.signal.aborted) timer = setTimeout(() => { timedOut = true; controller.abort() }, config.profile.timeoutSeconds * 1000)
+        if (active && !controller.signal.aborted) timer = setTimeout(() => {
+          if (!controller.signal.aborted) { timedOut = true; controller.abort() }
+        }, config.profile.timeoutSeconds * 1000)
       }
       if (this.client instanceof PiAgentService) return await this.client.run(config.profile, config.apiKey, conversation, controller.signal, instruction, context as ContextOptions | undefined, agentOptions, operationId, isTest, modelRequestActive)
       const client = this.client
       const timedClient = { complete: async (...args: Parameters<ModelClient['complete']>): Promise<ModelReply> => {
         modelRequestActive(true)
-        try { return await client.complete(...args) }
+        try { return await client.complete(args[0], args[1], args[2], args[3], args[4], () => { modelRequestActive(true); args[5]?.() }) }
         finally { modelRequestActive(false) }
       } }
       const prepared = isTest ? { messages: conversation } : await compactContext(timedClient, config.profile, config.apiKey, conversation, controller.signal, instruction, context as ContextOptions | undefined)
@@ -147,7 +176,7 @@ export class ModelService {
       controller.signal.throwIfAborted()
       return { ...result, ...('compaction' in prepared && prepared.compaction ? { compaction: prepared.compaction } : {}) }
     } catch (error) {
-      if (controller.signal.aborted) throw new ModelError(timedOut ? '模型请求超时，请检查服务或增加超时秒数' : '模型请求已取消')
+      if (controller.signal.aborted) throw new ModelError(timedOut ? '模型响应长时间无进展，请检查服务或增加超时秒数' : '模型请求已取消')
       throw error
     } finally { if (timer) clearTimeout(timer); this.pending.delete(operationId) }
   }

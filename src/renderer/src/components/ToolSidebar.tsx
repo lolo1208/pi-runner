@@ -2,6 +2,7 @@ import { Button } from '@/components/ui/button'
 import { Camera, Files, Globe, Terminal, X } from 'lucide-react'
 import type { Checkpoint } from '../../../shared/api'
 import { useEffect, useState } from 'react'
+import { ProjectFileTree } from './ProjectFileTree'
 
 type ToolId = 'snapshots' | 'files' | 'terminal' | 'browser'
 
@@ -10,6 +11,7 @@ interface ToolSidebarProps {
   isBusy: boolean
   activeTool: ToolId
   checkpoints: Checkpoint[]
+  revealFile: { path: string; id: number } | null
   onToolChange: (tool: ToolId) => void
   onClose: () => void
 }
@@ -37,7 +39,7 @@ function PlaceholderTool({ tool }: { tool: Exclude<ToolId, 'snapshots'> }): Reac
   </div>
 }
 
-export function ToolSidebar({ project, isBusy, activeTool, checkpoints, onToolChange, onClose }: ToolSidebarProps): React.JSX.Element {
+export function ToolSidebar({ project, isBusy, activeTool, checkpoints, revealFile, onToolChange, onClose }: ToolSidebarProps): React.JSX.Element {
   const [history, setHistory] = useState<{ project: string; checkpoints: Checkpoint[] } | null>(null)
   const [historyError, setHistoryError] = useState('')
   useEffect(() => {
@@ -80,6 +82,6 @@ export function ToolSidebar({ project, isBusy, activeTool, checkpoints, onToolCh
         </ol>
         {!sortedCheckpoints.length && <p className="hint">{project && history?.project !== project && !historyError ? '正在读取快照…' : '暂无快照'}</p>}
       </div>
-    </div> : <PlaceholderTool tool={activeTool} />}
+    </div> : activeTool === 'files' ? <ProjectFileTree project={project} reveal={revealFile} /> : <PlaceholderTool tool={activeTool} />}
   </section>
 }

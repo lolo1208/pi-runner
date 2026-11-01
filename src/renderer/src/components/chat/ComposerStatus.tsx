@@ -1,5 +1,5 @@
 import { Tooltip } from 'radix-ui'
-import { useMemo } from 'react'
+import { useDeferredValue, useMemo } from 'react'
 import { Monitor } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { ChatAttachment, ChatMessage, ModelProfileView, ModelRateLimit, ModelReply, ModelUsage, OutputSpeed } from '../../../../shared/models'
@@ -8,6 +8,7 @@ import { DEFAULT_COMPRESSION_THRESHOLD, estimateContextTokens } from '../../../.
 export { estimateTextTokens } from '../../../../shared/context'
 import { SubscriptionLimits } from './SubscriptionLimits'
 import { OpenrouterLimits } from './OpenrouterLimits'
+import { GoogleLimits } from './GoogleLimits'
 
 interface Props {
   project?: string | null
@@ -41,8 +42,10 @@ export function ComposerStatus({ project, profile, contextLimit, messages, promp
   // 附件解码与正文输入分开缓存，避免每次按键都解码大文本或统计图片。
   const attachmentTokens = useMemo(() => attachments?.length
     ? estimateContextTokens([{ role: 'user', content: '', images: attachments }]) - 4 : 0, [attachments])
-  const draftTokens = useMemo(() => (prompt || attachments?.length
-    ? estimateContextTokens([{ role: 'user', content: prompt }]) : 0), [prompt, attachments?.length])
+  // 状态栏允许短暂落后于输入，避免长草稿的逐字符估算阻塞按键响应。
+  const deferredPrompt = useDeferredValue(prompt)
+  const draftTokens = useMemo(() => (deferredPrompt || attachments?.length
+    ? estimateContextTokens([{ role: 'user', content: deferredPrompt }]) : 0), [deferredPrompt, attachments?.length])
   const used = history.tokens + draftTokens + attachmentTokens
   const limit = profile?.contextTokens ?? contextLimit
   const percent = limit ? Math.round(used / limit * 100) : null
@@ -58,6 +61,7 @@ export function ComposerStatus({ project, profile, contextLimit, messages, promp
         {outputSpeed && outputSpeed.outputTokens > 0 && <SpeedIndicator speed={outputSpeed} />}
         {profile?.provider === 'chatgpt' && <SubscriptionLimits usage={subscriptionUsage} latestReply={latestReply} />}
         {profile?.provider === 'openrouter' && <OpenrouterLimits model={profile.model} usage={openrouterUsage} latestReply={latestReply} />}
+        {profile?.provider === 'google' && <GoogleLimits latestReply={latestReply} contextLimit={contextLimit} />}
         {profile?.provider === 'openai' && <Tooltip.Root>
           <Tooltip.Trigger asChild><Button type="button" variant="ghost" className="composer-limits" aria-label="当前模型使用限制">
             {rateLimits?.length ? rateLimits.map(item => <span key={item.kind}>{item.kind === 'requests' ? '请求' : 'Token'} 剩余 {Math.round(item.remaining / item.limit * 100)}%</span>) : '使用限制：暂未提供'}

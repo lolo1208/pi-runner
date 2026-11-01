@@ -27,6 +27,5 @@ describe('ordinary conversation messages', () => {
     await waitFor(() => expect(onMessagesChange).toHaveBeenCalledTimes(2))
     expect(chatWithModel).toHaveBeenCalledTimes(2)
     expect(onMessagesChange.mock.calls[1][0].map((message: { content: string }) => message.content)).toEqual(['第一条消息', '收到', '第二条消息', '收到'])
-    expect(screen.getByText('无项目目录')).toBeTruthy()
   })
 })

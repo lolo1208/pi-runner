@@ -43,6 +43,8 @@ export function modelRequestError(value: unknown, secret = ''): string {
   else if (status === 403) summary = '模型服务拒绝访问，请根据返回原因检查访问权限'
   else if (/model_not_found|model.*does not exist/.test(reason)) summary = '模型服务无法找到指定模型，请检查模型名称及可用权限'
   else if (status === 404) summary = '模型服务未找到请求的资源，请检查接口地址及模型名称'
+  // 503 多数是服务端容量波动，与请求无关；给出可操作提示，不混同为普通服务器错误。
+  else if (status === 503 || /high demand|currently experiencing|overloaded|capacity/.test(reason)) summary = '模型服务当前需求过高（临时状态），请稍后重试或临时切换其它模型'
   else if (status >= 500) summary = '模型服务发生服务器错误，请稍后重试'
   else if (/etimedout|connect_timeout|timed?\s*out|timeout/.test(reason)) summary = '模型请求超时，请检查网络或增加超时秒数'
   else if (/econnreset|econnrefused|enotfound|eai_again|fetch failed|network|socket|connection error/.test(reason)) summary = '模型服务连接失败，请检查网络、代理和接口地址'

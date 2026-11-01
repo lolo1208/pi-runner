@@ -141,9 +141,29 @@ function readOnlyStatement(command: string): boolean {
   return readOnlyGitQuery(subcommand, queryArgs)
 }
 
+// 仅限常见 Windows 目录与系统标识；其他环境变量可能包含凭据。
+const safeWindowsEnvironmentVariables = new Set([
+  'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP', 'HOMEDRIVE', 'HOMEPATH',
+  'SYSTEMROOT', 'WINDIR', 'SYSTEMDRIVE', 'PROGRAMDATA', 'PROGRAMFILES', 'PROGRAMFILES(X86)',
+  'PROGRAMW6432', 'COMMONPROGRAMFILES', 'COMMONPROGRAMFILES(X86)', 'COMMONPROGRAMW6432',
+  'PUBLIC', 'ALLUSERSPROFILE', 'USERNAME', 'COMPUTERNAME', 'USERDOMAIN', 'OS',
+  'PROCESSOR_ARCHITECTURE', 'PROCESSOR_ARCHITEW6432', 'NUMBER_OF_PROCESSORS',
+])
+
+/** 只允许独立输出变量，不允许拼接、赋值、管道、插值或附带其他命令。 */
+function safeWindowsEnvironmentOutput(command: string): boolean {
+  if (process.platform !== 'win32') return false
+  const statements = command.split(/[;\r\n]+/).map(value => value.trim()).filter(Boolean)
+  return statements.length > 0 && statements.every(statement => {
+    const match = /^(?:\$env:([a-z][a-z0-9_]*)|\$\{env:([a-z][a-z0-9_]*(?:\(x86\))?)\})$/i.exec(statement)
+    return !!match && safeWindowsEnvironmentVariables.has((match[1] ?? match[2]).toUpperCase())
+  })
+}
+
 /** 所有语句都能确认为只读时才跳过基线；未知命令仍在执行前保护文件。 */
 export function readOnlyCommand(command: string): boolean {
   if (/^\s*\$PSVersionTable(?:\.PSVersion)?\s*$/i.test(command)) return true
+  if (safeWindowsEnvironmentOutput(command)) return true
   if (readOnlyStatements(command)?.every(readOnlyStatement)) return true
   return process.platform === 'win32' && powerShellReadOnly(command, readOnlyStatement)
 }
@@ -238,7 +258,10 @@ function developerNeedsReview(program: string, args: string[]): boolean {
   if (program === 'rustup') return true
   if (program === 'cargo' && ['install', 'uninstall'].includes(args[0])) return true
   if (program === 'uv' && ['tool', 'python', 'self'].includes(args[0])) return true
-  if (['npm', 'pnpm', 'yarn', 'pip', 'pip3', 'uv', 'poetry', 'pdm', 'hatch', 'bun', 'deno'].includes(program) && args.some(value => /^(?:--(?:global|user|system|prefix|target|root)(?:=|$)|-g$)/.test(value))) return true
+  if (['npm', 'pnpm', 'yarn', 'pip', 'pip3', 'uv', 'poetry', 'pdm', 'hatch', 'bun', 'deno'].includes(program) && args.some(value => /^(?:--(?:global|user|system|prefix|target)(?:=|$)|-g$)/.test(value))) return true
+  // --root 常用于测试、构建工具的根目录选项；仅当它指向项目外或无法确认时才审核。
+  const rootTargets = args.flatMap((value, index) => value === '--root' ? [args[index + 1] ?? ''] : value.startsWith('--root=') ? [value.slice(7)] : [])
+  if (rootTargets.some(value => !value || /^~(?:[\\/]|$)/.test(value) || path.isAbsolute(value) || /(?:^|[\\/])\.\.(?:[\\/]|$)/.test(value))) return true
   if (['npm', 'pnpm', 'yarn', 'cargo', 'uv', 'poetry', 'pdm', 'hatch', 'dotnet', 'nuget', 'mvn', 'gradle'].includes(program)) {
     if (args[0] === 'config' && ['set', 'delete', 'unset', 'edit'].includes(args[1])) return true
     if (['dotnet', 'nuget'].includes(program) && args.some(value => ['push', 'delete', 'setapikey'].includes(value.toLowerCase()))) return true
@@ -310,11 +333,13 @@ export function safeDeveloperCommand(command: string): boolean {
   let remaining = command
   for (let count = 0; count < 64; count++) {
     const guarded = remaining.match(/^([\s\S]+);\s*if\s*\(\s*(?:\$LASTEXITCODE\s+-eq\s+0|\$\?)\s*\)\s*\{([^{}]+)\}\s*;?\s*$/i)
-    if (!guarded || !readOnlyStatements(guarded[2])?.every(safeDeveloperStatement)) return false
+    if (!guarded) break
+    if (!readOnlyStatements(guarded[2])?.every(safeDeveloperStatement)) return false
     remaining = guarded[1]
     if (readOnlyStatements(remaining)?.every(safeDeveloperStatement)) return true
   }
-  return false
+  // 结构化解析分号、管道、if/else、成功判断与流合并；不求值条件，不执行脚本。
+  return powerShellReadOnly(command, safeDeveloperStatement)
 }
 
 export interface CommandRisk { risk: 'block' | 'safe' | 'approve'; reason?: string; mustConfirm?: boolean }
@@ -322,8 +347,32 @@ export interface CommandRisk { risk: 'block' | 'safe' | 'approve'; reason?: stri
 /** 显式指定项目/临时目录外目标或全局安装时，常见开发命令也进入审核。 */
 function externalDeveloperTarget(command: string, cwd: string): boolean {
   const roots = [path.resolve(cwd), path.resolve(os.tmpdir())]
-  return inspectedShellCommands(command).some(words => {
+  const statements = readOnlyStatements(command)
+  let current = path.resolve(cwd)
+  // 跟踪顺序切换目录；无法确认作用域或目标时保守审核。
+  if (statements) {
+    for (const statement of statements) {
+      const words = literalCommand(statement)
+      const program = words && commandProgram(words[0])
+      if (!words || !program || !['cd', 'chdir', 'set-location', 'sl'].includes(program)) continue
+      const escaped = statement.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      if (!new RegExp(`(?:^|;)\\s*${escaped}\\s*(?=;|$)`, 'i').test(scrubWindowsInertSyntax(command))) return true
+      const args = words.slice(1)
+      const paths = ['-path', '-literalpath', '/d'].includes(args[0]?.toLowerCase()) ? args.slice(1) : args
+      if (paths.length !== 1 || /^~/.test(paths[0])) return true
+      current = path.resolve(current, paths[0])
+      if (!roots.some(root => within(root, current))) return true
+    }
+  }
+  current = path.resolve(cwd)
+  return (statements ?? [command]).some(statement => inspectedShellCommands(statement).some(words => {
     const program = shellProgram(words[0]).replace(/\.(?:cmd|bat)$/i, '')
+    if (statements && ['cd', 'chdir', 'set-location', 'sl'].includes(program)) {
+      const args = words.slice(1)
+      const target = ['-path', '-literalpath', '/d'].includes(args[0]?.toLowerCase()) ? args[1] : args[0]
+      if (target) current = path.resolve(current, target)
+      return false
+    }
     const original = words.slice(1)
     const args = [...original.filter(value => !windowsDeveloperSwitch(program, value)), ...developerToolTargets(program, original)]
     return args.some(argument => {
@@ -332,10 +381,10 @@ function externalDeveloperTarget(command: string, cwd: string): boolean {
       if (/^[a-z][\w+.-]*:\/\//i.test(value)) return false
       if (/^~(?:[\\/]|$)/.test(value)) return true
       if (!path.isAbsolute(value) && !/(?:^|[\\/])\.\.(?:[\\/]|$)/.test(value)) return false
-      const target = path.resolve(cwd, value)
+      const target = path.resolve(current, value)
       return !roots.some(root => within(root, target))
     })
-  })
+  }))
 }
 
 /** 终端命令统一风险路由：block 直接拒绝，safe 直接执行，approve 请求批准。 */

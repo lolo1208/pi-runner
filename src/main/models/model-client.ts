@@ -3,6 +3,8 @@ import { asRecord, ModelError, normalizeOllamaUrl } from './model-validation'
 import { ollamaContextTokens } from './pi-ollama'
 import { modelMessages, useFileResponses } from './model-attachments'
 
+import { completeGoogle } from './google-completion'
+
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 const tokenCount = (value: unknown): number | undefined => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined
 
@@ -20,7 +22,8 @@ function readRateLimits(headers: Headers): ModelRateLimit[] {
 export class ModelClient {
   constructor(private readonly fetchRequest: typeof fetch = fetch) {}
 
-  async complete(profile: ModelProfile, apiKey: string, messages: ChatMessage[], signal: AbortSignal, customPrompt = ''): Promise<ModelReply> {
+  async complete(profile: ModelProfile, apiKey: string, messages: ChatMessage[], signal: AbortSignal, customPrompt = '', onProgress: () => void = () => {}): Promise<ModelReply> {
+    if (profile.provider === 'google') return completeGoogle(profile, apiKey, messages, signal, customPrompt, onProgress, this.fetchRequest)
     const startedAt = performance.now()
     const isAnthropic = profile.protocol === 'anthropic'
     const isOllama = profile.provider === 'ollama'
@@ -66,6 +69,7 @@ export class ModelClient {
       if (signal.aborted) throw new ModelError('请求已取消或超时')
       throw new ModelError('无法连接模型服务，请检查 Base URL、网络或代理；服务重定向不会被自动跟随')
     }
+    onProgress()
     if (!response.ok) {
       await response.body?.cancel().catch(() => undefined)
       const hints: Record<number, string> = {
@@ -86,6 +90,7 @@ export class ModelClient {
         while (true) {
           const result = await reader.read()
           if (result.done) break
+          if (result.value.byteLength) onProgress()
           length += result.value.byteLength
           if (length > MAX_RESPONSE_BYTES) throw new ModelError('模型响应超过 2 MiB 上限，请降低输出 Token 上限')
           chunks.push(result.value)

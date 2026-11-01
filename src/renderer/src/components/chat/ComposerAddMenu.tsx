@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Check, ChevronRight, FilePlus, Plus, Puzzle, Settings2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -23,7 +23,8 @@ export function useLocalSkills(): { skills: LocalSkill[]; error: string; loading
     window.addEventListener('skills-changed', refresh)
     return () => window.removeEventListener('skills-changed', refresh)
   }, [])
-  return { skills, error, loading, refresh: () => setRevision(value => value + 1) }
+  const refresh = useCallback(() => setRevision(value => value + 1), [])
+  return useMemo(() => ({ skills, error, loading, refresh }), [skills, error, loading, refresh])
 }
 
 export function ComposerSkillTags({ ids, skills, disabled, onChange }: { ids: string[]; skills: LocalSkill[]; disabled?: boolean; onChange(ids: string[]): void }): React.JSX.Element | null {

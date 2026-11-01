@@ -1,5 +1,5 @@
-export type ModelProtocol = 'openai-compatible' | 'anthropic'
-export type ProviderId = 'chatgpt' | 'openai' | 'openrouter' | 'anthropic' | 'deepseek' | 'ollama' | 'vllm' | 'custom'
+export type ModelProtocol = 'openai-compatible' | 'anthropic' | 'google-generative-ai'
+export type ProviderId = 'google' | 'chatgpt' | 'openai' | 'openrouter' | 'anthropic' | 'deepseek' | 'ollama' | 'vllm' | 'custom'
 export interface OpenrouterUsage {
   fetchedAt: number
   limit?: number | null
@@ -63,7 +63,7 @@ export function thinkingLabel(value: boolean | string | null | undefined): strin
 }
 export function selectedModelThinking(profile: ModelProfile, controls: ModelDescriptor['thinking']): boolean | string | null {
   const values = controls?.values ?? []
-  const selected = profile.provider === 'chatgpt' || profile.provider === 'openrouter' ? profile.thinkingLevel ?? (profile.thinking === false ? 'off' : null) : profile.ollamaThinkingLevel ?? profile.thinking
+  const selected = profile.provider === 'chatgpt' || profile.provider === 'openrouter' || profile.provider === 'google' || profile.provider === 'deepseek' ? profile.thinkingLevel ?? (profile.thinking === false ? 'off' : null) : profile.ollamaThinkingLevel ?? profile.thinking
   if (selected != null && values.includes(selected)) return selected
   // 保留用户选择；未配置时优先模型声明的默认值，再回退到中档或开启。
   if (controls?.default != null && values.includes(controls.default)) return controls.default
@@ -113,7 +113,8 @@ export interface ChatAttachment { id: string; name: string; dataUrl: string }
 /** 沿用图片附件的类型与存储字段，兼容已有会话；现在可包含任意文件。 */
 export type ChatImage = ChatAttachment
 export interface ChatExecution { model: string; provider?: ProviderId; elapsedMs?: number; roundId?: string }
-export interface ChatWorkItem { id: string; kind: 'thinking' | 'tool'; name?: string; skillName?: string; args?: Record<string, unknown>; content: string; isError?: boolean; completed?: boolean; state?: 'queued' | 'running' | 'waiting' | 'interrupted'; stateText?: string }
+export interface AiReviewDetail { decision: ReviewDecision; reason?: string; target?: string }
+export interface ChatWorkItem { id: string; kind: 'thinking' | 'tool'; name?: string; skillName?: string; args?: Record<string, unknown>; content: string; isError?: boolean; completed?: boolean; state?: 'queued' | 'running' | 'waiting' | 'interrupted'; stateText?: string; aiReview?: ReviewDecision; aiReviewDetails?: AiReviewDetail[] }
 export interface ChatCall { elapsedMs?: number; usage?: ModelUsage; work: ChatWorkItem[] }
 export interface ChatMessage { role: 'user' | 'assistant'; content: string; images?: ChatImage[]; skillIds?: string[]; execution?: ChatExecution; call?: ChatCall; snapshotHash?: string; codeSnapshotId?: string; historyId?: string }
 export interface ModelUsage { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number }
@@ -127,7 +128,7 @@ export type PermissionMode = 'default' | 'auto' | 'full'
 export const PERMISSION_MODES: PermissionMode[] = ['default', 'auto', 'full']
 /** 工具权限第二层自动审核的结论：放行 / 交给用户 / 拒绝。 */
 export type ReviewDecision = 'allow' | 'ask' | 'deny'
-export interface ToolReviewResult { decision: ReviewDecision; source: 'ai' | 'rule' | 'fallback' }
+export interface ToolReviewResult { decision: ReviewDecision; source: 'ai' | 'rule' | 'fallback'; reason?: string }
 export interface ToolReviewRequest {
   tool: string
   args: Record<string, unknown>
@@ -148,6 +149,7 @@ export interface ToolApproval {
   mustConfirm?: boolean
   /** 仅在 AI 有效返回 ask 时为 true；回退或强制人工确认不标记。 */
   aiReviewed?: boolean
+  aiReviewReason?: string
 }
 /** “每次询问”模式下命令审批的默认说明；命令弹窗不重复展示这条模式说明，只保留真正的扩权原因。 */
 export const DEFAULT_COMMAND_APPROVAL_REASON = '“每次询问”模式下，终端命令需要逐次确认。命令获准后可能读写项目外文件或访问网络'
@@ -197,6 +199,7 @@ export interface OutputSpeed {
 export type ModelResult<T> = { ok: true; value: T } | { ok: false; error: string }
 export interface ProviderPreset { id: ProviderId; label: string; protocol: ModelProtocol; baseUrl: string }
 export const PROVIDER_PRESETS: ProviderPreset[] = [
+  { id: 'google', label: 'Google AI Studio', protocol: 'google-generative-ai', baseUrl: 'https://generativelanguage.googleapis.com/v1beta' },
   { id: 'chatgpt', label: 'ChatGPT 订阅', protocol: 'openai-compatible', baseUrl: 'https://chatgpt.com/backend-api' },
   { id: 'openai', label: 'OpenAI', protocol: 'openai-compatible', baseUrl: 'https://api.openai.com/v1' },
   { id: 'openrouter', label: 'OpenRouter', protocol: 'openai-compatible', baseUrl: 'https://openrouter.ai/api/v1' },

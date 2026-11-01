@@ -36,7 +36,7 @@ describe('审核来源标记', () => {
   })
   it('参数超长未调用模型时不标记为 AI', async () => {
     const complete = vi.spyOn(ModelClient.prototype, 'complete')
-    expect(await new ToolReviewService(store()).reviewWithSource(request({ userPrompt: 'x'.repeat(2001) }))).toEqual({ decision: 'ask', source: 'fallback' })
+    expect(await new ToolReviewService(store()).reviewWithSource(request({ userPrompt: 'x'.repeat(40000) }))).toEqual({ decision: 'ask', source: 'fallback' })
     expect(complete).not.toHaveBeenCalled()
   })
 })
@@ -85,8 +85,8 @@ describe('tool review decisions', () => {
   it('does not send oversized instructions or operation arguments', async () => {
     const complete = vi.spyOn(ModelClient.prototype, 'complete')
     const service = new ToolReviewService(store())
-    expect(await service.review(request({ userPrompt: 'x'.repeat(2001) }))).toBe('ask')
-    expect(await service.review(request({ args: { content: 'x'.repeat(2001) } }))).toBe('ask')
+    expect(await service.review(request({ userPrompt: 'x'.repeat(40000) }))).toBe('ask')
+    expect(await service.review(request({ args: { content: 'x'.repeat(40000) } }))).toBe('ask')
     expect(complete).not.toHaveBeenCalled()
   })
   it('falls back after provider failure', async () => {

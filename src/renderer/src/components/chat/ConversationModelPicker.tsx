@@ -47,6 +47,9 @@ interface Props {
 
 export function ConversationModelPicker({ profile, profiles, providers, disabled, onSelect, onThinkingChange, onOpenSettings }: Props): React.JSX.Element {
   const [open, setOpen] = useState(false)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const restoringFocus = useRef(false)
+  const interactedOutside = useRef(false)
   const [query, setQuery] = useState('')
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({})
   const groupId = useId()
@@ -72,10 +75,10 @@ export function ConversationModelPicker({ profile, profiles, providers, disabled
 
   return <Popover.Root open={open && !disabled} onOpenChange={next => {
     setOpen(next)
-    if (next) setQuery('')
+    if (next) { setQuery(''); interactedOutside.current = false }
   }}>
     <Tooltip><TooltipTrigger asChild><Popover.Trigger asChild>
-      <Button type="button" className="model-picker" disabled={disabled} aria-label={`切换模型：${profile?.model || '选择模型'}`}>
+      <Button ref={triggerRef} type="button" className="model-picker" disabled={disabled} aria-label={`切换模型：${profile?.model || '选择模型'}`} onFocus={event => { if (restoringFocus.current) event.preventDefault() }}>
         <ModelIcon model={profile?.model} provider={profile?.provider} size={14} /><span className="model-price-name-text">{profile?.model || '选择模型'}</span>
         {profile && <ModelPriceTag descriptor={descriptor} />}
         {showThinking && configuredThinkingLabel && <span className="model-picker-thinking">· {configuredThinkingLabel}</span>}
@@ -83,7 +86,13 @@ export function ConversationModelPicker({ profile, profiles, providers, disabled
       </Button>
     </Popover.Trigger></TooltipTrigger><TooltipContent side="top" sideOffset={6}>切换本次会话的模型，并可在此设置推理强度</TooltipContent></Tooltip>
     <Popover.Portal>
-      <Popover.Content className="conversation-model-picker" side="top" align="end" sideOffset={10} collisionPadding={12} aria-label="本次会话模型" onOpenAutoFocus={event => event.preventDefault()}>
+      <Popover.Content className="conversation-model-picker" side="top" align="end" sideOffset={10} collisionPadding={12} aria-label="本次会话模型" onOpenAutoFocus={event => event.preventDefault()} onInteractOutside={() => { interactedOutside.current = true }} onCloseAutoFocus={event => {
+        if (interactedOutside.current) return
+        event.preventDefault()
+        restoringFocus.current = true
+        try { triggerRef.current?.focus() }
+        finally { restoringFocus.current = false }
+      }}>
         <div className="conversation-model-search">
           <Search size={16} aria-hidden="true" />
           <input aria-label="搜索会话模型" placeholder="搜索模型" value={query} onChange={event => setQuery(event.target.value)} />

@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Modal } from '@/components/ui/modal'
 import { PagedList } from '../PagedList'
 import { AiReviewBadge } from './AiReviewBadge'
+import { AiReviewReason } from './AiReviewReason'
 import { baseName, DiffFileHeader, DiffStat, DiffView, DiffViewSwitch, fileIcon, initialDiffViewMode, type DiffViewMode } from './DiffView'
 import { isCommandApproval, isFileChangeApproval } from '../../lib/tool-approval'
 import type { ToolApproval, ToolApprovalPreview } from '../../../../shared/models'
@@ -56,6 +57,7 @@ function ApprovalReview({ approval, mode, load }: { approval: ToolApproval; mode
   return <section className={`tool-approval-file${expanded ? '' : ' is-collapsed'}`}>
     <DiffFileHeader icon={isFile ? fileIcon(path) : <Terminal size={15} aria-hidden="true" />} name={baseName(path)} path={path} expanded={expanded} onToggle={() => setExpanded(value => !value)} trailing={stats && <DiffStat additions={stats.added} deletions={stats.removed} />} />
     {expanded && <div className="tool-approval-file-body">
+      {approval.aiReviewed && <AiReviewReason reviews={[{ decision: 'ask', reason: approval.aiReviewReason }]} />}
       {!isFile ? <pre className="tool-approval-operation">{typeof approval.args.command === 'string' ? approval.args.command : JSON.stringify(approval.args, null, 2)}</pre>
         : error ? <div className="tool-approval-preview-state" role="alert"><ShieldQuestion size={24} aria-hidden="true" /><p>{error}</p><Button type="button" variant="outline" onClick={() => setRetry(value => value + 1)}>重试</Button></div>
           : !preview ? <div className="tool-approval-preview-state" role="status">正在加载修改对比…</div>

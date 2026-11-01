@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { memoWithStableCallbacks } from './lib/memo-with-callbacks'
 import { useDraftSync } from './hooks/useDraftSync'
 import { StreamTextBuffer } from './lib/stream-text-buffer'
+import { reconcileTranscript } from './lib/reconcile-transcript'
 import type { QueueEditState } from '../../shared/conversations'
 import type { ChatgptUsage, OpenrouterUsage, ChatImage, ChatMessage, ModelProfile, ModelProfileView, ModelProviderConnection, ModelReply, ModelSettings, OutputSpeed, ProviderId } from '../../shared/models'
 import { unwrapModelResult } from './model-result'
@@ -169,10 +170,10 @@ function ModelChat({ notificationNavigationRequest = 0, snapshots, onSnapshotsCh
   }, [conversationId, onPermissionChange])
   /** 快捷面板内的推理修改：按设置页的字段归一规则只重写推理相关字段，其余参数原样保存。 */
   const changeThinking = useCallback(async (target: ModelProfileView, value: boolean | string | null): Promise<void> => {
-    if (target.provider !== 'chatgpt' && target.provider !== 'ollama' && target.provider !== 'openrouter') return
+    if (target.provider !== 'chatgpt' && target.provider !== 'ollama' && target.provider !== 'openrouter' && target.provider !== 'google') return
     const { hasApiKey: _hasApiKey, available: _available, ...base } = target
     const next: ModelProfile = { ...base,
-      thinkingLevel: (target.provider === 'chatgpt' || target.provider === 'openrouter') && typeof value === 'string' ? value as ModelProfile['thinkingLevel'] : null,
+      thinkingLevel: (target.provider === 'chatgpt' || target.provider === 'openrouter' || target.provider === 'google') && typeof value === 'string' ? value as ModelProfile['thinkingLevel'] : null,
       ollamaThinkingLevel: target.provider === 'ollama' && typeof value === 'string' ? value : null,
       thinking: typeof value === 'boolean' ? value : null }
     try {
@@ -220,7 +221,12 @@ function ModelChat({ notificationNavigationRequest = 0, snapshots, onSnapshotsCh
     let active = true
     void window.piRunner.getAgentHistory(conversationId).then(unwrapModelResult).then(history => {
       if (!active) return
-      if (history) { nativeHistory.current = true; transcriptRef.current = history; setMessages(history); messagesCallback.current?.(history, true) }
+      // 恢复请求返回前可能已收到更新的实时历史，不能用旧快照覆盖它。
+      if (history && !nativeHistory.current) {
+        nativeHistory.current = true
+        const restored = reconcileTranscript(transcriptRef.current, history)
+        transcriptRef.current = restored; setMessages(restored); messagesCallback.current?.(restored, true)
+      }
       setHistoryReady(true)
     }).catch(() => { if (active) setError('代理会话恢复失败，请检查本地会话文件后重试') })
     return () => { active = false }
@@ -252,18 +258,21 @@ function ModelChat({ notificationNavigationRequest = 0, snapshots, onSnapshotsCh
     if (event.type === 'transcript' && event.messages) {
       nativeHistory.current = true
       const previousAssistant = transcriptRef.current.filter(message => message.role === 'assistant')
-      const nextAssistant = event.messages.filter(message => message.role === 'assistant')
-      transcriptRef.current = event.messages
-      setMessages(event.messages); messagesCallback.current?.(event.messages)
+      const history = reconcileTranscript(transcriptRef.current, event.messages)
+      const nextAssistant = history.filter(message => message.role === 'assistant')
+      const changed = history !== transcriptRef.current
+      transcriptRef.current = history
+      if (changed) { setMessages(history); messagesCallback.current?.(history) }
       // SDK 的同步事件可能早于用户消息写入；确认本轮消息已入历史后才移除临时气泡。
-      const history = event.messages
       setPending(previous => previous && history.slice(previous.firstMessage).some(message =>
         message.role === 'user' && message.content === previous.message.content
         && (message.images?.length ?? 0) === (previous.message.images?.length ?? 0)
         && (message.images ?? []).every((image, index) => image.id === previous.message.images?.[index].id)
       ) ? null : previous)
       // 工具进度和预览保存也会刷新历史，不能清掉下一次模型调用正在生成的正文。
-      if (nextAssistant.length !== previousAssistant.length || nextAssistant.at(-1)?.historyId !== previousAssistant.at(-1)?.historyId || nextAssistant.at(-1)?.content !== previousAssistant.at(-1)?.content) streamBuffer.clear()
+      const latestAssistant = nextAssistant.at(-1)
+      // 实时思考快照属于当前调用，并非已落盘的新回复；其更新不能清空仍在生成的正文。
+      if (!latestAssistant?.historyId?.startsWith('live-thinking:') && (nextAssistant.length !== previousAssistant.length || latestAssistant?.historyId !== previousAssistant.at(-1)?.historyId || latestAssistant?.content !== previousAssistant.at(-1)?.content)) streamBuffer.clear()
     }
   }), [conversationId])
   const [statistics, setStatistics] = useState<{ profileId: string; reply: ModelReply } | null>(null)
@@ -357,8 +366,9 @@ function ModelChat({ notificationNavigationRequest = 0, snapshots, onSnapshotsCh
       replyReceived = true
       setStatistics({ profileId: profile.id, reply })
       if (reply.messages) nativeHistory.current = true
-      const completed: ChatMessage[] = (reply.messages ?? [...next, { role: 'assistant' as const, content: reply.text }]).map((message, index) =>
-        message.role === 'assistant' && index >= messages.length && message.execution?.elapsedMs === undefined ? { ...message, execution: { model: reply.model, provider: profile.provider, elapsedMs: reply.elapsedMs } } : message)
+      const completed = reconcileTranscript(transcriptRef.current, (reply.messages ?? [...next, { role: 'assistant' as const, content: reply.text }]).map((message, index) =>
+        message.role === 'assistant' && index >= messages.length && message.execution?.elapsedMs === undefined ? { ...message, execution: { model: reply.model, provider: profile.provider, elapsedMs: reply.elapsedMs } } : message))
+      transcriptRef.current = completed
       setMessages(completed); onMessagesChange?.(completed)
       replyCompleteCallback.current?.()
       taskEndCallback.current?.(true, completed.filter(message => message.role === 'user').at(-1)?.content ?? message.content)
@@ -396,8 +406,9 @@ function ModelChat({ notificationNavigationRequest = 0, snapshots, onSnapshotsCh
       const end = nextIndex < 0 ? messages.length : nextIndex
       const removedHashes = new Set(messages.slice(index, end).flatMap(message => message.snapshotHash ? [message.snapshotHash] : []))
       const history = conversationId ? unwrapModelResult(await window.piRunner.deleteAgentRound(conversationId, index, messages[index].historyId)) : null
-      const retained = history ?? [...messages.slice(0, index), ...messages.slice(end)]
+      const retained = reconcileTranscript(transcriptRef.current, history ?? [...messages.slice(0, index), ...messages.slice(end)])
       nativeHistory.current = history !== null
+      transcriptRef.current = retained
       setMessages(retained); onMessagesChange?.(retained)
       setCompaction(undefined); onCompactionChange?.(undefined)
       onSnapshotsChange?.((snapshots ?? []).flatMap(snapshot => {

@@ -34,9 +34,11 @@
 
 以下直接放行规则仅适用于项目自审；每次询问仍需确认终端命令。复合命令必须每一条都匹配，管道、动态展开和未知参数不能仅凭程序名称按只读放行。
 
-Windows PowerShell 另支持有限的只读查询组合：查询管道、局部变量赋值、数组、`foreach`、局部整数计数器的 `for`（已识别比较及 `++/--` 更新）、`if/elseif/else`、`try/catch`、属性与索引读取、比较筛选，以及 `Select-Object` 的计算属性。脚本块、括号和字符串插值中的操作逐项检查；允许用于显示相对路径的 `Substring`。`ForEach-Object { ... }`（含显式 `-Process`）仅在整个脚本块均为已识别查询时放行；`-Parallel`、成员执行形式及未知参数不放行。支持 `[pscustomobject]@{...}` 的静态属性名与逐项检查的查询值、`-join` 字符串投影。文件类型调用仅额外允许 `[System.IO.File]` / `[IO.File]` 的 `ReadLines/ReadAllLines/ReadAllText` 单路径读取，路径必须是字面量字符串或限定的 `(Resolve-Path '路径')`（可带 `-Path/-LiteralPath`）；动态路径、其他方法、类型调用、动态执行及未知语法继续进入审核。`Group-Object`、`Sort-Object`、JSON 转换只接受已识别选项。`for` 不接受任意初始化、执行型更新语句或属性写入；所有条件、循环体及条件分支均检查，不根据条件值跳过危险分支。循环或条件中的赋值不作为块外可信 URL 等数据来源。依赖路径中的 `@scope` 及 pnpm 包目录名的 `+` 按路径字面量解析，不影响表达式中的加法识别。此语法不应用于 Linux/macOS Shell。
+Windows PowerShell 另支持有限的只读查询组合：查询管道、局部变量赋值、数组、`foreach`、局部整数计数器的 `for`（已识别比较及 `++/--` 更新）、`if/elseif/else`、`try/catch`、属性与索引读取、比较筛选，以及 `Select-Object` 的计算属性。脚本块、括号和字符串插值中的操作逐项检查；允许用于显示相对路径的 `Substring`，以及无副作用的无参字符串方法（`Trim`、`TrimStart`、`TrimEnd`、`ToString`、`ToLower`、`ToUpper` 及不区分区域性版本）。stderr 或全部流合并到 stdout 的 `2>&1`、`*>&1` 不写文件，可直接忽略；写重定向仍按公共规则拦截。参数位置的 `.`、`..` 视为目录字面量，`echo ---` 之类的纯连字符参数按文本输出。逗号数组（`'a','b'`）与 `@(...)` 同样逐项检查；`continue`/`break` 仅作为流程控制关键字；`[regex]::Match` 属只读匹配。`ForEach-Object { ... }`（含显式 `-Process`）仅在整个脚本块均为已识别查询时放行；`-Parallel`、成员执行形式及未知参数不放行。支持 `[pscustomobject]@{...}` 的静态属性名与逐项检查的查询值、`-join` 字符串投影。文件类型调用仅额外允许 `[System.IO.File]` / `[IO.File]` 的 `ReadLines/ReadAllLines/ReadAllText` 单路径读取，路径必须是字面量字符串或限定的 `(Resolve-Path '路径')`（可带 `-Path/-LiteralPath`）；动态路径、其他方法、类型调用、动态执行及未知语法继续进入审核。`Group-Object`、`Sort-Object`、JSON 转换只接受已识别选项。`for` 不接受任意初始化、执行型更新语句或属性写入；所有条件、循环体及条件分支均检查，不根据条件值跳过危险分支。循环或条件中的赋值不作为块外可信 URL 等数据来源。依赖路径中的 `@scope` 及 pnpm 包目录名的 `+` 按路径字面量解析，不影响表达式中的加法识别。此语法不应用于 Linux/macOS Shell。
 
-`Invoke-WebRequest` / `Invoke-RestMethod` 的匿名 GET 查询可直接执行，只接受字面量 HTTP/HTTPS URL，或由这些 URL 组成的局部变量和循环变量，以及 `-Uri`、`-UseBasicParsing`。带认证信息的 URL、其他请求参数、动态拼接地址、凭据、请求正文、证书校验覆盖和落盘参数不按只读查询放行。原生程序的变量参数可能展开为执行或写入选项，因此不沿用 PowerShell cmdlet 的变量规则。
+Windows 下可直接输出以下常见环境变量（支持分号或换行分隔及 `${env:名称}` 写法）：`USERPROFILE`、`APPDATA`、`LOCALAPPDATA`、`TEMP`、`TMP`、`HOMEDRIVE`、`HOMEPATH`、`SYSTEMROOT`、`WINDIR`、`SYSTEMDRIVE`、`PROGRAMDATA`、`PROGRAMFILES`、`PROGRAMFILES(X86)`、`PROGRAMW6432`、`COMMONPROGRAMFILES`、`COMMONPROGRAMFILES(X86)`、`COMMONPROGRAMW6432`、`PUBLIC`、`ALLUSERSPROFILE`、`USERNAME`、`COMPUTERNAME`、`USERDOMAIN`、`OS`、`PROCESSOR_ARCHITECTURE`、`PROCESSOR_ARCHITEW6432`、`NUMBER_OF_PROCESSORS`。该规则仅允许单独输出，不允许赋值、插值、拼接、管道或附带其他命令；其他变量仍须审核。环境变量可被用户或进程自定义，白名单仅代表常见用途，不保证其值不含敏感信息。
+
+`Invoke-WebRequest` / `Invoke-RestMethod` 的匿名 GET 查询可直接执行，只接受字面量 HTTP/HTTPS URL，或由这些 URL 组成的局部变量和循环变量，以及 `-Uri`、`-UseBasicParsing` 和不超过 300 秒的字面量 `-TimeoutSec`。支持逐项检查的 `-replace`、文本 `IndexOf`、`[Math]::Min/Max`、`[regex]::Matches`（可带已识别的字面量匹配选项）、`[regex]::Replace`（替换值必须为单引号字面量）、`[System.Net.WebUtility]::HtmlDecode` 和限定的字符串比较枚举，其他方法和参数仍须审核。也允许在固定的 HTTP/HTTPS 地址路径中插入来自有限字面量数组的循环变量：片段只含字母、数字、点、下划线、连字符和斜杠，且不含空路径段或 `.`、`..` 路径段；不能改变主机、认证信息或查询串。带认证信息的 URL、其他请求参数、其他动态拼接地址、凭据、请求正文、证书校验覆盖和落盘参数不按只读查询放行。原生程序的变量参数可能展开为执行或写入选项，因此不沿用 PowerShell cmdlet 的变量规则。
 
 | 类别 | 常见覆盖范围 |
 | --- | --- |
@@ -53,7 +55,7 @@ Windows PowerShell 另支持有限的只读查询组合：查询管道、局部�
 
 npm/pnpm 的包元数据查询支持 `package@version`、`@scope/package@version`，不将 scoped 包误认为编译器响应文件。已识别参数的 `view/info/show/v/search/outdated`、依赖列表、`audit` 查询以及 `pnpm help <命令>` 可直接执行；`audit fix/--fix` 和未知查询参数仍进入审核。安装（包括 `npm ci`、`pnpm install --frozen-lockfile`）、`pnpm import`、本地 Node 脚本及项目打包脚本属于开发操作，保留执行前快照。
 
-简单管道的每一阶段分别分类，PowerShell `Select-Object Name,Length` 等静态属性列表可用于查询。Windows 还支持 `命令; if ($LASTEXITCODE -eq 0) { 后续命令 }` 和 `$?` 成功条件尾块，可连续串联多个条件块（最多 64 个），每个块内及最前面的所有命令必须独立满足放行规则；不支持的条件、动态执行及额外尾随操作不能借此绕过审核。文件写入、全局安装、系统操作及项目外目标继续遵循原有边界。
+简单管道的每一阶段分别分类，PowerShell `Select-Object Name,Length` 等静态属性列表可用于查询。Windows 还支持 `命令; if ($LASTEXITCODE -eq 0) { 后续命令 }` 和 `$?` 成功条件尾块，可连续串联多个条件块（最多 64 个），每个块内及最前面的所有命令必须独立满足放行规则；不支持的条件、动态执行及额外尾随操作不能借此绕过审核。Windows PowerShell 还支持 `if (...) { ... } else { ... }` 双分支与分号、管道、流合并的结构化解析：条件只检查语法，不求值；每个分支内的命令必须独立满足放行规则。文件写入、全局安装、系统操作及项目外目标继续遵循原有边界。`pnpm vitest run --root .` 等 `--root` 根目录选项在值为项目内相对路径时放行，绝对路径、`~` 或含 `..` 的目标仍进入审核。
 
 包执行器转发已识别查询（如 `pnpm exec electron --version`）按开发操作执行，保留快照。Node `-e/--eval` 仅额外识别固定的静态包定位/加载日志诊断模板，以及打印加载异常并设置 `process.exitCode=1` 的组合；不将任意内联代码归为安全查询。PowerShell 静态 JSON 转换、`Select-String -Context 12,10` 以及环境变量列表查询可与项目开发命令组合，各阶段仍单独审核。
 

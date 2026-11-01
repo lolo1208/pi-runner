@@ -12,7 +12,8 @@ export function shellCommandWords(source: string): string[][] {
         else quote = ''
       } else if (character === '`' && quote === '"' && index + 1 < source.length) word += source[++index]
       else word += character
-    } else if (character === '"' || character === "'") { quote = character; started = true }
+    } else if (process.platform === 'win32' && !started && source.slice(index, index + 4) === '2>&1' && /[\s;|]|$/.test(source[index + 4] ?? '')) { index += 3 }
+    else if (character === '"' || character === "'") { quote = character; started = true }
     else if (character === '`' && index + 1 < source.length) { word += source[++index]; started = true }
     else if (/[;\r\n|&(){}]/.test(character)) flushCommand()
     else if (/\s/.test(character)) flushWord()

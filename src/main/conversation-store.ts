@@ -64,19 +64,28 @@ function parseState(value: unknown): ConversationState {
 /** 不设置保留期限；只有用户删除会话时才从保存状态中移除。 */
 export class ConversationStore {
   private readable = false
+  /** 最近一次成功读取或保存的状态；保存时不再重新读取并解析整个文件，避免阻塞主进程。 */
+  private cached: ConversationState | null = null
+  private cachedJson = ''
   constructor(private readonly file: string) {}
 
   load(): ConversationState {
+    if (this.cached && this.readable) return this.cached
     try {
       const state = parseState(JSON.parse(readFileSync(this.file, 'utf8')))
       this.readable = true
+      this.cached = state
+      this.cachedJson = JSON.stringify(state)
       return state
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         this.readable = true
-        return { version: 1, tasks: [], selectedId: null }
+        this.cached = { version: 1, tasks: [], selectedId: null }
+        this.cachedJson = JSON.stringify(this.cached)
+        return this.cached
       }
       this.readable = false
+      this.cached = null
       throw new Error('无法读取本地会话，原文件已保留。请检查会话文件或访问权限后重启应用。')
     }
   }
@@ -84,9 +93,14 @@ export class ConversationStore {
   save(value: unknown): void {
     if (!this.readable) throw new Error('本地会话尚未成功读取，已停止保存以保护原文件。')
     const state = parseState(value)
+    const json = JSON.stringify(state)
+    // 内容未变化时跳过写盘，草稿同步的重复保存不会产生磁盘 I/O。
+    if (json === this.cachedJson) return
     mkdirSync(path.dirname(this.file), { recursive: true })
     // 同步写入临时文件并原子替换，关闭窗口时无需等待后台写入。
-    writeFileSync(`${this.file}.tmp`, JSON.stringify(state), { encoding: 'utf8', mode: 0o600, flush: true })
+    writeFileSync(`${this.file}.tmp`, json, { encoding: 'utf8', mode: 0o600, flush: true })
     renameSync(`${this.file}.tmp`, this.file)
+    this.cached = state
+    this.cachedJson = json
   }
 }

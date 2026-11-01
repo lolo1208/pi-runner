@@ -7,6 +7,8 @@ import { ChatMarkdown } from './ChatMarkdown'
 import { TranscriptScope, useTranscriptState } from './TranscriptState'
 import { TranscriptPagedList } from './TranscriptPagedList'
 import { hasPlanResult, PlanResultCard } from './PlanResultCard'
+import { AiReviewBadge } from './AiReviewBadge'
+import { AiReviewReason } from './AiReviewReason'
 
 const toolLabels: Record<string, string> = { bash: '运行命令', powershell: '运行命令', read: '读取文件', read_many: '批量读取文件', download_many: '批量下载文件', write: '写入文件', download: '下载文件', edit: '编辑文件', delete: '删除文件', mkdir: '创建目录', rmdir: '删除目录', move: '移动或重命名', copy: '复制文件或目录', stat: '查看文件或目录信息', ls: '查看目录', find: '查找文件或目录', grep: '搜索内容', read_skill_file: '读取技能文件', report_skill_usage: '说明技能用途', ask_user_question: '确认需求', submit_plan: '提交计划' }
 
@@ -26,9 +28,10 @@ function WorkItem({ item, busy = false }: { item: ChatWorkItem; busy?: boolean }
   return <div className="chat-work-item">
     <Button variant="ghost" className="chat-work-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
       {item.kind === 'thinking' ? <Sparkles size={14} /> : item.isError ? <X size={14} /> : item.completed ? <Check size={14} /> : interrupted ? <CirclePause size={14} aria-label="未完成" /> : waiting ? <Clock size={14} aria-label={stateText} /> : <LoaderCircle size={14} className="chat-execution-spinner" aria-label="正在执行" />}
-      <span className="chat-work-summary"><span>{label}{stateText ? ` · ${stateText}` : ''}</span>{item.skillName && <span className="chat-work-skill-name" title={item.skillName}>· {item.skillName}</span>}<small title={preview}>{preview}</small></span>
+      <span className="chat-work-summary"><span>{label}{stateText ? ` · ${stateText}` : ''}</span><AiReviewBadge show={Boolean(item.aiReview)} decision={item.aiReview} partial={Boolean(batchItems)} />{item.skillName && <span className="chat-work-skill-name" title={item.skillName}>· {item.skillName}</span>}<small title={preview}>{preview}</small></span>
       <ChevronRight size={14} className={open ? 'chat-disclosure-chevron open' : 'chat-disclosure-chevron'} />
     </Button>
+    {item.aiReviewDetails && <AiReviewReason reviews={item.aiReviewDetails} showTarget={Boolean(batchItems)} />}
     {open && <div className="chat-work-detail">
       {item.kind === 'tool' && <><div className="chat-work-detail-label">{command ? '命令' : '输入参数'}</div><pre>{command ? String(item.args?.command ?? '') : JSON.stringify(item.args, null, 2)}</pre><div className="chat-work-detail-label">执行结果</div></>}
       <pre>{item.content || emptyContent}</pre>
@@ -100,10 +103,10 @@ export function RoundActivity({ project, messages, execution, startedAt, status,
     </div>}
     {open && groups.length > 0 && <div className="chat-round-calls"><TranscriptPagedList preferLatest={busy} items={groups} label="调用记录">{page => page.map(group => { const message = group.messages.at(-1)!; const index = group.start + group.messages.length - 1; return <TranscriptScope id={`call:${group.start}`} key={group.start}><div className="chat-call-section">
       <CallActivity group={group} executing={busy && index === messages.length - 1} status={status} />
-      {!hasPlanCards && message.content && (busy || index < messages.length - 1) && <ChatMarkdown project={project} content={message.content} snapshotId={message.codeSnapshotId} />}
+      {(!hasPlanCards || busy) && message.content && (busy || index < messages.length - 1) && <ChatMarkdown project={project} content={message.content} snapshotId={message.codeSnapshotId} />}
     </div></TranscriptScope> })}</TranscriptPagedList></div>}
     {hasPlanCards ? <div className="chat-round-result plan-round-results">{messages.map((message, index) => <TranscriptScope key={index} id={`plan-call:${index}`}>
-      {message.content && <ChatMarkdown project={project} content={message.content} snapshotId={message.codeSnapshotId} />}
+      {!busy && message.content && <ChatMarkdown project={project} content={message.content} snapshotId={message.codeSnapshotId} />}
       {message.call?.work.filter(hasPlanResult).map(item => <TranscriptScope key={item.id} id={`plan-result:${item.id}`}><PlanResultCard item={item} project={project} /></TranscriptScope>)}
     </TranscriptScope>)}</div> : !busy && final?.content && <div className="chat-round-result"><ChatMarkdown project={project} content={final.content} snapshotId={final.codeSnapshotId} /></div>}
   </>

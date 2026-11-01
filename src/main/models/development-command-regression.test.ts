@@ -38,6 +38,26 @@ describe('开发命令审核回归', () => {
     expect(readOnlyCommand(command)).toBe(false)
   })
 
+  it.each([
+    `cat apps/server/package.json | Select-String -Pattern '"test"'; cd apps/server; npm test 2>&1 | Select-String -Pattern "^ℹ (tests|pass|fail)|✖" | Select-Object -First 80; cd ../..`,
+    `Get-ChildItem apps/server/src -Recurse -Filter *.test.ts | Select-Object -ExpandProperty FullName; Get-Content apps/server/src/storage/s3.ts -TotalCount 5 | Out-Null; Select-String -Path apps/server/src/**/*.ts -Pattern "NODE_ENV" -ErrorAction SilentlyContinue | Select-Object -First 5`,
+    `cd apps/server; npx tsx --test --test-reporter=dot src/**/*.test.ts src/*/*/*.test.ts 2>&1 | Select-String -Pattern "^# (tests|pass|fail)" ; cd ../..; Get-ChildItem -Recurse -Filter *.test.ts apps/server/src | Select-Object -ExpandProperty FullName | Measure-Object | Select-Object -ExpandProperty Count`,
+    `cd apps/server; npx tsx --test src/app-cors.test.ts src/modules/auth/nickname.test.ts src/db/initialize.test.ts 2>&1 | Select-String -Pattern "error|Error|expected|actual|not_|message" | Select-Object -First 40; cd ../..`,
+    `cargo check -p shuobei-keyd --target x86_64-unknown-linux-gnu; wsl.exe --list --quiet; git diff --check`,
+    `cargo check -p shuobei-keyd; rustup target list --installed`,
+    `Get-Command psql, postgres, docker, wsl -ErrorAction SilentlyContinue | Select-Object Name, Source; pnpm --filter @shuobei/web typecheck`,
+  ])('直接放行报告中的只读和开发组合：%s', command => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    expect(commandRisk(command, process.cwd())).toEqual({ risk: 'safe' })
+  })
+
+  it('目录切换不能绕过项目外目标审核', () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    expect(commandRisk('cd ..; npm test; cd project', process.cwd()).risk).toBe('approve')
+    expect(commandRisk('cd apps/server; npm --prefix ../../../outside test', process.cwd()).risk).toBe('approve')
+    expect(commandRisk('cd apps/server | npm test; cd ../..', process.cwd()).risk).toBe('approve')
+  })
+
   it('识别 PowerShell 查询管道和混合查询', () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
     const command = 'npm ls --depth=0; Get-ChildItem release -File | Select-Object Name,Length; Get-Content out/preload/index.js; Get-ChildItem resources/game -File | Select-Object Name'
@@ -68,6 +88,23 @@ describe('开发命令审核回归', () => {
   })
 
   it.each([
+    `pnpm typecheck; if ($LASTEXITCODE -eq 0) { pnpm build } else { Write-Output 'typecheck failed' }`,
+    `pnpm typecheck; if ($LASTEXITCODE -eq 0) { pnpm test 2>&1 | Select-String -Pattern 'Test Files|FAIL' | Select-Object -First 10 }; pnpm build 2>&1 | Select-String -Pattern 'built in|error' | Select-Object -First 6`,
+    `pnpm vitest run --root . .tmp/check-node-json.test.ts 2>&1 | Select-String -Pattern 'Test Files|Tests ' | Select-Object -First 8`,
+    `pnpm vitest run --root . .tmp/check-node-json.test.ts 2>&1 | Select-String -Pattern '"\\d:' | ForEach-Object { $_.Line.Trim() } | Select-Object -First 30`,
+  ])('放行成功条件与流合并组合：%s', command => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    expect(commandRisk(command).risk).toBe('safe')
+  })
+
+  it('放行跨语句的只读 Git 与文本查询', () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    const command = `git diff HEAD -- src/renderer/src/ModelChat.tsx | Select-String -Pattern '无项目目录|project' | Select-Object -First 30; echo ---; git show HEAD:src/renderer/src/ModelChat.tsx | Select-String -Pattern '无项目目录' | Select-Object -First 5; echo ---; grep -rn "无项目目录" src/renderer/src | Select-Object -First 10`
+    expect(commandRisk(command).risk).toBe('safe')
+    expect(readOnlyCommand(command)).toBe(true)
+  })
+
+  it.each([
     'npm view @packages version',
     'npm view $(danger) version',
     'pnpm view electron --unknown-option',
@@ -89,6 +126,12 @@ describe('开发命令审核回归', () => {
     'npm ci; if ($LASTEXITCODE -eq 0) { npm run build }; unknown-command',
     'Get-ChildItem | unknown-command',
     'pnpm install --global typescript',
+    `pnpm test; if ($LASTEXITCODE -eq 0) { pnpm build } else { npm publish }`,
+    'pnpm test; if ($LASTEXITCODE = 0) { pnpm build }',
+    'pnpm vitest run --root ../outside tests 2>&1 | Select-Object -Last 5',
+    'pnpm vitest run --root /etc tests 2>&1 | Select-Object -Last 5',
+    '$x=[pscustomobject]@{Name="a"}; $x.Dispose()',
+    '$LASTEXITCODE = 0',
   ])('未知语法及风险操作仍需审核：%s', command => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
     expect(commandRisk(command).risk).toBe('approve')
@@ -111,6 +154,7 @@ describe('开发命令审核回归', () => {
     'npm ci; if ($LASTEXITCODE -eq 0) { Set-Content output.txt data }',
     'pnpm test; if ($LASTEXITCODE -eq 0) { Set-Content x y }; if ($LASTEXITCODE -eq 0) { pnpm build }',
     'npm view electron version > output.txt',
+    'Get-ChildItem | ForEach-Object { $_.Line.Trim() } 2> output.txt',
     'Get-ChildItem | Remove-Item',
   ])('直接文件写入仍拦截：%s', command => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')

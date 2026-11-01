@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Copy, ExternalLink, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import type { ChatgptAuthStatus, ModelSettings } from '../../../shared/models'
@@ -53,7 +54,17 @@ export function ChatgptAuthorization({ onChange }: { onChange(settings: ModelSet
     <p className="hint" role="status">{!auth ? '正在读取授权状态…' : auth.state === 'signed-in' ? 'ChatGPT 账号已授权 · 凭证已加密保存' : auth.state === 'authorizing' ? '等待浏览器授权…' : '使用 ChatGPT 订阅账号登录，无需 API Key。'}</p>
     {auth?.state === 'signed-in' ? <div className="chatgpt-auth-actions">
       <Button disabled={busy} variant="outline" onClick={() => { void run(async () => { change.current(unwrapModelResult(await window.piRunner.refreshChatgptModels())); setNotice('模型列表已刷新') }) }}><RefreshCw size={15} />刷新模型</Button>
-      <Button disabled={busy} variant="ghost" onClick={() => { void run(async () => { unwrapModelResult(await window.piRunner.logoutChatgpt()); setAuth({ state: 'signed-out' }); previous.current = 'signed-out'; setNotice('已退出 ChatGPT 账号，模型参数与对话保留') }) }}>退出账号</Button>
+      <AlertDialog>
+        <AlertDialogTrigger asChild><Button disabled={busy} variant="outline" className="chatgpt-logout-button">退出账号</Button></AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogTitle>退出 ChatGPT 账号？</AlertDialogTitle>
+          <AlertDialogDescription>退出后需要重新授权才能使用订阅模型，已保存的模型参数和对话不会删除。</AlertDialogDescription>
+          <AlertDialogFooter>
+            <AlertDialogCancel asChild><Button variant="outline">取消</Button></AlertDialogCancel>
+            <AlertDialogCancel asChild><Button variant="destructive" onClick={() => { void run(async () => { unwrapModelResult(await window.piRunner.logoutChatgpt()); setAuth({ state: 'signed-out' }); previous.current = 'signed-out'; setNotice('已退出 ChatGPT 账号，模型参数与对话保留') }) }}>确认退出</Button></AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div> : <>
       <div className="chatgpt-auth-actions"><Button disabled={busy || !auth} onClick={() => authorize(false)}><ExternalLink size={15} />在浏览器中授权</Button><Button disabled={busy || !auth} variant="outline" onClick={() => authorize(true)}><Copy size={15} />复制授权链接</Button>
         {auth?.state === 'authorizing' && <Button disabled={busy} variant="ghost" onClick={() => { void run(async () => { unwrapModelResult(await window.piRunner.cancelChatgptAuth()); setAuth({ state: 'signed-out' }); previous.current = 'signed-out' }) }}>取消授权</Button>}

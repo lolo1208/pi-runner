@@ -45,53 +45,76 @@
   overflow: hidden;
 }
 
-.project-edit-dialog {
+.edit-info-dialog {
   width: min(560px, calc(100vw - 40px));
 }
 
-.conversation-edit-dialog {
-  width: min(560px, calc(100vw - 40px));
+.edit-info-dialog .modal-heading {
+  margin-bottom: 6px;
 }
 
-.conversation-edit-fields {
-  display: grid;
-  gap: 16px;
+.edit-info-dialog .modal-description {
+  margin-bottom: 22px;
 }
 
-.conversation-edit-field {
+.edit-info-fields {
   display: grid;
-  gap: 6px;
+  gap: 20px;
+}
+
+.edit-info-field {
+  display: grid;
+  gap: 8px;
   min-width: 0;
 }
 
-.conversation-edit-field .hint {
+.edit-info-field .hint {
   margin: 0;
+  line-height: 1.6;
 }
 
-.conversation-edit-field textarea {
-  max-height: 16rem;
-  resize: vertical;
+.edit-info-field-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
-.project-edit-fields {
-  gap: 16px;
-  display: grid;
+.edit-info-field-heading span {
+  color: var(--muted);
+  font-size: calc(12rem / 14);
 }
 
-.project-edit-field {
-  gap: 6px;
-  display: grid;
+.edit-info-prompt-field {
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
 }
 
-.project-edit-field .hint {
-  margin: 0;
-}
-
-.project-edit-prompt {
-  min-height: 0;
-  max-height: 9rem;
+.edit-info-prompt-field .edit-info-prompt {
+  width: 100%;
+  max-height: calc(9rem + 18px);
   overflow-y: auto;
   resize: none;
+}
+
+.edit-info-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.edit-info-footer .hint {
+  margin: 0;
+}
+
+.edit-info-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
 }
 
 .project-edit-directory {
@@ -109,9 +132,3 @@
   flex: none;
 }
 
-.project-edit-actions {
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 20px;
-  display: flex;
-}

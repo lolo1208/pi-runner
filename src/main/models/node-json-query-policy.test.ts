@@ -44,6 +44,7 @@ describe('Node 只读 JSON 查询', () => {
     expect(nodeJsonQuery(['-e', code])).toBe(false)
     expect(commandRisk(`node -e "${code}"`).risk).not.toBe('safe')
     for (const query of diaryQueries) {
+      // 变形必须真正改写查询；未改写的合法查询不能用于否定断言。
       for (const changed of [
         query + ";require('child_process').execSync('danger')",
         query + ";require('fs').writeFileSync('x','y')",
@@ -51,7 +52,7 @@ describe('Node 只读 JSON 查询', () => {
         query.replace("'./cocos-proj/assets/common/prefabs/diary.prefab'", 'getPath()'),
         query.replace('console.log', 'eval'),
         query.replace(/\ba\b/g, 'JSON'),
-      ]) {
+      ].filter(item => item !== query)) {
         expect(nodeJsonQuery(['-e', changed])).toBe(false)
         expect(commandRisk(`node -e "${changed}"`).risk).not.toBe('safe')
       }

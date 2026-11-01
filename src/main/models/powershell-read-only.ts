@@ -1,7 +1,7 @@
 import { queryOptions } from './command-query-options'
 
 type Token = { text: string; kind: 'word' | 'string' | 'variable' | 'symbol'; quoted?: string }
-type Value = { literal?: string; urls?: string[] }
+type Value = { literal?: string; literals?: string[]; urls?: string[]; image?: boolean; regexMatches?: boolean }
 
 /** 有限的 PowerShell 只读语法，不执行、展开或加载源代码。
  * 未知语法默认送审；仅显式支持对象投影及限定的文件读取类型调用。
@@ -25,14 +25,25 @@ function tokens(source: string): Token[] {
           if (quote === "'" && source[i + 1] === "'") { text += "'"; i += 2; continue }
           i++; closed = true; break
         }
-        if (source[i] === '`') throw Error('escape')
+        if (source[i] === '`') {
+          if (quote !== '"' || !/[nrt]/i.test(source[i + 1] ?? '')) throw Error('escape')
+          text += ' '; i += 2; continue
+        }
         text += source[i++]
       }
       if (!closed) throw Error('quote')
       result.push({ text, kind: 'string', quoted: quote }); continue
     }
+    const profile = source.slice(i).match(/^\$env:USERPROFILE(?![\w:])/i)
+    if (profile) { result.push({ text: '$env:userprofile', kind: 'variable' }); i += profile[0].length; continue }
     const variable = source.slice(i).match(/^\$(?:[A-Za-z_][A-Za-z0-9_]*|\?)/)
     if (variable) { result.push({ text: variable[0].toLowerCase(), kind: 'variable' }); i += variable[0].length; continue }
+    // 流合并只把 stderr 或全部流并入 stdout，不创建也不截断文件。
+    const merge = source.slice(i).match(/^(?:[12*]>&1)(?![^\s;|)])/)
+    if (merge) { i += merge[0].length; continue }
+    // 纯连字符参数（如 echo ---）是字面量，不是选项名。
+    const dashRun = source.slice(i).match(/^-{2,}(?![A-Za-z0-9_])/)
+    if (dashRun) { result.push({ text: dashRun[0], kind: 'word' }); i += dashRun[0].length; continue }
     const pair = source.slice(i, i + 2)
     if (['..', '++', '--', '::'].includes(pair) && !(pair === '--' && /[A-Za-z]/.test(source[i + 2] ?? ''))) {
       result.push({ text: pair, kind: 'symbol' }); i += 2; continue
@@ -42,15 +53,22 @@ function tokens(source: string): Token[] {
     // 依赖路径中的 @scope、pnpm 的 + 是字面量；不要吞掉 Length+1 等表达式的加号。
     const word = source.slice(i).match(/^[A-Za-z_][\w.-]*[\\/][\w./\\*?:@+-]*/)
       ?? source.slice(i).match(/^(?:--?[A-Za-z][\w-]*|[A-Za-z_][\w./\\*?:-]*)/)
-    if (word) { result.push({ text: word[0], kind: 'word' }); i += word[0].length; continue }
+    if (word) {
+      // 成员名之后的减号是算术运算符，而不是名称的一部分。
+      const text = word[0].endsWith('-') && /[\d[$(]/.test(source[i + word[0].length] ?? '') ? word[0].slice(0, -1) : word[0]
+      result.push({ text, kind: 'word' }); i += text.length; continue
+    }
     // 参数位置的相对路径（如 .tmp、./src、../x）是普通字面量，不是成员访问。
     const relative = c === '.' && i > 0 && /[ \t]/.test(source[i - 1]) ? source.slice(i).match(/^(?:\.{1,2}[\\/][\w./\\*?:-]*|\.[A-Za-z_][\w./\\-]*)/) : null
     if (relative) { result.push({ text: relative[0], kind: 'word' }); i += relative[0].length; continue }
-    if (';|(){}[]@=,.+'.includes(c)) { result.push({ text: c, kind: 'symbol' }); i++; continue }
+    if (';|(){}[]@=,.+-'.includes(c)) { result.push({ text: c, kind: 'symbol' }); i++; continue }
     throw Error('unsupported token')
   }
   return result
 }
+
+// 无参字符串方法不读写文件；其他实例方法仍只接受显式支持的写法。
+const noArgMethods = new Set(['trim', 'trimstart', 'trimend', 'tostring', 'tolower', 'toupper', 'tolowerinvariant', 'toupperinvariant'])
 
 class QueryParser {
   private readonly input: Token[]
@@ -72,10 +90,12 @@ class QueryParser {
     this.bounded(() => {
       while (this.peek() && !this.peek('}')) {
         if (this.eat(';')) continue
+        // 循环与分支的流程控制关键字本身不执行命令。
+        if (this.eat('continue') || this.eat('break')) continue
         if (this.eat('foreach')) {
           const before = new Map(this.variables)
           this.need('('); const name = this.local(); this.need('in'); const collection = this.pipeline(); this.need(')')
-          this.variables.set(name, collection.urls?.length ? { urls: collection.urls } : {})
+          this.variables.set(name, { ...(collection.urls?.length ? { urls: collection.urls } : {}), ...(collection.literals?.length ? { literals: collection.literals } : {}) })
           this.invalidateBlockInputs()
           this.block()
           this.invalidateChanged(before)
@@ -141,7 +161,7 @@ class QueryParser {
     if (this.interpolation) throw Error('assignment in interpolation')
     const token = this.take()
     if (token.kind !== 'variable' || !/^\$[a-z][a-z0-9_]*$/.test(token.text)
-      || /^\$(?:env|global|script|local|private|using|ps.*|host|executioncontext|error|input|args|matches|ofs|home|pwd|true|false|null)$/.test(token.text)) throw Error('nonlocal variable')
+      || /^\$(?:env|global|script|local|private|using|ps.*|host|executioncontext|error|input|args|matches|ofs|home|pwd|lastexitcode|true|false|null)$/.test(token.text)) throw Error('nonlocal variable')
     return token.text
   }
   private block(): void { this.need('{'); this.statements(); this.need('}') }
@@ -161,11 +181,27 @@ class QueryParser {
     const before = new Map(this.variables)
     this.invalidateBlockInputs(); this.block(); this.invalidateChanged(before)
   }
-  private pipeline(): Value {
+  /** allowArray 关闭时保留逗号给 @(...) 逐项处理，避免重复消费分隔符。 */
+  private pipeline(allowArray = true): Value {
     return this.bounded(() => {
       let value = this.input[this.position]?.kind === 'word' && !/^\d+$/.test(this.input[this.position].text)
         ? this.command() : this.expression()
-      while (this.eat('|')) { this.command(); value = {} }
+      // PowerShell 的逗号数组：'a','b' 等价于 @('a','b')；逐项检查且仅字面量项可作为可信来源。
+      const items: Value[] = [value]
+      while (allowArray && this.eat(',')) items.push(this.expression())
+      if (items.length > 1) {
+        value = items.every(item => item.literal !== undefined)
+          ? { literals: items.map(item => item.literal!), ...(items.every(item => item.urls?.length) ? { urls: items.flatMap(item => item.urls!) } : {}) }
+          : {}
+      }
+      while (this.eat('|')) {
+        const start = this.position
+        this.command(value)
+        const stage = this.input.slice(start, this.position)
+        // 仅 -First/-Last 数量筛选保留 Match 对象来源；其他投影不可信。
+        if (!(value.regexMatches && stage.length === 3 && stage[0].text.toLowerCase() === 'select-object'
+          && ['-first', '-last'].includes(stage[1].text.toLowerCase()) && /^\d+$/.test(stage[2].text))) value = {}
+      }
       return value
     })
   }
@@ -177,9 +213,12 @@ class QueryParser {
           const member = this.take()
           if (member.kind !== 'word' || !/^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*$/.test(member.text)) throw Error('member')
           if (this.eat('(')) {
-            // Only this string operation is needed for relative display paths.
-            if (member.text.split('.').at(-1)?.toLowerCase() !== 'substring') throw Error('method')
-            this.expression(); if (this.eat(',')) this.expression(); this.need(')')
+            const method = member.text.toLowerCase().split('.').at(-1) ?? ''
+            if (method === 'dispose' && value.image) this.need(')')
+            else if (noArgMethods.has(method) && this.peek(')')) this.need(')')
+            else if (['substring', 'indexof'].includes(method)) { this.expression(); if (this.eat(',')) this.expression(); this.need(')') }
+            // 其他方法可能读写文件或进程，不开放。
+            else throw Error('method')
           }
           value = {}
         } else {
@@ -187,8 +226,10 @@ class QueryParser {
           // Keep literal URL provenance for a slice, never for a property access.
         }
       }
-      while (['+', '..', '-join', '-eq', '-ne', '-in', '-like', '-notlike', '-gt', '-lt', '-ge', '-le', '-and', '-or'].some(op => this.peek(op))) {
-        const op = this.take().text.toLowerCase(); this.expression(); if (op !== '..') value = {}
+      while (['+', '-', '..', '-join', '-replace', '-eq', '-ne', '-in', '-like', '-notlike', '-match', '-notmatch', '-gt', '-lt', '-ge', '-le', '-and', '-or'].some(op => this.peek(op))) {
+        const op = this.take().text.toLowerCase(); this.expression()
+        if (op === '-replace' && this.eat(',')) this.expression()
+        if (op !== '..') value = {}
       }
       return value
     })
@@ -199,15 +240,28 @@ class QueryParser {
     if (this.eat('@')) {
       this.need('('); const values: Value[] = []
       if (!this.peek(')')) {
-        values.push(this.pipeline())
-        while (this.eat(',')) values.push(this.pipeline())
+        values.push(this.pipeline(false))
+        while (this.eat(',')) values.push(this.pipeline(false))
       }
       this.need(')')
-      return values.length && values.every(value => value.urls?.length) ? { urls: values.flatMap(value => value.urls!) } : {}
+      return {
+        ...(values.length && values.every(value => value.urls?.length) ? { urls: values.flatMap(value => value.urls!) } : {}),
+        ...(values.length && values.every(value => value.literal !== undefined) ? { literals: values.map(value => value.literal!) } : {}),
+      }
     }
     const token = this.take()
     if (token.kind === 'string') {
       if (token.quoted === '"' && token.text.includes('$')) {
+        // 仅允许将有限字面量路径片段嵌入固定的 HTTP(S) 地址路径。
+        // 不允许影响主机、查询串、认证信息或路径回退，也不信任循环内重新赋值。
+        const urlTemplate = /^(https?:\/\/[^\s\/$?#]+\/[^$?#]*)\$([a-z][a-z0-9_]*)(\/[^$?#]*)?$/i.exec(token.text)
+        if (urlTemplate) {
+          const parts = this.variables.get('$' + urlTemplate[2].toLowerCase())?.literals
+          if (parts?.length && parts.length <= 100 && parts.every(part => /^[a-z0-9._\/-]+$/i.test(part) && part.split('/').every(segment => segment && segment !== '.' && segment !== '..'))) {
+            const urls = parts.map(part => urlTemplate[1] + part + (urlTemplate[3] ?? ''))
+            if (urls.every(value => { try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password } catch { return false } })) return { urls }
+          }
+        }
         // Interpolations are parsed recursively with the same local variable scope.
         let rest = token.text
         while (rest.includes('$')) {
@@ -223,7 +277,7 @@ class QueryParser {
             rest = rest.slice(end)
           } else {
             const variable = rest.match(/^\$[A-Za-z_][A-Za-z0-9_]*/)?.[0].toLowerCase()
-            if (!variable || !this.variables.has(variable) || rest[variable.length] === ':') throw Error('interpolation variable')
+            if (!variable || variable !== '$_' && !this.variables.has(variable) || rest[variable.length] === ':') throw Error('interpolation variable')
             rest = rest.slice(variable.length)
           }
         }
@@ -235,6 +289,8 @@ class QueryParser {
     }
     if (token.kind === 'variable') {
       if (token.text === '$_') return {}
+      // 只读自动变量可用于成功条件判断，不提供任何数据来源或写入能力。
+      if (token.text === '$lastexitcode' || token.text === '$?') return {}
       const value = this.variables.get(token.text)
       if (!value) throw Error('unbound variable')
       return value
@@ -247,7 +303,38 @@ class QueryParser {
     const type = this.take()
     if (type.kind !== 'word') throw Error('type')
     this.need(']')
-    if (type.text.toLowerCase() === 'pscustomobject') {
+    const typeName = type.text.toLowerCase()
+    if (typeName === 'stringcomparison') {
+      this.need('::')
+      if (!['ordinal', 'ordinalignorecase'].includes(this.take().text.toLowerCase())) throw Error('comparison')
+      return {}
+    }
+    if (typeName === 'system.net.webutility') {
+      this.need('::')
+      if (this.take().text.toLowerCase() !== 'htmldecode') throw Error('static method')
+      this.need('('); this.expression(); this.need(')')
+      return {}
+    }
+    if (typeName === 'math' || typeName === 'regex') {
+      this.need('::')
+      const method = this.take().text.toLowerCase()
+      if (!(typeName === 'math' ? ['min', 'max'] : ['match', 'matches', 'replace']).includes(method)) throw Error('static method')
+      this.need('('); this.expression(); this.need(','); this.expression()
+      if (typeName === 'regex' && method === 'replace') {
+        // 替换值限于字面量字符串，不能绑定 MatchEvaluator 等可执行重载。
+        this.need(',')
+        const replacement = this.take()
+        if (replacement.kind !== 'string' || replacement.quoted !== "'") throw Error('replacement')
+      }
+      if (typeName === 'regex' && method === 'matches' && this.eat(',')) {
+        // 仅允许无副作用的字面量匹配选项，不接受动态表达式或超时重载。
+        const option = this.take()
+        if (option.kind !== 'string' || option.quoted !== "'" || !/^(?:none|ignorecase|multiline|singleline|cultureinvariant|ignorepatternwhitespace|explicitcapture)(?:\s*,\s*(?:none|ignorecase|multiline|singleline|cultureinvariant|ignorepatternwhitespace|explicitcapture))*$/i.test(option.text)) throw Error('regex options')
+      }
+      this.need(')')
+      return typeName === 'regex' && method === 'matches' ? { regexMatches: true } : {}
+    }
+    if (typeName === 'pscustomobject') {
       this.need('@'); this.need('{')
       while (this.eat(';')) { /* 对象内换行 */ }
       while (!this.peek('}')) {
@@ -260,10 +347,11 @@ class QueryParser {
       this.need('}')
       return {}
     }
-    if (!['system.io.file', 'io.file'].includes(type.text.toLowerCase())) throw Error('type')
+    const image = type.text.toLowerCase() === 'system.drawing.image'
+    if (!image && !['system.io.file', 'io.file'].includes(type.text.toLowerCase())) throw Error('type')
     this.need('::')
     const method = this.take()
-    if (method.kind !== 'word' || !['readlines', 'readalllines', 'readalltext'].includes(method.text.toLowerCase())) throw Error('static method')
+    if (method.kind !== 'word' || !(image ? ['fromfile'] : ['readlines', 'readalllines', 'readalltext']).includes(method.text.toLowerCase())) throw Error('static method')
     this.need('(')
     const resolved = this.eat('(')
     if (resolved) {
@@ -279,14 +367,20 @@ class QueryParser {
       this.need(')')
     }
     this.need(')')
-    return {}
+    return image ? { image: true } : {}
   }
-  private command(): Value {
+  private command(input: Value = {}): Value {
     const program = this.take().text.toLowerCase()
     if (!/^[a-z][\w-]*$/.test(program)) throw Error('command')
     if (program === 'foreach-object') {
-      this.eat('-process')
-      this.queryBlock()
+      if (this.peek('value')) {
+        // 仅对已知 Regex Match 对象投影 Value，避免调用其他对象同名方法。
+        if (!input.regexMatches) throw Error('unknown member target')
+        this.take()
+      } else {
+        this.eat('-process')
+        this.queryBlock()
+      }
       return {}
     }
     const args: string[] = []; const values: Value[] = []; let dynamic = false
@@ -308,23 +402,48 @@ class QueryParser {
         this.need('}'); args.push('value'); continue
       }
       const token = this.input[this.position]
+      // 仅作为目录枚举的路径参数使用用户主目录，不允许其他环境变量或动态路径拼接。
+      if (token.text === '$env:userprofile' && program === 'get-childitem'
+        && args.at(-1)?.toLowerCase() === '-path' && [';', '|', ')', '}', undefined].includes(this.input[this.position + 1]?.text)
+      ) { this.take(); args.push('userprofile'); values.push({}); continue }
+      if (token.text === '$env:userprofile' && program === 'get-childitem'
+        && args.at(-1)?.toLowerCase() === '-path' && this.input[this.position + 1]?.kind === 'word'
+        && this.input[this.position + 1].text.startsWith('-')
+      ) { this.take(); args.push('userprofile'); values.push({}); continue }
       if (token.kind === 'word') { args.push(this.take().text); values.push({}); continue }
+      // 参数位置的 . 与 .. 是当前/上级目录字面量，不是成员访问。
+      if (token.kind === 'symbol' && (token.text === '.' || token.text === '..')) {
+        this.take(); args.push(token.text); values.push({ literal: token.text }); continue
+      }
       if (this.eat(',')) continue
       const value = this.expression(); dynamic ||= value.literal === undefined
       args.push(value.literal ?? 'value'); values.push(value)
     }
-    if (['invoke-webrequest', 'invoke-restmethod'].includes(program)) {
+    if (program === 'echo') {
+      // PowerShell 的 echo 是 Write-Output 别名，只有输出而无副作用。
+      if (dynamic) throw Error('echo variable')
+      return {}
+    }
+    if (program === 'add-type') {
+      // 只允许加载系统绘图库，不允许编译源码或加载任意程序集。
+      if (dynamic || args.length !== 2 || args[0].toLowerCase() !== '-assemblyname' || args[1].toLowerCase() !== 'system.drawing') throw Error('assembly')
+    } else if (['invoke-webrequest', 'invoke-restmethod'].includes(program)) {
       // Anonymous GET only. URI variables must originate entirely from literal URLs.
       let uri = false
       for (let index = 0; index < args.length; index++) {
         if (args[index].toLowerCase() === '-usebasicparsing') continue
+        if (args[index].toLowerCase() === '-timeoutsec') {
+          const timeout = args[++index]
+          if (!timeout || !/^\d+$/.test(timeout) || Number(timeout) > 300) throw Error('timeout')
+          continue
+        }
         if (args[index].toLowerCase() === '-uri') { index++; if (!values[index]?.urls?.length || uri) throw Error('uri'); uri = true; continue }
         if (args[index].startsWith('-') || !values[index]?.urls?.length || uri) throw Error('network options')
         uri = true
       }
       if (!uri) throw Error('missing uri')
     } else if (program === 'where-object') {
-      if (!queryOptions(args, [], ['-eq', '-ne', '-in', '-like', '-notlike', '-gt', '-lt', '-ge', '-le'])) throw Error('predicate')
+      if (!queryOptions(args, [], ['-eq', '-ne', '-in', '-like', '-notlike', '-match', '-notmatch', '-gt', '-lt', '-ge', '-le'])) throw Error('predicate')
     } else if (['sort-object', 'group-object', 'convertto-json', 'convertfrom-json'].includes(program)) {
       const specs: Record<string, [string[], string[]]> = {
         'sort-object': [['-descending', '-unique', '-stable'], ['-property']],

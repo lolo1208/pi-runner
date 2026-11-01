@@ -29,6 +29,7 @@ export function useSlashSkillPicker({ prompt, textareaRef, available, skillIds, 
   const [caret, setCaret] = useState(0)
   const [focused, setFocused] = useState(false)
   const [composing, setComposing] = useState(false)
+  const composingRef = useRef(false)
   const [dismissedStart, setDismissedStart] = useState<number | null>(null)
   const [highlight, setHighlight] = useState({ query: '', index: 0 })
   const candidate = focused && !composing && !disabled ? slashQuery(prompt, caret) : null
@@ -42,6 +43,8 @@ export function useSlashSkillPicker({ prompt, textareaRef, available, skillIds, 
   useEffect(() => { if (open) available.refresh() }, [open])
 
   const updateCaret = (): void => {
+    // 预编辑期间不追踪候选串光标；选词结束后一次同步即可。
+    if (composingRef.current) return
     const textarea = textareaRef.current
     if (!textarea) return
     setCaret(textarea.selectionStart === textarea.selectionEnd ? textarea.selectionStart : -1)
@@ -57,7 +60,7 @@ export function useSlashSkillPicker({ prompt, textareaRef, available, skillIds, 
     })
   }
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): boolean => {
-    if (!query || event.nativeEvent.isComposing || event.keyCode === 229) return false
+    if (!query || composingRef.current || event.nativeEvent.isComposing || event.keyCode === 229) return false
     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setDismissedStart(query.start); return true }
     if (event.key === 'Enter') { event.preventDefault(); if (activeSkill) select(activeSkill); return true }
     if ((event.key === 'Tab' || event.key === 'ArrowDown' || event.key === 'ArrowUp') && skills.length && !event.ctrlKey && !event.metaKey && !event.altKey) {
@@ -76,12 +79,20 @@ export function useSlashSkillPicker({ prompt, textareaRef, available, skillIds, 
       'aria-autocomplete': 'list' as const,
       'aria-activedescendant': open && activeSkill ? `${listId}-${activeSkill.id}` : undefined,
       onFocus: () => { setFocused(true); updateCaret() },
-      onBlur: () => setFocused(false),
+      onBlur: () => { composingRef.current = false; setComposing(false); setFocused(false) },
       onSelect: updateCaret,
-      onCompositionStart: () => setComposing(true),
-      onCompositionEnd: () => { setComposing(false); updateCaret() }
+      onCompositionStart: () => { composingRef.current = true; setComposing(true) },
+      onCompositionEnd: () => {
+        composingRef.current = false
+        setComposing(false)
+        // 组合输入期间跳过了 onChange 检查，结束时仍须清除已被替换的斜杠标记。
+        if (dismissedStart !== null && textareaRef.current?.value[dismissedStart] !== '/') setDismissedStart(null)
+        updateCaret()
+      }
     },
+    isComposing: () => composingRef.current,
     onChange: () => {
+      if (composingRef.current) return
       const textarea = textareaRef.current
       setFocused(document.activeElement === textarea)
       if (textarea && dismissedStart !== null && textarea.value[dismissedStart] !== '/') setDismissedStart(null)

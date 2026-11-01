@@ -26,6 +26,23 @@
   background: var(--hover);
 }
 
+.project-file-panel { display: flex; flex: 1; min-height: 0; flex-direction: column; }
+.project-file-heading { display: flex; align-items: center; justify-content: space-between; padding: 14px 12px 8px; }
+.project-file-heading button { border: 0; background: transparent; color: var(--muted); cursor: pointer; padding: 4px; }
+.project-file-tree { overflow: auto; flex: 1; padding: 2px 0 12px; }
+.project-file-panel > .hint, .project-file-panel > .error, .project-file-tree > .hint { margin: 12px; }
+.ai-file-tree { padding: 4px 8px 12px; }
+.ai-file-tree [role="treeitem"] { margin-bottom: 2px; }
+.ai-file-tree button.ai-file-tree-row { display: flex; justify-content: flex-start; align-items: center; gap: 4px; width: 100%; min-width: 0; min-height: 26px; border: 0; border-radius: 6px; background: transparent; color: inherit; text-align: left; padding: 4px 8px; cursor: pointer; box-shadow: none; }
+.ai-file-tree button.ai-file-tree-row:hover, .ai-file-tree [role="treeitem"][aria-selected="true"] > button.ai-file-tree-row { background: var(--hover); }
+.ai-file-tree-icon, .ai-file-tree-chevron, .ai-file-tree-spacer { flex: none; color: var(--muted); }
+.ai-file-tree-icon { display: flex; }
+.ai-file-tree-chevron.is-open { transform: rotate(90deg); }
+.ai-file-tree-spacer { width: 16px; }
+.ai-file-tree-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-file-tree-children { margin-left: 16px; }
+.ai-file-tree-actions { display: flex; margin-left: auto; gap: 4px; }
+
 .tool-placeholder {
   text-align: center;
   color: var(--muted);

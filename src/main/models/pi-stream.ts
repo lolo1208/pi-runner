@@ -7,12 +7,12 @@ import { thinkingText } from './pi-thinking'
 /** 同步启动失败也必须停止计时，避免清理期间被误报为超时。 */
 export function requestPiStream(start: () => AssistantMessageEventStream, apiKey: string, abortSource: () => void, onActive: (active: boolean) => void, responseError: () => string | undefined = () => undefined): AssistantMessageEventStream {
   onActive(true)
-  try { return safePiStream(start(), apiKey, abortSource, () => onActive(false), responseError) }
+  try { return safePiStream(start(), apiKey, abortSource, () => onActive(false), responseError, () => onActive(true)) }
   catch (error) { onActive(false); throw new ModelError(modelRequestError(error, apiKey)) }
 }
 
 /** 在 pi 记录会话之前过滤密钥回显，并限制单次模型响应大小。 */
-export function safePiStream(source: AssistantMessageEventStream, apiKey: string, abortSource: () => void = () => {}, onComplete: () => void = () => {}, responseError: () => string | undefined = () => undefined): AssistantMessageEventStream {
+export function safePiStream(source: AssistantMessageEventStream, apiKey: string, abortSource: () => void = () => {}, onComplete: () => void = () => {}, responseError: () => string | undefined = () => undefined, onProgress: () => void = () => {}): AssistantMessageEventStream {
   const output = createAssistantMessageEventStream()
   let completed = false
   const complete = (): void => { if (!completed) { completed = true; onComplete() } }
@@ -34,21 +34,22 @@ export function safePiStream(source: AssistantMessageEventStream, apiKey: string
     const pending = new Map<number, string>()
     try {
       for await (const event of source) {
+        onProgress()
         if ('partial' in event) last = sanitize(event.partial)
         if (event.type === 'text_delta' || event.type === 'thinking_delta' || event.type === 'toolcall_delta') {
           bytes += Buffer.byteLength(event.delta)
           if (bytes > 2 * 1024 * 1024) throw new Error('模型响应超过 2 MiB 上限，请降低输出 Token 上限')
         }
-        if (apiKey && event.type === 'text_delta') {
+        if (apiKey && (event.type === 'text_delta' || event.type === 'thinking_delta')) {
           const text = ((pending.get(event.contentIndex) ?? '') + event.delta).split(apiKey).join('[已隐藏密钥]')
           let retained = 0
           for (let length = 1; length < apiKey.length; length++) if (text.endsWith(apiKey.slice(0, length))) retained = length
           pending.set(event.contentIndex, retained ? text.slice(-retained) : '')
           const delta = retained ? text.slice(0, -retained) : text
           if (delta) output.push({ ...event, delta, partial: last! })
-        } else if (event.type === 'text_end') {
+        } else if (event.type === 'text_end' || event.type === 'thinking_end') {
           const tail = pending.get(event.contentIndex)
-          if (tail) output.push({ type: 'text_delta', contentIndex: event.contentIndex, delta: tail, partial: last! })
+          if (tail) output.push({ type: event.type === 'text_end' ? 'text_delta' : 'thinking_delta', contentIndex: event.contentIndex, delta: tail, partial: last! })
           pending.delete(event.contentIndex)
           output.push({ ...event, content: apiKey ? event.content.split(apiKey).join('[已隐藏密钥]') : event.content, partial: last! })
         } else if (event.type === 'done') { last = sanitize(event.message); complete(); output.push({ ...event, message: last }); return }

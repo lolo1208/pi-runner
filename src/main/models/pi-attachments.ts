@@ -3,6 +3,7 @@ import type { ImageContent } from '@earendil-works/pi-ai'
 import type { SessionManager } from '@earendil-works/pi-coding-agent'
 import type { ChatMessage, ModelProfile } from '../../shared/models'
 import { attachmentKind, attachmentText } from '../../shared/attachments'
+import { googleAttachment } from './google-attachments'
 import { modelMessages } from './model-attachments'
 
 const markerPattern = /\[pi-runner-files:([\w-]+)\]/
@@ -30,6 +31,19 @@ export class PiAttachments {
   }
   replacePayload(payload: unknown, profile: ModelProfile, responses: boolean): unknown {
     const body = payload as Record<string, unknown>
+    if (profile.provider === 'google' && Array.isArray(body.contents)) {
+      body.contents = (body.contents as { role?: string; parts?: { text?: string }[] }[]).map(item => {
+        if (item.role !== 'user') return item
+        const id = markerPattern.exec(item.parts?.map(part => part.text ?? '').join('\n') ?? '')?.[1]
+        const original = id && this.messages.get(id)
+        if (!original) return item
+        return { ...item, parts: [
+          ...(original.content ? [{ text: original.content }] : []),
+          ...(original.images ?? []).map(googleAttachment)
+        ] }
+      })
+      return body
+    }
     const key = responses ? 'input' : 'messages'
     if (!Array.isArray(body[key])) return body
     body[key] = (body[key] as Record<string, unknown>[]).map(item => {

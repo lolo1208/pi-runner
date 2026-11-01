@@ -5,6 +5,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Modal } from '@/components/ui/modal'
 import { SyntaxCode } from './SyntaxCode'
 import { AiReviewBadge } from './AiReviewBadge'
+import { AiReviewReason } from './AiReviewReason'
 import { highlightCommand } from '../../lib/command-syntax'
 import { approvalCommand, commandApprovalNotice } from '../../lib/tool-approval'
 import type { ToolApproval } from '../../../../shared/models'
@@ -30,6 +31,7 @@ export function CommandApprovalDialog({ open, onOpenChange, approval, repeat, on
   return <Modal open={open} onOpenChange={onOpenChange} title={<span className="tool-approval-file-title"><Terminal size={18} aria-hidden="true" /><span>请求执行终端命令</span><AiReviewBadge show={approval.aiReviewed} /></span>}
     description={notice} contentClassName="command-approval-dialog">
     <div className="command-approval-body">
+      {approval.aiReviewed && <AiReviewReason reviews={[{ decision: 'ask', reason: approval.aiReviewReason }]} />}
       <div className="command-approval-meta"><span>工作目录</span><span className="command-approval-cwd" title={approval.cwd}>{approval.cwd}</span></div>
       <div className="command-approval-command">
         <span className="command-approval-label">命令</span>

@@ -1,5 +1,5 @@
 import { memoWithStableCallbacks } from '../../lib/memo-with-callbacks'
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -60,29 +60,6 @@ function ChatComposerView({ active = true, queue = [], editingId, queuePaused, o
   const isMac = /Mac|iPhone|iPad/.test(navigator.platform) || navigator.userAgent.includes('Macintosh')
   const sendShortcut = isMac ? '⌘ + Enter' : 'Ctrl + Enter'
 
-  const resizeRef = useRef<() => void>(() => {})
-  useLayoutEffect(() => {
-    const textarea = textareaRef.current
-    if (!textarea) return
-    const resize = () => {
-      if (!textarea.clientWidth) return
-      const lineHeight = Number.parseFloat(getComputedStyle(textarea).lineHeight) || 25.2
-      textarea.style.height = '0px'
-      const height = Math.max(lineHeight, textarea.scrollHeight)
-      textarea.style.height = `${Math.min(height, lineHeight * 8)}px`
-      textarea.style.overflowY = height > lineHeight * 8 ? 'auto' : 'hidden'
-    }
-    resizeRef.current = resize
-    resize()
-    let width = textarea.clientWidth
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => {
-      if (textarea.clientWidth !== width) { width = textarea.clientWidth; resize() }
-    })
-    observer?.observe(textarea)
-    return () => { observer?.disconnect(); resizeRef.current = () => {} }
-  }, [])
-  useLayoutEffect(() => { if (active) resizeRef.current() }, [prompt, images.length, active])
-
   useEffect(() => { if (editingId && active) textareaRef.current?.focus() }, [editingId, active])
 
   const addImages = async (files: File[]): Promise<void> => {
@@ -113,7 +90,7 @@ function ChatComposerView({ active = true, queue = [], editingId, queuePaused, o
     if (!(target instanceof HTMLElement) || !event.currentTarget.contains(target)) return
     if (target.closest('button, a, input, textarea, select, label, [role="button"], [role="combobox"], [role="menuitem"], [contenteditable="true"], [tabindex], .chat-image')) return
     textareaRef.current?.focus({ preventScroll: true })
-  }} onSubmit={event => { event.preventDefault(); if (!readingRef.current && (editingId || !settingsDisabled)) onSend() }} onDragOver={event => {
+  }} onSubmit={event => { event.preventDefault(); if (!readingRef.current && !slashSkills.isComposing() && (editingId || !settingsDisabled)) onSend() }} onDragOver={event => {
     if (event.dataTransfer.types.includes('Files')) event.preventDefault()
   }} onDrop={event => {
     if (!event.dataTransfer.files.length) return
@@ -140,14 +117,35 @@ function ChatComposerView({ active = true, queue = [], editingId, queuePaused, o
         void addImages([new File([text], name, { type: 'text/plain' })])
       }
     }} onKeyDown={event => {
+      // 以组合输入生命周期为准，不仅依赖部分输入法可能遗漏的键盘事件标记。
+      if (slashSkills.isComposing() || event.nativeEvent.isComposing || event.keyCode === 229) return
       if (slashSkills.onKeyDown(event)) return
-      if (event.key !== 'Enter' || event.nativeEvent.isComposing || event.keyCode === 229) return
+      if (event.key !== 'Enter') return
       const shouldSend = sendWithCtrlEnter ? (isMac ? event.metaKey : event.ctrlKey) : !event.shiftKey
       if (shouldSend) { event.preventDefault(); if (!readingRef.current && (editingId || !settingsDisabled)) onSend() }
     }} />
-    {active && <div className="composer-actions">
+    {active && <ComposerActions available={localSkills} skillIds={skillIds} onSkillsChange={onSkillsChange} reading={reading} filesDisabled={reading || images.length >= MAX_MESSAGE_ATTACHMENTS} onAddFiles={() => fileRef.current?.click()}
+      intentMode={intentMode} onIntentChange={onIntentChange} permissionMode={permissionMode} onPermissionChange={onPermissionChange} profile={profile} profiles={profiles} providers={providers} onSelectModel={onSelectModel} onThinkingChange={onThinkingChange}
+      isBusy={isBusy} stopping={stopping} settingsDisabled={settingsDisabled} editingId={editingId} hasContent={Boolean(prompt.trim() || images.length)} sendWithCtrlEnter={sendWithCtrlEnter} sendShortcut={sendShortcut} onOpenSettings={onOpenSettings} onCancel={onCancel} />}
+  </form>
+}
+
+interface ComposerActionsProps extends Pick<ChatComposerProps, 'intentMode' | 'onIntentChange' | 'permissionMode' | 'onPermissionChange' | 'profile' | 'profiles' | 'providers' | 'onSelectModel' | 'onThinkingChange' | 'isBusy' | 'stopping' | 'settingsDisabled' | 'editingId' | 'sendWithCtrlEnter' | 'onOpenSettings' | 'onCancel'> {
+  available: ReturnType<typeof useLocalSkills>
+  skillIds: string[]
+  onSkillsChange(ids: string[]): void
+  reading: boolean
+  filesDisabled: boolean
+  onAddFiles(): void
+  hasContent: boolean
+  sendShortcut: string
+}
+
+/** 工具栏只关心是否有内容，不随每个字符重建模型选择器、技能菜单和 Tooltip。 */
+const ComposerActions = memoWithStableCallbacks(function ComposerActions({ available, skillIds, onSkillsChange, reading, filesDisabled, onAddFiles, intentMode = 'execute', onIntentChange, permissionMode = 'default', onPermissionChange, profile, profiles, providers, onSelectModel, onThinkingChange, isBusy, stopping, settingsDisabled, editingId, hasContent, sendWithCtrlEnter, sendShortcut, onOpenSettings, onCancel }: ComposerActionsProps): React.JSX.Element {
+  return <div className="composer-actions">
       <div className="composer-tools">
-        <ComposerAddMenu available={localSkills} ids={skillIds} onChange={onSkillsChange} disabled={reading} filesDisabled={reading || images.length >= MAX_MESSAGE_ATTACHMENTS} onConfigureSkills={() => onOpenSettings('skills')} onAddFiles={() => fileRef.current?.click()} />
+        <ComposerAddMenu available={available} ids={skillIds} onChange={onSkillsChange} disabled={reading} filesDisabled={filesDisabled} onConfigureSkills={() => onOpenSettings('skills')} onAddFiles={onAddFiles} />
         <IntentModePicker mode={intentMode} onChange={onIntentChange} disabled={isBusy || settingsDisabled} />
         {reading ? <span className="composer-mode">正在添加附件…</span> : <PermissionModePicker mode={permissionMode} disabled={isBusy || settingsDisabled || !onPermissionChange} onChange={onPermissionChange ?? (async () => {})} />}
       </div>
@@ -157,10 +155,9 @@ function ChatComposerView({ active = true, queue = [], editingId, queuePaused, o
           {stopping && <span className="composer-stop-status" role="status">正在停止任务…</span>}
           <Tooltip><TooltipTrigger asChild><Button type="button" className="send-button stop-button" aria-label={stopping ? '正在停止任务' : '取消请求'} disabled={stopping} onClick={onCancel}>{stopping ? <LoaderCircle size={14} className="animate-spin" aria-hidden="true" /> : <Square size={14} aria-hidden="true" />}</Button></TooltipTrigger><TooltipContent side="top">{stopping ? '正在停止任务…' : '停止任务'}</TooltipContent></Tooltip>
         </>}
-        <Tooltip><TooltipTrigger asChild><Button type="submit" className={`send-button${editingId ? ' queue-save-button' : ''}`} aria-label={editingId ? '保存队列消息' : '发送消息'} disabled={(!editingId && (!profile || settingsDisabled)) || reading || (!prompt.trim() && !images.length)}>{editingId ? <><Check size={15} />保存</> : <ArrowUp size={19} />}</Button></TooltipTrigger><TooltipContent side="top">{`${editingId ? '保存队列消息' : isBusy ? '加入队列' : '发送消息'}（${sendWithCtrlEnter ? sendShortcut : 'Enter'}）`}</TooltipContent></Tooltip>
+        <Tooltip><TooltipTrigger asChild><Button type="submit" className={`send-button${editingId ? ' queue-save-button' : ''}`} aria-label={editingId ? '保存队列消息' : '发送消息'} disabled={(!editingId && (!profile || settingsDisabled)) || reading || !hasContent}>{editingId ? <><Check size={15} />保存</> : <ArrowUp size={19} />}</Button></TooltipTrigger><TooltipContent side="top">{`${editingId ? '保存队列消息' : isBusy ? '加入队列' : '发送消息'}（${sendWithCtrlEnter ? sendShortcut : 'Enter'}）`}</TooltipContent></Tooltip>
       </div>
-    </div>}
-  </form>
-}
+    </div>
+})
 
 export const ChatComposer = memoWithStableCallbacks(ChatComposerView)

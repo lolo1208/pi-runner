@@ -41,7 +41,7 @@ export async function performFileAction(project: string, relativePath: string, a
     return
   }
   const info = await stat(file).catch(() => { throw new Error('文件不存在或无法访问，请确认文件已恢复到本地后重试') })
-  if (!info.isFile()) throw new Error('所选路径不是文件')
+  if (!info.isFile() && !info.isDirectory()) throw new Error('所选路径不是文件或目录')
   if (action === 'open-file') {
     const error = await shell.openPath(file)
     if (error) throw new Error('无法打开文件，请检查文件的默认打开方式后重试')

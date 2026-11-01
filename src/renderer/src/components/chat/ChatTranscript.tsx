@@ -9,7 +9,6 @@ import { CopyMessageButton } from './CopyMessageButton'
 import { DeleteRoundButton } from './DeleteRoundButton'
 import { RoundChanges } from './RoundChanges'
 import { RoundActivity } from './RoundActivity'
-import { ChatMarkdown } from './ChatMarkdown'
 import { roundChangesKey, useRoundChanges } from '../../hooks/useRoundChanges'
 import { TranscriptProvider, TranscriptScope, TranscriptState } from './TranscriptState'
 import { navigateTranscript } from './transcript-navigation'
@@ -95,6 +94,9 @@ const listComponents = { List: MessageList }
 export const ChatTranscript = memo(function ChatTranscript(props: ChatTranscriptProps): React.JSX.Element {
   const { messages, snapshots = NO_SNAPSHOTS, pendingMessage, streamedText = '', isBusy, execution, active = true } = props
   const [store] = useState(() => new TranscriptState())
+  const deleteRoundRef = useRef(props.onDeleteRound)
+  deleteRoundRef.current = props.onDeleteRound
+  const deleteRound = useCallback((index: number) => deleteRoundRef.current!(index), [])
   const [position, setPosition] = useState<MutableRefObject<ReadingPosition>>(() => ({ current: { offset: 0, follow: true } }))
   const navigationTarget = useRef<string | null>(null)
   const messageKeys = useRef(new WeakMap<ChatMessage, string>())
@@ -141,7 +143,8 @@ export const ChatTranscript = memo(function ChatTranscript(props: ChatTranscript
   }, [messages, snapshots])
   useLayoutEffect(() => { previousGroups.current = groups }, [groups])
 
-  const hasStream = Boolean(streamedText || isBusy && !messages.slice(execution?.firstMessage ?? messages.length).some(message => message.role === 'assistant'))
+  const hasActiveAssistant = Boolean(isBusy && execution && groups.some(row => row.messages[0]?.role === 'assistant' && row.index + row.messages.length > execution.firstMessage))
+  const hasStream = !hasActiveAssistant && Boolean(streamedText || isBusy)
   const rows = useMemo(() => {
     if (!pendingMessage && !hasStream) return groups
     const rows = [...groups]
@@ -166,9 +169,16 @@ export const ChatTranscript = memo(function ChatTranscript(props: ChatTranscript
   useLayoutEffect(() => {
     const previous = previousMessages.current
     previousMessages.current = messages
-    const replaced = messages.length < previous.length || messages.some((message, index) => {
-      const old = previous[index]
-      return old && (old.role !== message.role || old.historyId !== message.historyId || old.execution?.roundId !== message.execution?.roundId || Boolean(old.content && !message.content.startsWith(old.content)))
+    // 临时思考和工具记录会在每次模型调用之间出现、消失或转为正式历史，
+    // 不能将这些正常的流式更新当作历史替换，否则会反复卸载整个列表。
+    const durable = (items: ChatMessage[]): ChatMessage[] => items.filter(message => !message.historyId?.startsWith('live:') && !message.historyId?.startsWith('live-thinking:'))
+    const oldHistory = durable(previous)
+    const newHistory = durable(messages)
+    const replaced = newHistory.length < oldHistory.length || newHistory.some((message, index) => {
+      const old = oldHistory[index]
+      if (!old) return false
+      if (old.historyId && message.historyId) return old.historyId !== message.historyId || old.role !== message.role
+      return old.role !== message.role || old.execution?.roundId !== message.execution?.roundId || Boolean(old.content && !message.content.startsWith(old.content))
     })
     if (replaced) {
       const oldRows = previousRows.current
@@ -196,7 +206,7 @@ export const ChatTranscript = memo(function ChatTranscript(props: ChatTranscript
   }, [messages, rows, store, position, props.notificationNavigationRequest])
 
   return <TranscriptProvider key={revision} store={store} active={active}>
-    {active && (rows.length ? <VirtualTranscript {...props} rows={rows} position={position} navigationTarget={navigationTarget} lastLatestRequest={lastLatestRequest} lastNotificationRequest={lastNotificationRequest} changes={changes} onRange={setRange} onVisible={setVisible} />
+    {active && (rows.length ? <VirtualTranscript {...props} onDeleteRound={props.onDeleteRound ? deleteRound : undefined} rows={rows} position={position} navigationTarget={navigationTarget} lastLatestRequest={lastLatestRequest} lastNotificationRequest={lastNotificationRequest} changes={changes} onRange={setRange} onVisible={setVisible} />
       : <div className="chat-scroll"><div className="chat-welcome">
         <div className="welcome-brand">
           <div className="welcome-mark"><img src="./icons/app-icon.png" alt="" draggable={false} /></div>
@@ -563,8 +573,14 @@ function VirtualTranscript({ rows, position, navigationTarget, lastLatestRequest
     else scheduleMeasure()
   }, [scheduleMeasure, initial.follow])
   const handleHeightChange = useCallback((): void => {
-    // 流式内容增长不一定增加条目数，也需要在跟随模式下贴住底部。
-    if (initialized.current && followLatest.current) list.current?.scrollToIndex({ index: 'LAST', align: 'end', behavior: 'auto' })
+    // 高度变化可能由虚拟列表自己的测量产生；反复 scrollToIndex 会与其高度校正互相触发。
+    // 贴底时直接修正滚动容器，并标记为程序滚动，避免内容收起时被误判为用户向上滚动。
+    const el = scroll.current
+    if (el && initialized.current && followLatest.current) {
+      el.scrollTop = el.scrollHeight
+      correctedScrollTop.current = el.scrollTop
+      lastScrollTop.current = el.scrollTop
+    }
     scheduleMeasure()
   }, [scheduleMeasure])
 
@@ -586,16 +602,17 @@ function VirtualTranscript({ rows, position, navigationTarget, lastLatestRequest
     onScroll={handleScroll} rangeChanged={range => { onRange(range); scheduleMeasure() }} totalListHeightChanged={handleHeightChange}
     itemContent={(_, row) => <TranscriptScope id={row.key}>
       <div className={`chat-virtual-row ${row.messages[0]?.role ?? 'assistant'}`} data-transcript-key={row.key}>
-        {row.kind === 'stream' ? <article className="chat-message assistant" aria-label="正在生成的回复" aria-live="polite">{!activeAssistantKey && <RoundActivity messages={[]} execution={execution} startedAt={execution?.startedAt} status={activeStatus} initiallyOpen={false} busy />}{streamedText && <ChatMarkdown project={project} content={streamedText} />}</article>
-          : <TranscriptMessage row={row} project={project} isBusy={isBusy} execution={row.key === activeAssistantKey ? execution : undefined} activeStatus={activeStatus} changes={changes} settingsDisabled={settingsDisabled} onDeleteRound={onDeleteRound} deletingRound={deletingRound} />}
+        {row.kind === 'stream' ? <article className="chat-message assistant" aria-label="正在生成的回复" aria-live="polite"><RoundActivity project={project} messages={streamedText ? [{ role: 'assistant', content: streamedText }] : []} execution={execution} startedAt={execution?.startedAt} status={activeStatus} busy /></article>
+          : <TranscriptMessage row={row} project={project} isBusy={isBusy} execution={row.key === activeAssistantKey ? execution : undefined} streamedText={row.key === activeAssistantKey ? streamedText : ''} activeStatus={activeStatus} changes={changes} settingsDisabled={settingsDisabled} onDeleteRound={onDeleteRound} deletingRound={deletingRound} />}
         {row.kind === 'pending' && !isBusy && <div className="thinking" role="status"><span className="busy-dot" />正在等待模型回复…</div>}
       </div>
     </TranscriptScope>} />
   </div>
 }
 
-const TranscriptMessage = memo(function TranscriptMessage({ row, project, isBusy, execution, activeStatus, changes, settingsDisabled, onDeleteRound, deletingRound }: {
+const TranscriptMessage = memo(function TranscriptMessage({ row, project, isBusy, execution, streamedText, activeStatus, changes, settingsDisabled, onDeleteRound, deletingRound }: {
   row: TranscriptRow
+  streamedText?: string
   project?: string | null
   isBusy?: boolean
   execution?: ChatTranscriptProps['execution']
@@ -607,8 +624,16 @@ const TranscriptMessage = memo(function TranscriptMessage({ row, project, isBusy
 }): React.JSX.Element {
   const message = row.messages[0]
   const busy = Boolean(isBusy && execution && row.index + row.messages.length > execution.firstMessage)
+  const latest = row.messages.at(-1)
+  // 实时思考快照和流式文本来自同一次调用，合并展示，不能凭空追加一个调用。
+  const liveSnapshot = latest?.historyId?.startsWith('live-thinking:')
+  const activityMessages = busy && streamedText
+    ? liveSnapshot && latest
+      ? [...row.messages.slice(0, -1), { ...latest, content: streamedText.startsWith(latest.content) ? streamedText : latest.content }]
+      : [...row.messages, { role: 'assistant' as const, content: streamedText }]
+    : row.messages
   return <article className={`chat-message ${message.role}`} data-round-index={row.roundIndex}>
-    {message.role === 'assistant' && <RoundActivity project={project} messages={row.messages} busy={busy} execution={busy ? execution : row.messages.at(-1)?.execution} startedAt={busy ? execution?.startedAt : undefined} status={busy ? activeStatus : undefined} />}
+    {message.role === 'assistant' && <RoundActivity project={project} messages={activityMessages} busy={busy} execution={busy ? execution : row.messages.at(-1)?.execution} startedAt={busy ? execution?.startedAt : undefined} status={busy ? activeStatus : undefined} />}
     {Boolean(message.images?.length) && <ChatImages images={message.images!} />}
     {message.role === 'user' && message.content && <p>{bubbleText(message.content)}</p>}
     {message.role === 'user' && <div className="message-actions">
@@ -621,7 +646,7 @@ const TranscriptMessage = memo(function TranscriptMessage({ row, project, isBusy
     })}
   </article>
 }, (previous, next) => previous.row === next.row && previous.project === next.project && previous.isBusy === next.isBusy
-  && previous.execution === next.execution
+  && previous.streamedText === next.streamedText && previous.execution === next.execution
   && previous.onDeleteRound === next.onDeleteRound && previous.deletingRound === next.deletingRound
   && previous.settingsDisabled === next.settingsDisabled
   && (!(next.isBusy && next.execution && next.row.index + next.row.messages.length > next.execution.firstMessage)

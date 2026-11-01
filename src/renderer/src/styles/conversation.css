@@ -23,6 +23,7 @@
 .tool-approval-summary strong { display: block; font-weight: 500; overflow-wrap: anywhere; }
 .tool-approval-summary small { display: block; color: var(--muted); font-size: calc(12rem / 14); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tool-approval-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.tool-approval-actions .tool-approval-repeat { align-self: center; margin: 0 8px 0 0; }
 .tool-approval-actions .ui-button { min-height: calc(30rem / 14); padding: 5px 10px; font-size: calc(12rem / 14); }
 .tool-approval-actions .tool-approval-details { border: 0; color: var(--muted); background: transparent; }
 .tool-approval-actions .tool-approval-approve { border-color: transparent; background: var(--accent); color: var(--accent-foreground); }
@@ -37,6 +38,12 @@
 .tool-approval-file-title > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tool-approval-ai-badge { display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0; padding: 2px 5px; border: 1px solid var(--border); border-radius: 5px; color: var(--muted); background: var(--hover); font-size: calc(10rem / 14); font-weight: 500; line-height: 1.2; vertical-align: middle; }
 .tool-approval-ai-badge > svg { flex-shrink: 0; }
+.ai-review-reasons { font-size: calc(12rem / 14); line-height: 1.5; color: var(--text); overflow-wrap: anywhere; }
+.ai-review-reason { display: flex; flex-wrap: wrap; column-gap: 3px; }
+.ai-review-reason > span:first-child { font-weight: 500; }
+.chat-work-item > .ai-review-reasons { margin: 2px 24px 6px 30px; }
+.tool-approval-summary .ai-review-reasons { margin-top: 3px; }
+.command-approval-body > .ai-review-reasons, .tool-approval-file-body > .ai-review-reasons { margin: 8px 12px; }
 .tool-approval-summary strong > .tool-approval-ai-badge { margin-left: 7px; }
 .tool-approval-preview .modal-close { top: 17px; right: 17px; border-radius: 6px; }
 .tool-approval-preview .modal-description { margin: 0; padding: 0 56px 17px 52px; font-size: calc(12rem / 14); line-height: 1.5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -566,10 +573,12 @@ button.chat-round-dot:focus-visible { outline: 1px solid var(--accent); outline-
   background: none;
   border: 0;
   width: 100%;
-  height: 1.8em;
-  min-height: 0;
+  /* Electron 的 Chromium 支持原生内容定高；不再折叠正在组合输入的控件来测量高度。 */
+  field-sizing: content;
+  height: auto;
+  min-height: 1.8em;
   max-height: 14.4em;
-  overflow-y: hidden;
+  overflow-y: auto;
   border-radius: 0;
   box-shadow: none;
   padding: 0;
@@ -581,12 +590,6 @@ button.chat-round-dot:focus-visible { outline: 1px solid var(--accent); outline-
 .composer textarea:focus-visible {
   outline: 0;
   box-shadow: none;
-}
-
-/* 空输入时的占位提示只是界面语言，框选输入区时不应被选中；有内容时仍可正常选中文本。 */
-.composer textarea:placeholder-shown {
-  -webkit-user-select: none;
-  user-select: none;
 }
 
 .chat-images {

@@ -26,8 +26,8 @@ export function literalCommand(command: string): string[] | undefined {
     if (!closed || (quote && index < source.length && !/[ \t]/.test(source[index]))) return undefined
     // 逗号数组只支持查询显示中的静态属性名，不能将一般 Shell 数组当作单个参数。
     if (!quote && value.includes(',') && !(process.platform === 'win32'
-      && (/^(?:select-object|select|format-table|ft|format-list|fl)$/i.test(tokens[0] ?? '')
-        && /^[a-z_][\w.-]*(?:,[a-z_][\w.-]*)+$/i.test(value)
+      && (/^(?:select-object|select|format-table|ft|format-list|fl|get-command|gcm)$/i.test(tokens[0] ?? '')
+        && /^[a-z_][\w.-]*(?:,[a-z_][\w.-]*)*,?$/i.test(value)
         || /^(?:select-string|sls)$/i.test(tokens[0] ?? '') && tokens.at(-1)?.toLowerCase() === '-context'
         && /^\d+,\d+$/.test(value)))) return undefined
     // npm 的 scoped 包名及 package@version 是字面量；其他 @ 前缀仍可能是 PowerShell splatting。

@@ -76,9 +76,10 @@ const brands: ModelBrand[] = [
   { pattern: /gpt|chatgpt|codex|(?:^|[/])o[134](?:[-:/]|$)/i, label: 'OpenAI', icon: openai },
 ]
 const providers: Partial<Record<ProviderId, ModelIconEntry>> = {
+  google: { label: 'Google AI Studio', icon: gemini },
   openai: { label: 'OpenAI', icon: openai }, chatgpt: { label: 'OpenAI', icon: openai },
   anthropic: { label: 'Claude', icon: claude }, deepseek: { label: 'DeepSeek', icon: deepseek },
-  ollama: { label: 'Ollama', icon: ollama },
+  ollama: { label: 'Ollama', icon: ollama }, openrouter: { label: 'OpenRouter', icon: openrouter },
 }
 
 export function ModelIcon({ model, provider, size = 15 }: { model?: string; provider?: ProviderId; size?: number }): React.JSX.Element {

@@ -14,14 +14,19 @@ import { unwrapModelResult } from './model-result'
 import { ChatgptAuthorization } from './components/ChatgptAuthorization'
 import { OpenrouterCatalog } from './components/OpenrouterCatalog'
 import { ModelPriceTag } from './components/ModelPriceTag'
+import { deepseekPricing } from '../../shared/model-pricing'
+import { DEEPSEEK_BASE_URL, DEEPSEEK_DEFAULT_OUTPUT_TOKENS, deepseekModelInfo } from '../../shared/deepseek'
 import { callableOpenrouterModels, defaultOpenrouterMaxTokens } from '../../shared/openrouter'
 import { automaticOutputTokens, systemOutputTokens } from '../../shared/output-tokens'
+import { googleDocumentedModel, googleModelProfile } from '../../shared/google'
+import { ApiProviderConnection } from './components/ApiProviderConnection'
 import { PagedList } from './components/PagedList'
 
 function newProfile(provider: ProviderId): ModelProfile {
   const preset = PROVIDER_PRESETS.find(item => item.id === provider)!
   return { id: crypto.randomUUID(), name: preset.label, provider, protocol: preset.protocol, baseUrl: preset.baseUrl,
-    model: '', temperature: null, maxTokens: provider === 'openrouter' ? defaultOpenrouterMaxTokens() : 2048, ...(provider === 'openrouter' ? { autoMaxTokens: true } : {}), tokenParameter: provider === 'openai' ? 'max_completion_tokens' : 'max_tokens', timeoutSeconds: provider === 'openrouter' ? 120 : 60 }
+    model: provider === 'deepseek' ? 'deepseek-flash' : '', temperature: null, maxTokens: provider === 'deepseek' ? DEEPSEEK_DEFAULT_OUTPUT_TOKENS : provider === 'openrouter' || provider === 'google' ? defaultOpenrouterMaxTokens() : 2048, ...(provider === 'openrouter' ? { autoMaxTokens: true } : {}), tokenParameter: provider === 'openai' ? 'max_completion_tokens' : 'max_tokens',
+    timeoutSeconds: provider === 'openrouter' || provider === 'google' || provider === 'ollama' || provider === 'deepseek' ? 120 : 60 }
 }
 function providerName(provider: ProviderId): string { return PROVIDER_PRESETS.find(item => item.id === provider)!.label }
 const PROFILE_EDIT_FIELDS = ['name', 'provider', 'protocol', 'baseUrl', 'model', 'temperature', 'maxTokens', 'autoMaxTokens', 'tokenParameter', 'timeoutSeconds', 'contextTokens', 'thinking', 'thinkingLevel', 'ollamaThinkingLevel'] as const
@@ -35,7 +40,7 @@ interface Props { settings: ModelSettings; onChange(settings: ModelSettings): vo
 export default function ModelSettingsPanel({ settings, onChange, onBusyChange }: Props): React.JSX.Element {
   const [selected, setSelected] = useState<ProviderId | null>(() => {
     const available = new Set([...settings.profiles.map(item => item.provider), ...(settings.providers ?? []).map(item => item.provider)])
-    return (['openrouter', 'ollama', 'chatgpt'] as const).find(provider => available.has(provider)) ?? null
+    return (['openrouter', 'google', 'ollama', 'chatgpt'] as const).find(provider => available.has(provider)) ?? null
   })
   const [profile, setProfile] = useState<ModelProfile>(() => newProfile('ollama'))
   const [dialog, setDialog] = useState<'choose' | 'configure' | null>(null)
@@ -50,6 +55,10 @@ export default function ModelSettingsPanel({ settings, onChange, onBusyChange }:
   const [notice, setNotice] = useState('')
   const [ollamaUrl, setOllamaUrl] = useState('http://localhost:11434')
   const openrouterConnection = settings.providers?.find(item => item.provider === 'openrouter')
+  const googleConnection = settings.providers?.find(item => item.provider === 'google')
+  const deepseekConnection = settings.providers?.find(item => item.provider === 'deepseek')
+  const googleProfileIds = useRef(new Map<string, string>())
+  const deepseekProfileIds = useRef(new Map<string, string>())
   const [modelInfo, setModelInfo] = useState<ModelDescriptor | null>(null)
   const [infoLoading, setInfoLoading] = useState(false)
   const [infoError, setInfoError] = useState('')
@@ -67,27 +76,63 @@ export default function ModelSettingsPanel({ settings, onChange, onBusyChange }:
   const providers = [...new Set([...settings.profiles.map(item => item.provider), ...(settings.providers ?? []).map(item => item.provider)])]
   const ollamaConnection = settings.providers?.find(item => item.provider === 'ollama')
   const currentOllamaUrl = ollamaConnection?.baseUrl ?? settings.profiles.find(item => item.provider === 'ollama')?.baseUrl ?? 'http://localhost:11434'
-  const preferredProvider = (['openrouter', 'ollama', 'chatgpt'] as const).find(provider => providers.includes(provider))
+  const preferredProvider = (['openrouter', 'google', 'ollama', 'chatgpt'] as const).find(provider => providers.includes(provider))
   const currentProvider = selected && providers.includes(selected) ? selected : preferredProvider ?? providers[0] ?? null
-  const models = settings.profiles.filter(item => item.provider === currentProvider)
+  const savedModels = settings.profiles.filter(item => item.provider === currentProvider)
+  const models: ModelProfileView[] = currentProvider === 'google' ? [
+    ...(googleConnection?.models ?? []).map(model => {
+      const saved = savedModels.find(item => item.model === model.id)
+      if (saved) return saved
+      let id = googleProfileIds.current.get(model.id)
+      if (!id) { id = crypto.randomUUID(); googleProfileIds.current.set(model.id, id) }
+      return { ...googleModelProfile(model, id), hasApiKey: Boolean(googleConnection?.hasApiKey), available: googleDocumentedModel(model.id) }
+    }),
+    ...savedModels.filter(item => !googleConnection?.models.some(model => model.id === item.model))
+  ] : currentProvider === 'deepseek' && deepseekConnection ? [
+    ...deepseekConnection.models.map(model => {
+      const saved = savedModels.find(item => item.model === model.id && item.baseUrl === deepseekConnection.baseUrl)
+      if (saved) return saved
+      let id = deepseekProfileIds.current.get(model.id)
+      if (!id) { id = crypto.randomUUID(); deepseekProfileIds.current.set(model.id, id) }
+      return { ...newProfile('deepseek'), id, name: model.id, model: model.id, enabled: false, hasApiKey: Boolean(deepseekConnection.hasApiKey), available: true }
+    }),
+    ...savedModels.filter(item => item.baseUrl !== deepseekConnection.baseUrl || !deepseekConnection.models.some(model => model.id === item.model))
+  ] : savedModels
   const shownModelCount = currentProvider === 'openrouter' ? new Set([...callableOpenrouterModels(openrouterConnection?.models ?? []).map(item => item.id), ...models.map(item => item.model)]).size : models.length
   const descriptors = new Map<string, ModelDescriptor>()
   for (const connection of settings.providers ?? []) for (const model of connection.models) descriptors.set(`${connection.provider}:${model.id}`, model)
+  for (const item of settings.profiles) if (item.provider === 'deepseek' && item.baseUrl === 'https://api.deepseek.com/v1' && !descriptors.has(`deepseek:${item.model}`)) {
+    descriptors.set(`deepseek:${item.model}`, { id: item.model, capabilities: [], maxContextTokens: null, ...deepseekModelInfo(item.model), pricing: deepseekPricing(item.model) })
+  }
   /** 只展示模型真正支持的推理档位，避免给不支持推理的模型显示误导性标签。 */
   const modelThinkingLabel = (item: ModelProfileView): string | null => {
     const controls = descriptors.get(`${item.provider}:${item.model}`)?.thinking
     if (!controls?.values.some(value => value !== false && value !== 'off')) return null
     return thinkingLabel(selectedModelThinking(item, controls))
   }
+  // 进入供应商列表时记录启用状态；操作开关只更新状态，不改变当前位置。
+  const sortSnapshot = useRef<{ provider: ProviderId | null; enabled: Map<string, boolean> }>({ provider: null, enabled: new Map() })
+  if (sortSnapshot.current.provider !== currentProvider) sortSnapshot.current = { provider: currentProvider, enabled: new Map() }
+  const modelKey = (item: ModelProfileView): string => `${item.baseUrl}\0${item.model}`
+  for (const item of models) if (!sortSnapshot.current.enabled.has(modelKey(item))) sortSnapshot.current.enabled.set(modelKey(item), item.enabled !== false)
   const filteredModels = models
     .filter(item => `${item.name} ${item.model}`.toLowerCase().includes(query.trim().toLowerCase()))
-    .sort((a, b) => Number(a.enabled === false) - Number(b.enabled === false)
+    .sort((a, b) => Number(a.available === false) - Number(b.available === false)
+      || Number(!sortSnapshot.current.enabled.get(modelKey(a))) - Number(!sortSnapshot.current.enabled.get(modelKey(b)))
       || b.name.localeCompare(a.name, 'zh-CN', { numeric: true, sensitivity: 'base' }))
-  const options = (['chatgpt', 'ollama', 'openrouter'] as const).filter(provider => `${providerName(provider)} ${provider === 'chatgpt' ? '订阅 OpenAI ChatGPT' : provider === 'ollama' ? '本地' : 'API 云端 多厂家模型'}`.toLowerCase().includes(providerQuery.trim().toLowerCase()))
+  const options = (['chatgpt', 'ollama', 'openrouter', 'google', 'deepseek'] as const).filter(provider => `${providerName(provider)} ${provider === 'chatgpt' ? '订阅 OpenAI ChatGPT' : provider === 'ollama' ? '本地' : provider === 'google' ? 'Gemini 谷歌 API 云端' : provider === 'deepseek' ? '深度求索 官方 API' : 'API 云端 多厂家模型'}`.toLowerCase().includes(providerQuery.trim().toLowerCase()))
   const subscription = profile.provider === 'chatgpt' && !editing
   const connectingOllama = dialog === 'configure' && profile.provider === 'ollama' && !editing
   const connectingOpenrouter = dialog === 'configure' && profile.provider === 'openrouter' && !editing
+  const connectingGoogle = dialog === 'configure' && profile.provider === 'google' && !editing
+  const connectingDeepseek = dialog === 'configure' && profile.provider === 'deepseek' && !editing
   useEffect(() => {
+    if (profile.provider === 'deepseek' && dialog === 'configure' && editing) {
+      setModelInfo(deepseekConnection?.models.find(item => item.id === profile.model && profile.baseUrl === deepseekConnection.baseUrl) ?? (profile.baseUrl === DEEPSEEK_BASE_URL ? { id: profile.model, capabilities: [], maxContextTokens: null, ...deepseekModelInfo(profile.model), pricing: deepseekPricing(profile.model) } : null)); setInfoError(''); setInfoLoading(false); return
+    }
+    if (profile.provider === 'google' && dialog === 'configure' && editing) {
+      setModelInfo(googleConnection?.models.find(item => item.id === profile.model) ?? null); setInfoError(''); setInfoLoading(false); return
+    }
     if (dialog !== 'configure' || !editing || !['ollama', 'chatgpt', 'openrouter'].includes(profile.provider)) { setModelInfo(null); setInfoError(''); setInfoLoading(false); return }
     if (profile.provider === 'openrouter') {
       const cached = openrouterConnection?.models.find(item => item.id === profile.model)
@@ -134,13 +179,14 @@ export default function ModelSettingsPanel({ settings, onChange, onBusyChange }:
     if (profile.contextTokens != null && modelInfo?.maxContextTokens != null && profile.contextTokens > modelInfo.maxContextTokens) throw new Error('上下文上限不能超过模型支持的最大上下文')
     const contextTokens = profile.contextTokens ?? modelInfo?.maxContextTokens
     const normalizedProfile = { ...profile,
+      name: profile.provider === 'deepseek' ? profile.model.trim() : profile.name,
       contextTokens: contextTokens == null ? null : Math.floor(contextTokens / 1000) * 1000,
-      temperature: profile.provider === 'chatgpt' || (profile.provider === 'openrouter' && profile.temperature === null) ? null : Math.floor(profile.temperature ?? 1),
+      temperature: profile.provider === 'chatgpt' || (['openrouter', 'google', 'deepseek'].includes(profile.provider) && profile.temperature === null) ? null : Math.floor(profile.temperature ?? 1),
       maxTokens: systemOutputTokens(profile.provider) ? automaticOutputTokens({ ...profile, contextTokens: contextTokens == null ? null : Math.floor(contextTokens / 1000) * 1000 }, modelInfo) : Math.floor(profile.maxTokens ?? 2048),
       ...(systemOutputTokens(profile.provider) ? { autoMaxTokens: true } : {}),
-      timeoutSeconds: Math.floor(profile.timeoutSeconds ?? (profile.provider === 'ollama' ? 120 : 60)) }
+      timeoutSeconds: Math.floor(profile.timeoutSeconds ?? (profile.provider === 'ollama' || profile.provider === 'google' ? 120 : 60)) }
     const selected = selectedModelThinking(profile, modelInfo?.thinking)
-    if (profile.provider === 'chatgpt' || profile.provider === 'openrouter') {
+    if (profile.provider === 'chatgpt' || profile.provider === 'openrouter' || profile.provider === 'google' || profile.provider === 'deepseek') {
       normalizedProfile.thinkingLevel = typeof selected === 'string' ? selected as ModelProfile['thinkingLevel'] : null
       normalizedProfile.thinking = null
     } else if (profile.provider === 'ollama') {
@@ -168,6 +214,20 @@ export default function ModelSettingsPanel({ settings, onChange, onBusyChange }:
     const next = unwrapModelResult(await window.piRunner.connectOpenrouter(refresh ? undefined : apiKey.trim()))
     onChange(next); setSelected('openrouter'); setQuery(''); setApiKey('')
     if (!refresh) setDialog(null)
+  }) }
+  const connectGoogle = (refresh = false): void => { void run(async () => {
+    const next = unwrapModelResult(await window.piRunner.connectGoogle(refresh ? undefined : apiKey.trim()))
+    onChange(next); setSelected('google'); setQuery(''); setApiKey('')
+    if (!refresh) setDialog(null)
+    const count = next.providers?.find(item => item.provider === 'google')?.models.length ?? 0
+    setNotice(count ? `已读取 ${count} 个 Google 模型，请启用需要的模型。` : '已连接 Google AI Studio，但未发现支持工具调用的通用 Gemini 模型。请检查密钥项目和地区权限后刷新。')
+  }) }
+  const connectDeepseek = (refresh = false): void => { void run(async () => {
+    const next = unwrapModelResult(await window.piRunner.connectDeepseek(refresh ? undefined : apiKey.trim()))
+    onChange(next); setSelected('deepseek'); setQuery(''); setApiKey('')
+    if (!refresh) setDialog(null)
+    const count = next.providers?.find(item => item.provider === 'deepseek')?.models.length ?? 0
+    setNotice(`已读取 ${count} 个 DeepSeek 官方模型，请启用需要的模型。`)
   }) }
   const toggleModel = (item: ModelProfileView): void => { void run(async () => {
     const next = unwrapModelResult(await window.piRunner.saveModelProfile({ profile: { ...item, enabled: item.enabled === false }, credential: { action: 'keep' } }))
@@ -202,7 +262,7 @@ export default function ModelSettingsPanel({ settings, onChange, onBusyChange }:
     <div className="provider-workspace">
       <aside className="provider-sidebar" aria-label="已配置的模型供应商">
         <p className="provider-sidebar-label">已配置的供应商</p>
-        <nav aria-label="供应商列表">{providers.map(provider => { const count = settings.profiles.filter(item => item.provider === provider).length; return <Button key={provider} variant="ghost" disabled={isBusy} className="provider-nav-item" aria-current={provider === currentProvider ? 'page' : undefined} onClick={() => { setSelected(provider); setQuery(''); setError(''); setNotice('') }}>
+        <nav aria-label="供应商列表">{providers.map(provider => { const count = provider === 'google' ? new Set([...(googleConnection?.models.map(model => model.id) ?? []), ...settings.profiles.filter(item => item.provider === 'google').map(item => item.model)]).size : provider === 'deepseek' ? new Set([...(deepseekConnection?.models.map(model => model.id) ?? []), ...settings.profiles.filter(item => item.provider === 'deepseek').map(item => item.model)]).size : settings.profiles.filter(item => item.provider === provider).length; return <Button key={provider} variant="ghost" disabled={isBusy} className="provider-nav-item" aria-current={provider === currentProvider ? 'page' : undefined} onClick={() => { setSelected(provider); setQuery(''); setError(''); setNotice('') }}>
           <ProviderIcon provider={provider} /><span className="provider-nav-name">{providerName(provider)}</span><Tooltip><TooltipTrigger asChild><small aria-label={`${count} 个模型`}>{count}</small></TooltipTrigger><TooltipContent>{count} 个模型</TooltipContent></Tooltip>
         </Button> })}</nav>
         {!providers.length && <p className="hint provider-sidebar-empty">添加供应商后，将在这里显示。</p>}
@@ -212,17 +272,24 @@ export default function ModelSettingsPanel({ settings, onChange, onBusyChange }:
         {currentProvider ? <>
           <header className="provider-detail-heading"><ProviderIcon provider={currentProvider} /><div><h3>{providerName(currentProvider)}</h3><p>{currentProvider === 'ollama' ? '本地服务 · Ollama' : currentProvider === 'chatgpt' ? 'ChatGPT 订阅账号' : 'API 配置'}</p></div><span className="provider-badge">已配置</span></header>
           <div className="provider-connection-summary"><span>连接方式</span><strong>{currentProvider === 'ollama' ? currentOllamaUrl : currentProvider === 'chatgpt' ? '浏览器授权' : 'API 连接'}</strong>{currentProvider === 'ollama' && <Button size="sm" variant="ghost" disabled={isBusy} onClick={() => configure('ollama')}>配置连接</Button>}<p>每个模型的上下文与生成参数独立保存。</p>{currentProvider === 'chatgpt' && !dialog && <ChatgptAuthorization onChange={onChange} />}</div>
-          {currentProvider === 'openrouter' && <div className="openrouter-connection"><span className="hint">API Key {openrouterConnection?.hasApiKey ? '已加密保存 · 所有模型共用' : '未配置'}</span><Button size="sm" variant="ghost" disabled={isBusy} onClick={() => configure('openrouter')}>配置连接</Button><Button size="sm" variant="outline" disabled={isBusy} onClick={() => connectOpenrouter(true)}><RefreshCw size={14} />刷新模型</Button></div>}
+          {currentProvider === 'openrouter' && <div className="openrouter-connection"><span className="hint">API Key {openrouterConnection?.hasApiKey ? '已加密保存 · 所有模型共用' : '未配置'}</span><Button variant="outline" disabled={isBusy} onClick={() => configure('openrouter')}>配置连接</Button><Button variant="outline" disabled={isBusy} onClick={() => connectOpenrouter(true)}><RefreshCw size={15} />刷新模型</Button></div>}
+          {currentProvider === 'google' && <div className="openrouter-connection"><span className="hint">API Key {googleConnection?.hasApiKey ? '已加密保存 · 所有模型共用' : '未配置'}</span><Button variant="outline" disabled={isBusy} onClick={() => configure('google')}>配置连接</Button><Button variant="outline" disabled={isBusy} onClick={() => connectGoogle(true)}><RefreshCw size={15} />刷新模型</Button></div>}
+          {currentProvider === 'deepseek' && <div className="openrouter-connection"><span className="hint">供应商 API Key {deepseekConnection?.hasApiKey ? '已加密保存 · 默认供模型共用' : '未配置'}</span><Button variant="outline" disabled={isBusy} onClick={() => configure('deepseek')}>配置连接</Button><Button variant="outline" disabled={isBusy || !deepseekConnection?.hasApiKey} onClick={() => connectDeepseek(true)}><RefreshCw size={15} />刷新模型</Button></div>}
           <div className="provider-model-toolbar"><div><h4>模型 <span>{shownModelCount}</span></h4><p>启用需要的模型，默认模型可在通用设置中选择。</p></div>{currentProvider === 'ollama' && <Button size="sm" variant="outline" disabled={isBusy} onClick={() => connectOllama(currentOllamaUrl)}><RefreshCw size={14} />刷新模型</Button>}</div>
           <div className="search-field provider-model-search"><Search size={15} /><Input aria-label="搜索模型" placeholder="搜索模型名称或 ID" value={query} onChange={event => setQuery(event.target.value)} /></div>
-          {currentProvider === 'openrouter' ? <><p className="hint">展示所有支持文字输出和工具调用的模型。已启用模型按名称排序，未启用模型按厂商分组，默认收起。</p><OpenrouterCatalog settings={settings} query={query} busy={isBusy} getThinkingLabel={modelThinkingLabel} onConfigure={item => configure('openrouter', item)} onToggle={toggleModel} /></> : <><PagedList items={filteredModels} label="供应商模型" resetKey={`${currentProvider}:${query}`}>{page => <ul className="provider-model-list">{page.map(item => { const thinking = modelThinkingLabel(item); return <li key={item.id}>
-            <ProviderIcon provider={item.provider} model={item.model} /><div className="provider-model-name model-priced-name" title={item.available === false ? `${item.name}（当前不可用）` : item.enabled === false ? `${item.name}（已停用）` : item.name}><strong>{item.name}{item.available === false ? ' · 当前不可用' : ''}</strong><ModelPriceTag descriptor={descriptors.get(`${item.provider}:${item.model}`)} /></div>
+          {currentProvider === 'openrouter' ? <><p className="hint">展示所有支持文字输出和工具调用的模型。已启用模型按名称排序，未启用模型按厂商分组，默认收起。</p><OpenrouterCatalog settings={settings} query={query} busy={isBusy} getThinkingLabel={modelThinkingLabel} onConfigure={item => configure('openrouter', item)} onToggle={toggleModel} /></> : <>{(currentProvider === 'google' ? [
+            { label: '可用', items: filteredModels.filter(item => item.available !== false) },
+            { label: '不可用', items: filteredModels.filter(item => item.available === false) }
+          ] : [{ label: '供应商模型', items: filteredModels }]).map(group => <section key={group.label} aria-label={`${group.label}模型`}>
+          {currentProvider === 'google' && <h5 className="openrouter-section-heading">{group.label} <span>{group.items.length}</span></h5>}
+          <PagedList items={group.items} label={`${group.label}模型`} resetKey={`${currentProvider}:${query}`}>{page => <ul className="provider-model-list">{page.map(item => { const thinking = modelThinkingLabel(item); return <li key={item.id}>
+            <ProviderIcon provider={item.provider} model={item.model} /><div className="provider-model-name model-priced-name" title={item.available === false ? `${item.name}（当前不可用）` : item.enabled === false ? `${item.name}（已停用）` : item.name}><strong>{item.name}{item.available === false && item.provider !== 'google' ? ' · 当前不可用' : ''}</strong><ModelPriceTag descriptor={descriptors.get(`${item.provider}:${item.model}`)} /></div>
             <div className="provider-model-actions">{thinking && <Tooltip><TooltipTrigger asChild><span className="provider-model-thinking">{thinking}</span></TooltipTrigger><TooltipContent>当前推理强度：{thinking}</TooltipContent></Tooltip>}<Tooltip><TooltipTrigger asChild><span className="inline-flex" tabIndex={isBusy ? 0 : undefined}><Button size="icon" variant="ghost" disabled={isBusy} aria-label={`配置 ${item.name}`} onClick={() => configure(item.provider, item)}><SlidersHorizontal size={16} /></Button></span></TooltipTrigger><TooltipContent>模型高级设置</TooltipContent></Tooltip>
-              <Switch aria-label={`启用 ${item.name}`} checked={item.enabled !== false} disabled={isBusy || item.available === false} onCheckedChange={() => toggleModel(item)} /></div>
-          </li> })}</ul>}</PagedList>
+              <Switch aria-label={`启用 ${item.name}`} checked={item.enabled !== false && item.available !== false} disabled={isBusy || item.available === false} onCheckedChange={() => toggleModel(item)} /></div>
+          </li> })}</ul>}</PagedList></section>)}
           {!filteredModels.length && <p className="provider-no-results">{query ? '没有匹配的模型，请尝试其他关键词。' : currentProvider === 'ollama' ? '本地还没有模型。请使用 ollama pull 下载模型，再点击“刷新模型”。' : '暂无模型。'}</p>}
           </>}
-        </> : <div className="provider-empty"><Cpu size={30} /><h3>添加你的第一个模型供应商</h3><p>连接 ChatGPT 订阅、OpenRouter 或本地 Ollama 模型。</p><Button variant="outline" onClick={() => { setEditing(false); setDialog('choose'); setProviderQuery('') }}><Plus size={16} />添加供应商</Button></div>}
+        </> : <div className="provider-empty"><Cpu size={30} /><h3>添加你的第一个模型供应商</h3><p>连接 ChatGPT 订阅、Google AI Studio、DeepSeek、OpenRouter 或本地 Ollama 模型。</p><Button variant="outline" onClick={() => { setEditing(false); setDialog('choose'); setProviderQuery('') }}><Plus size={16} />添加供应商</Button></div>}
       </div>
     </div>
     {!dialog && feedback}
@@ -232,17 +299,12 @@ export default function ModelSettingsPanel({ settings, onChange, onBusyChange }:
       headingExtra={!editing && <div className="provider-steps" aria-label="添加进度"><span data-active={dialog === 'choose'}>1 选择供应商</span><ChevronRight size={13} /><span data-active={dialog === 'configure'}>2 配置连接</span></div>}
       onCloseAutoFocus={event => { event.preventDefault(); document.querySelector<HTMLButtonElement>('.provider-add')?.focus() }}>
       <div className="provider-dialog-body model-settings">
-          {!editing && <p className="provider-dialog-description">{dialog === 'choose' ? '选择要连接的账号、API 或本地服务。' : subscription ? '通过 ChatGPT 订阅账号使用 OpenAI 模型。' : connectingOllama ? '连接本机运行的 Ollama，自动获取已安装的模型。' : connectingOpenrouter ? '输入 OpenRouter API Key，自动读取所有可调用模型。连接后展开厂商分组，配置并启用需要的模型。' : ''}</p>}
+          {!editing && <p className="provider-dialog-description">{dialog === 'choose' ? '选择要连接的账号、API 或本地服务。' : subscription ? '通过 ChatGPT 订阅账号使用 OpenAI 模型。' : connectingOllama ? '连接本机运行的 Ollama，自动获取已安装的模型。' : connectingGoogle ? '输入 Google AI Studio API Key，读取支持工具调用的 Gemini 模型。连接后请启用需要的模型。' : connectingDeepseek ? '输入 DeepSeek API Key，读取官方模型目录。连接后请启用需要的模型。' : connectingOpenrouter ? '输入 OpenRouter API Key，自动读取所有可调用模型。连接后展开厂商分组，配置并启用需要的模型。' : ''}</p>}
           {dialog === 'choose' ? <>
             <div className="search-field"><Search size={15} /><Input aria-label="搜索供应商" placeholder="搜索供应商…" value={providerQuery} onChange={event => setProviderQuery(event.target.value)} /></div>
-            <div className="provider-options">{options.map(provider => <Button variant="ghost" key={provider} onClick={() => configure(provider)}><ProviderIcon provider={provider} /><span><strong>{providerName(provider)}</strong><small>{provider === 'chatgpt' ? '浏览器授权 · 支持复制链接' : provider === 'openrouter' ? 'API Key 连接 · 全部可调用模型' : '本地运行，连接 Ollama 服务'}</small></span><ChevronRight size={17} /></Button>)}</div>
-            {!options.length && <p className="provider-no-results">没有匹配的供应商。目前支持 ChatGPT、OpenRouter 和 Ollama。</p>}
-          </> : subscription ? <div className="provider-subscription"><ChatgptAuthorization onChange={next => { onChange(next); setSelected('chatgpt') }} /></div> : connectingOpenrouter ? <fieldset className="provider-connection-form" disabled={isBusy}>
-            <Label>API Key<Input type="password" value={apiKey} autoComplete="off" spellCheck={false} disabled={!settings.encryptionAvailable} placeholder={openrouterConnection?.hasApiKey ? '输入新的 API Key' : '输入 OpenRouter API Key'} onChange={event => setApiKey(event.target.value)} /></Label>
-            <p className="hint">密钥加密保存在本机，所有 OpenRouter 模型共用。读取目录不会调用模型。</p>
-            {!settings.encryptionAvailable && <p className="error" role="alert">系统安全存储不可用，暂时无法保存 API Key。</p>}
-            <Button disabled={!apiKey.trim() || !settings.encryptionAvailable} onClick={() => connectOpenrouter()}>{isBusy ? '正在读取模型…' : openrouterConnection?.hasApiKey ? '更新密钥并读取模型' : '连接并读取模型'}</Button>
-          </fieldset> : connectingOllama ? <fieldset className="provider-connection-form" disabled={isBusy}>
+            <div className="provider-options">{options.map(provider => <Button variant="ghost" key={provider} onClick={() => configure(provider)}><ProviderIcon provider={provider} /><span><strong>{providerName(provider)}</strong><small>{provider === 'chatgpt' ? '浏览器授权 · 支持复制链接' : provider === 'google' ? 'API Key 连接 · Gemini 原生协议' : provider === 'openrouter' ? 'API Key 连接 · 全部可调用模型' : provider === 'deepseek' ? 'API Key 连接 · DeepSeek 官方服务' : '本地运行，连接 Ollama 服务'}</small></span><ChevronRight size={17} /></Button>)}</div>
+            {!options.length && <p className="provider-no-results">没有匹配的供应商。目前支持 ChatGPT、Google AI Studio、OpenRouter 和 Ollama。</p>}
+          </> : subscription ? <div className="provider-subscription"><ChatgptAuthorization onChange={next => { onChange(next); setSelected('chatgpt') }} /></div> : connectingOpenrouter || connectingGoogle || connectingDeepseek ? <ApiProviderConnection name={connectingGoogle ? 'Google AI Studio' : connectingDeepseek ? 'DeepSeek' : 'OpenRouter'} apiKey={apiKey} hasApiKey={connectingGoogle ? googleConnection?.hasApiKey : connectingDeepseek ? deepseekConnection?.hasApiKey : openrouterConnection?.hasApiKey} encryptionAvailable={settings.encryptionAvailable} busy={isBusy} onKeyChange={setApiKey} onConnect={() => connectingGoogle ? connectGoogle() : connectingDeepseek ? connectDeepseek() : connectOpenrouter()} /> : connectingOllama ? <fieldset className="provider-connection-form" disabled={isBusy}>
             <Label>本地服务地址<Input type="url" value={ollamaUrl} onChange={event => setOllamaUrl(event.target.value)} placeholder="http://localhost:11434" /></Label><p className="hint">请先启动 Ollama。本步骤只读取模型列表，不会下载或运行模型。</p><Button onClick={() => connectOllama(ollamaUrl, true)} disabled={!ollamaUrl.trim()}>连接并获取模型</Button>
           </fieldset> : <fieldset disabled={isBusy && !requestId}>
             <ModelProfileFields profile={profile} savedProfile={saved} settings={settings} modelInfo={modelInfo} infoLoading={infoLoading} apiKey={apiKey} removeKey={removeKey} onFieldChange={update} onApiKeyChange={setApiKey} onRemoveKeyChange={remove => { setRemoveKey(remove); setApiKey('') }}>

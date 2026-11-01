@@ -7,7 +7,7 @@ import { ModelPriceTag } from './ModelPriceTag'
 import { CountryFlag } from './CountryFlag'
 import { callableOpenrouterModels, defaultOpenrouterMaxTokens, OPENROUTER_BASE_URL, openrouterManufacturer, openrouterManufacturerCountry } from '../../../shared/openrouter'
 import type { ModelDescriptor, ModelProfileView, ModelSettings } from '../../../shared/models'
-import { useState, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { PagedList } from './PagedList'
 
 // 前列参考 OpenRouter 最近完整周的作者请求份额；长尾厂商按常见度维护顺序。
@@ -52,6 +52,8 @@ export function OpenrouterCatalog({ settings, query, busy, getThinkingLabel, onC
   const callable = callableOpenrouterModels(catalog)
   const ids = new Set(callable.map(item => item.id))
   const profiles = new Map(saved.map(item => [item.model, item]))
+  // 分组只在重新打开供应商列表时重新计算，避免切换开关后模型跳走。
+  const initiallyEnabled = useRef(new Set(saved.filter(item => item.enabled !== false).map(item => item.model)))
   // 保留已有配置，服务下架的模型仍可查看和调整。
   const rows: ModelDescriptor[] = [...callable, ...saved.filter(item => !ids.has(item.model)).map(item => catalog.find(model => model.id === item.model) ?? { id: item.model, name: item.name, capabilities: [], maxContextTokens: null })]
   const search = query.trim().toLowerCase()
@@ -61,8 +63,7 @@ export function OpenrouterCatalog({ settings, query, busy, getThinkingLabel, onC
   for (const model of rows) {
     const vendor = openrouterManufacturer(model.id)
     if (search && !`${model.name ?? ''} ${model.id} ${vendor}`.toLowerCase().includes(search)) continue
-    const profile = profiles.get(model.id)
-    if (profile && profile.enabled !== false) enabled.push(model)
+    if (initiallyEnabled.current.has(model.id)) enabled.push(model)
     else {
       const group = groups.get(vendor) ?? []
       group.push(model)

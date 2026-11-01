@@ -93,9 +93,10 @@ queries('get-hotfix', '', '-id -description -computername')
 queries('resolve-dnsname', '-dnsonly -nohostsfile -tcpOnly -quicktimeout', '-name -type -server')
 queries('test-connection', '-quiet -ipv4 -ipv6 -repeat', '-targetname -computername -count -delay -timeoutseconds -buffersize')
 queries('test-netconnection', '-traceroute', '-computername -port -commonTCPport -informationlevel -hops')
-queries('get-command gcm', '-all -listimported -syntax', '-name -module -commandtype -verb -noun -totalcount')
+queries('get-command gcm', '-all -listimported -syntax', '-name -module -commandtype -verb -noun -totalcount -erroraction -ea')
+queries('out-null', '', '', false)
 queries('get-help', '-detailed -examples -full', '-name -parameter -category')
-queries('select-string sls', '-simplematch -allmatches -casesensitive -list -notmatch -quiet -raw', '-pattern -path -literalpath -encoding -context -include -exclude')
+queries('select-string sls', '-simplematch -allmatches -casesensitive -list -notmatch -quiet -raw', '-pattern -path -literalpath -encoding -context -include -exclude -erroraction -ea')
 queries('write-output', '-noenumerate', '-inputobject')
 queries('write-host', '-nonewline', '-object -separator -foregroundcolor -backgroundcolor')
 queries('format-list fl format-table ft format-wide fw', '-autosize -wrap -force -hidetableheaders -showerror -displayerror', '-property -view -groupby -column')
@@ -108,7 +109,12 @@ queries('compare-object compare', '-includeequal -excludeDifferent -passthru -ca
 
 function basicReadOnlyQuery(program: string, args: string[]): boolean {
   // 别名在不同 Shell 下含义不同，只接受这些命令共同的无副作用形式。
-  if (program === 'echo') return args.every(value => !value.startsWith('-') || ['-n', '-e', '-E'].includes(value))
+  // 纯连字符参数（如 echo ---）只是输出文本，不是选项。
+  if (program === 'echo') return args.every(value => !value.startsWith('-') || /^-+$/.test(value) || ['-n', '-e', '-E'].includes(value))
+  // GNU/BSD head 和 tail 支持传统的 -数字 行数写法。
+  if (['head', 'tail'].includes(program)) {
+    return queryOptions(args.map(value => /^-\d+$/.test(value) ? '-n=' + value.slice(1) : value), querySpecs[program].flags, querySpecs[program].values)
+  }
   if (program === 'printf') return args.length > 0 && !args[0].startsWith('-') && !/%(?:\d+\$)?[-+#0 ']*\d*(?:\.\d+)?n/.test(args[0])
   if (program === 'uniq') return queryOptions(args, ['-c', '-d', '-u', '-i', '-z', '--count', '--repeated', '--unique', '--ignore-case', '--zero-terminated'], ['-f', '-s', '-w', '--skip-fields', '--skip-chars', '--check-chars'], true, 1)
   if (program === 'type') return args.every(value => !value.startsWith('-') || ['-a', '-t', '-p', '-P', '-f'].includes(value))
@@ -175,6 +181,7 @@ function additionalReadOnlyQuery(program: string, args: string[]): boolean {
 }
 
 export function knownReadOnlyQuery(program: string, args: string[]): boolean {
+  if (process.platform === 'win32' && program === 'wsl' && (args.length === 1 && ['--list', '-l'].includes(args[0]) || args.length === 2 && ['--list', '-l'].includes(args[0]) && ['--quiet', '-q', '--verbose', '-v'].includes(args[1]))) return true
   const toolPolicy = developerToolPolicy(program, args)
   if (toolPolicy) return toolPolicy.kind === 'read'
   if (program === 'diff' && args.some(value => /^--output(?:=|$)/.test(value))) return false
@@ -194,7 +201,7 @@ export function knownReadOnlyQuery(program: string, args: string[]): boolean {
   if (program === 'tree') return queryOptions(args, ['-a', '-d', '-f', '-i', '-p', '-s', '-h', '-D', '-F', '-n', '-C', '-r', '-t', '/F', '/A', '--dirsfirst', '--noreport'], ['-L', '-I', '-P', '--filelimit'])
   // find 在 -- 后仍解释表达式，不能把后面的 -delete/-exec 当作普通路径。
   if (program === 'find') return !args.includes('--') && queryOptions(args,
-    ['-H', '-L', '-P', '-print', '-print0', '-ls', '-empty', '-readable', '-writable', '-executable', '-not', '!', '-a', '-and', '-o', '-or'],
+    ['-H', '-L', '-P', '-print', '-print0', '-ls', '-empty', '-readable', '-writable', '-executable', '-not', '!', '-a', '-and', '-o', '-or', '-prune'],
     ['-name', '-iname', '-path', '-ipath', '-type', '-maxdepth', '-mindepth', '-size', '-mtime', '-mmin', '-user', '-group', '-perm'])
   if (program === 'go') {
     if (args[0] === 'version') return queryOptions(args.slice(1), ['-m', '-v', '-json'])

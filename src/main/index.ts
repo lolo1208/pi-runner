@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, Menu, net, safeStorage, Tray } from 'electron'
+import { app, BrowserWindow, dialog, Menu, net, safeStorage, shell, Tray } from 'electron'
 import { flushRendererConversations } from './flush-conversations'
 import path from 'node:path'
 import { pathToFileURL, fileURLToPath } from 'node:url'
@@ -11,6 +11,8 @@ import { registerIpcHandlers } from './ipc-handlers'
 import { closeAllNotifications } from './notifications'
 import { ChatgptCredentials } from './models/chatgpt-credentials'
 import { ChatgptService } from './models/chatgpt-service'
+import { GoogleClient } from './models/google-client'
+import { DeepseekClient } from './models/deepseek-client'
 import { OpenrouterClient } from './models/openrouter-client'
 import { ToolReviewService } from './models/tool-review-service'
 import { anonymousDownloadFetch } from './models/download-fetch'
@@ -93,7 +95,15 @@ function createWindow(): void {
   mainWindow = new BrowserWindow({ width: 1440, height: 920, minWidth: 960, minHeight: 640, backgroundColor: '#f2f2ee', frame: false, thickFrame: true, icon: windowIcon,
     webPreferences: { preload: path.join(mainDirectory, '../preload/index.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true }
   })
-  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    try {
+      const parsed = new URL(url)
+      if (['http:', 'https:', 'mailto:'].includes(parsed.protocol)) {
+        void shell.openExternal(parsed.href).catch(error => console.error('打开外部链接失败:', error))
+      }
+    } catch { /* 忽略无效链接 */ }
+    return { action: 'deny' }
+  })
   mainWindow.webContents.on('will-navigate', event => event.preventDefault())
   mainWindow.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
   mainWindow.webContents.session.setPermissionCheckHandler(() => false)
@@ -139,15 +149,15 @@ if (hasSingleInstanceLock) void app.whenReady().then(() => {
   modelSettings = new ModelSettingsStore(path.join(app.getPath('userData'), 'model-settings.json'), cipher)
   // 订阅网络沿用 Electron 的系统代理；不向授权接口或模型接口发送浏览器 Cookie。
   const subscriptionFetch: typeof fetch = (input, init) => net.fetch(input instanceof URL ? input.href : input, { ...init, credentials: 'omit' })
-  const modelFetch: typeof fetch = (input, init) => new URL(input instanceof Request ? input.url : String(input)).hostname === 'openrouter.ai' ? subscriptionFetch(input, init) : fetch(input, init)
+  const modelFetch: typeof fetch = (input, init) => ['openrouter.ai', 'generativelanguage.googleapis.com', 'api.deepseek.com'].includes(new URL(input instanceof Request ? input.url : String(input)).hostname) ? subscriptionFetch(input, init) : fetch(input, init)
   chatgptService = new ChatgptService(new ChatgptCredentials(path.join(app.getPath('userData'), 'chatgpt-auth.enc'), cipher), modelSettings, subscriptionFetch)
-  const reviewService = new ToolReviewService(modelSettings, modelFetch)
+  const reviewService = new ToolReviewService(modelSettings, modelFetch, chatgptService)
   modelService = new ModelService(modelSettings, new PiAgentService({ dataDirectory: piRunnerDirectory, protectedDirectories: [app.getPath('userData')], chatgpt: chatgptService,
     fetchRequest: modelFetch,
     // 下载仅发匿名 GET，不继承模型认证头、Cookie 或订阅请求配置。
     downloadFetch: anonymousDownloadFetch,
     review: request => reviewService.reviewWithSource(request),
-    getProject: () => snapshotManager?.getRoot(), emit: event => { mainWindow?.webContents.send(IPC_CHANNELS.agentEvent, event) } }), undefined, new OpenrouterClient(subscriptionFetch))
+    getProject: () => snapshotManager?.getRoot(), emit: event => { mainWindow?.webContents.send(IPC_CHANNELS.agentEvent, event) } }), undefined, new OpenrouterClient(subscriptionFetch), new GoogleClient(subscriptionFetch), new DeepseekClient(subscriptionFetch))
   registerIpcHandlers({
     getMainWindow: () => mainWindow,
     getSnapshotManager: () => snapshotManager,
