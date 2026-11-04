@@ -12,6 +12,7 @@ import type { OllamaCallInfo } from './pi-ollama'
 import { modelResponseError } from './model-request-error'
 import type { PiAttachments } from './pi-attachments'
 import { exchangeChatgptToken, loginChatgpt } from './chatgpt-oauth'
+import { cacheFingerprint, emptyUsageFields, observeUsage } from './pi-cache'
 
 const providerId = 'openai-codex'
 const root = 'https://chatgpt.com/backend-api'
@@ -227,7 +228,7 @@ export class ChatgptService {
     }).finally(() => { this.usagePending = undefined })
   }
   invalidateUsage(): void { this.usageCache = undefined }
-  async createProvider(profile: ModelProfile, attachments: PiAttachments, onModelRequestActive: (active: boolean) => void = () => {}) {
+  async createProvider(profile: ModelProfile, attachments: PiAttachments, onModelRequestActive: (active: boolean) => void = () => {}, onCacheInfo: (info: { fields?: ReturnType<typeof emptyUsageFields>; fingerprint?: ReturnType<typeof cacheFingerprint>; upstream?: string }) => void = () => {}) {
     if (!await this.credentials.read(providerId)) throw new ModelError('请先在模型供应商中授权 ChatGPT 订阅账号')
     const runtime = await this.createRuntime()
     const original = runtime.getProvider(providerId)!
@@ -251,6 +252,7 @@ export class ChatgptService {
       streamSimple: (target: Model<Api>, context: TranscriptContext, options?: SimpleStreamOptions) => {
         const controller = new AbortController()
         let responseError: string | undefined
+        const fields = emptyUsageFields()
         this.invalidateUsage()
         return requestPiStream(() => original.streamSimple(target, context, { ...options, transport: 'sse', maxTokens: Math.min(options?.maxTokens ?? configured.maxTokens, configured.maxTokens), temperature: undefined, timeoutMs: 0, maxRetries: 0,
           signal: options?.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal,
@@ -263,7 +265,16 @@ export class ChatgptService {
             }
             return response
           },
-          onPayload: async (payload, target) => attachments.replacePayload(requestThinkingSummary(await options?.onPayload?.(payload, target) ?? payload), profile, true)
+          onPayload: async (payload, target) => {
+            const body = attachments.replacePayload(requestThinkingSummary(await options?.onPayload?.(payload, target) ?? payload), profile, true) as Record<string, unknown>
+            if (options?.cacheRetention !== 'none') onCacheInfo({ fingerprint: cacheFingerprint(body) })
+            return body
+          },
+          onProviderStreamEvent: async (event, target) => {
+            observeUsage(event, fields)
+            onCacheInfo({ fields: { ...fields } })
+            await options?.onProviderStreamEvent?.(event, target)
+          }
         }), options?.apiKey ?? '', () => controller.abort(), onModelRequestActive, () => responseError)
       }
     })

@@ -96,6 +96,23 @@ export function ModelProfileFields({ profile, savedProfile, settings, modelInfo,
           <p id={`${fieldId}-temperature-help`} className="hint">值越低，回复越稳定。</p>
         </div>
       </>}
+      {(profile.provider === 'anthropic' || profile.provider === 'openai') && <>
+        <Label htmlFor={`${fieldId}-cache`}>提示词缓存保留时间</Label>
+        <div className="model-parameter-row">
+          <Select value={profile.cacheRetention ?? 'short'} onValueChange={value => onFieldChange('cacheRetention', value as ModelProfile['cacheRetention'])}>
+            <SelectTrigger id={`${fieldId}-cache`} aria-describedby={`${fieldId}-cache-help`}><SelectValue /></SelectTrigger>
+            <SelectContent><SelectItem value="short">默认</SelectItem><SelectItem value="long">延长</SelectItem></SelectContent>
+          </Select>
+          <p id={`${fieldId}-cache-help`} className="hint">仅官方接口生效；模型须支持延长缓存，可能增加缓存费用。</p>
+        </div>
+      </>}
+      {router && <>
+        <Label htmlFor={`${fieldId}-router-provider`}>首选上游</Label>
+        <div className="model-parameter-row">
+          <Input id={`${fieldId}-router-provider`} value={profile.openrouterProvider ?? ''} maxLength={100} placeholder="自动选择" aria-describedby={`${fieldId}-router-provider-help`} onChange={event => onFieldChange('openrouterProvider', event.target.value)} />
+          <p id={`${fieldId}-router-provider-help`} className="hint">填写 OpenRouter 上游标识；不可用时允许回退，留空自动路由。</p>
+        </div>
+      </>}
       <Label htmlFor={`${fieldId}-timeout`}>超时（秒）</Label>
       <div className="model-parameter-row">
         <IntegerParameterInput id={`${fieldId}-timeout`} min="5" max="300" value={profile.timeoutSeconds ?? (local ? 120 : 60)} placeholder={local ? '120' : '60'} aria-describedby={`${fieldId}-timeout-help`} onValueChange={value => onFieldChange('timeoutSeconds', value)} />

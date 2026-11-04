@@ -1,7 +1,7 @@
 import { Button } from '@/components/ui/button'
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 
-import { FolderOpen, MessageCirclePlus, PanelRightOpen } from 'lucide-react'
+import { FolderOpen, MessageCirclePlus, PanelRightClose, PanelRightOpen } from 'lucide-react'
 import type { ModelSettings } from '../../shared/models'
 import ModelChat from './ModelChat'
 import { sameProjectPath } from './lib/project-paths'
@@ -17,6 +17,7 @@ import { composeCustomPrompt } from '../../shared/prompts'
 import { ProjectPickerDialog } from './components/ProjectPickerDialog'
 import { ProjectSidebar } from './components/ProjectSidebar'
 import { ToolSidebar } from './components/ToolSidebar'
+import { PanelResizer } from './components/PanelResizer'
 import { WindowTitleBar } from './components/WindowTitleBar'
 import './styles.css'
 export default function App(): React.JSX.Element {
@@ -70,6 +71,27 @@ export default function App(): React.JSX.Element {
     return () => document.removeEventListener('visibilitychange', markViewed)
   }, [currentTask?.id, currentTask?.unreadCompletion, settingsSection, setTasks])
   const [toolsOpen, setToolsOpen] = useState(false)
+  const appRef = useRef<HTMLDivElement>(null)
+  const resizeSidebar = (clientX: number): void => {
+    const app = appRef.current
+    if (!app) return
+    const bounds = app.getBoundingClientRect()
+    const minimum = bounds.width <= 600 ? 180 : 220
+    const reserve = toolsOpen && bounds.width > 850 ? 680 : 320
+    const width = Math.max(minimum, Math.min(460, bounds.width - reserve, clientX - bounds.left))
+    app.parentElement?.style.setProperty('--task-sidebar-width', `clamp(${minimum}px, ${width}px, min(460px, calc(100vw - ${reserve}px)))`)
+  }
+  const resizeToolPanel = (clientX: number): void => {
+    const app = appRef.current
+    const conversation = conversationRef.current
+    if (!app || !conversation) return
+    const bounds = app.getBoundingClientRect()
+    const left = conversation.getBoundingClientRect().left
+    const available = bounds.right - left
+    const minimum = Math.min(360, available - 320)
+    const maximum = Math.max(minimum, Math.min(available * 0.5, available - 320))
+    app.style.setProperty('--tool-panel-width', `${Math.max(minimum, Math.min(maximum, bounds.right - clientX))}px`)
+  }
   const [revealFile, setRevealFile] = useState<{ project: string; path: string; id: number } | null>(null)
   useEffect(() => {
     const reveal = (event: Event): void => {
@@ -166,7 +188,7 @@ export default function App(): React.JSX.Element {
       onToggleMaximize={() => { void window.piRunner.toggleMaximizeWindow() }}
       onClose={() => { void window.piRunner.closeWindow() }}
     />
-    <div className={`app ${toolsOpen ? 'tools-open' : ''}`} hidden={settingsSection !== null}>
+    <div ref={appRef} className={`app ${toolsOpen ? 'tools-open' : ''}`} hidden={settingsSection !== null}>
       <ProjectSidebar
         groups={groupedTasks}
         busyProjectRoots={new Set(tasks.filter(task => busyTasks.includes(task.id)).map(task => task.project ?? UNLINKED_PROJECT_LABEL))}
@@ -194,8 +216,9 @@ export default function App(): React.JSX.Element {
         onCreateProjectTask={root => root === UNLINKED_PROJECT_LABEL ? createOrdinaryTask() : chooseExistingProject(root)}
         onOpenSettings={() => setSettingsSection('general')}
       />
+      <PanelResizer className="task-panel-resizer" label="调整项目列表和对话面板宽度" onResize={resizeSidebar} onReset={() => appRef.current?.parentElement?.style.removeProperty('--task-sidebar-width')} />
       <main className="conversation" ref={conversationRef}>
-        <header className="conversation-header"><Button className="icon-button" aria-label={toolsOpen ? '收起工具栏' : '展开工具栏'} aria-expanded={toolsOpen} onClick={() => setToolsOpen(value => !value)}><PanelRightOpen size={18} /></Button></header>
+        <header className="conversation-header"><Button className="icon-button" aria-label={toolsOpen ? '收起工具栏' : '展开工具栏'} aria-expanded={toolsOpen} onClick={() => setToolsOpen(value => !value)}>{toolsOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}</Button></header>
         {!currentTask && <section className="no-task-state"><FolderOpen size={30} /><h1>开始一段对话</h1><p>直接开始普通对话，或选择项目目录。</p><Button className="project-new-button conversation-action-button" onClick={() => setProjectPickerOpen(true)}><MessageCirclePlus size={17} aria-hidden="true" />新建对话</Button></section>}
         {mountedTasks.map(task => <div className="task-chat" key={task.id} hidden={task.id !== currentTask?.id}><ModelChat onSnapshotsChange={agentSnapshots => setTasks(items => items.map(item => item.id === task.id ? { ...item, agentSnapshots } : item))} notificationNavigationRequest={notificationNavigationRequests[task.id] ?? 0} snapshots={task.agentSnapshots} active={task.id === currentTask?.id && settingsSection === null} projectReady={task.project === null || (!pendingProjectDirectories[task.project] && [...readyProjects].some(root => sameProjectPath(root, task.project!)))} projectCurrent={!isBusy && Boolean(project && task.project && sameProjectPath(project, task.project))} conversationId={task.id} initialIntentMode={task.intentMode} onIntentChange={intentMode => setTasks(items => items.map(item => item.id === task.id ? { ...item, intentMode } : item))} initialPermissionMode={task.permissionMode} onPermissionChange={permissionMode => setTasks(items => items.map(item => item.id === task.id ? { ...item, permissionMode } : item))} compressionThreshold={preferences.compressionThreshold} initialCompaction={task.compaction} onCompactionChange={compaction => setTasks(items => items.map(item => item.id === task.id ? { ...item, compaction } : item))} initialModelId={task.modelId} onModelChange={modelId => setTasks(items => items.map(item => item.id === task.id && item.modelId !== modelId ? { ...item, modelId } : item))} customPrompt={composeCustomPrompt(task.prompt, task.project ? projectMeta[task.project]?.prompt : undefined, preferences.customPrompt)} project={task.project} providers={settings?.providers} initialMessages={task.messages} initialDraft={task.draft} initialDraftImages={task.draftImages} initialDraftSkillIds={task.draftSkillIds} initialQueue={task.queuedMessages} initialQueuePaused={task.queuePaused} initialQueueEdit={task.queueEdit} onQueueChange={(queuedMessages, queuePaused, queueEdit) => setTasks(items => items.map(item => item.id === task.id && (item.queuedMessages !== queuedMessages || item.queuePaused !== queuePaused || item.queueEdit !== queueEdit) ? { ...item, queuedMessages, queuePaused, queueEdit } : item))} onDraftChange={(draft, draftImages, draftSkillIds) => setTasks(items => items.map(item => item.id === task.id && (item.draft !== draft || item.draftImages !== draftImages || item.draftSkillIds !== draftSkillIds) ? { ...item, draft, draftImages, draftSkillIds } : item))} profile={activeProfile} profiles={settings?.profiles} onModelSettingsChange={setSettings} onWaitingForInputChange={(waiting, reason) => {
           setWaitingTaskIds(items => waiting ? items.includes(task.id) ? items : [...items, task.id] : items.includes(task.id) ? items.filter(id => id !== task.id) : items)
@@ -210,6 +233,7 @@ export default function App(): React.JSX.Element {
         {settingsError && <p role="alert" className="error">{settingsError}<Button onClick={loadSettings}>重新读取设置</Button></p>}
 
       </main>
+      {toolsOpen && <PanelResizer className="tool-panel-resizer" label="调整对话和工具面板宽度" onResize={resizeToolPanel} onReset={() => appRef.current?.style.removeProperty('--tool-panel-width')} />}
       {toolsOpen && <ToolSidebar
         project={currentTask ? currentTask.project : project}
         isBusy={isBusy || isChatBusy}
@@ -217,7 +241,6 @@ export default function App(): React.JSX.Element {
         checkpoints={checkpoints}
         revealFile={revealFile && currentTask?.project && sameProjectPath(revealFile.project, currentTask.project) ? revealFile : null}
         onToolChange={setTool}
-        onClose={() => setToolsOpen(false)}
       />}
     </div>
     {settingsSection !== null && <SettingsPage initialSection={settingsSection} settings={settings} error={settingsError} reload={loadSettings} preferences={preferences} onPreferences={updatePreferences} onChange={setSettings} onClose={() => setSettingsSection(null)} />}

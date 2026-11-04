@@ -1,4 +1,7 @@
 import { open, realpath } from 'node:fs/promises'
+import { constants } from 'node:fs'
+import { validateOrdinaryPath } from './filesystem-tools'
+import { validateTextMutationTarget } from './text-mutation-tools'
 import { createEditToolDefinition } from '@earendil-works/pi-coding-agent'
 import type { ToolApproval, ToolApprovalPreview } from '../../shared/models'
 import { ModelError } from './model-validation'
@@ -11,8 +14,10 @@ export async function toolApprovalPreview(approval: ToolApproval): Promise<ToolA
   const target = approval.args.path
   let before = ''
   try {
+    await validateOrdinaryPath(target)
+    await validateTextMutationTarget(target)
     if (await realpath(target) !== target) throw new ModelError('目标路径已变化，请重新请求操作')
-    const file = await open(target, 'r')
+    const file = await open(target, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
     try {
       const info = await file.stat()
       if (!info.isFile()) throw new ModelError('只能预览普通文件')

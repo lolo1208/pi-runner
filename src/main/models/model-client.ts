@@ -28,6 +28,7 @@ export class ModelClient {
     const isAnthropic = profile.protocol === 'anthropic'
     const isOllama = profile.provider === 'ollama'
     const isResponses = useFileResponses(profile, messages)
+    let usageFields: NonNullable<ModelReply['usageFields']> | undefined
     const headers: Record<string, string> = { 'Content-Type': 'application/json', Accept: 'application/json' }
     if (isAnthropic) {
       headers['anthropic-version'] = '2023-06-01'
@@ -47,6 +48,7 @@ export class ModelClient {
     }
     if (profile.temperature !== null) body.temperature = profile.temperature
     if (profile.provider === 'openrouter') {
+      if (profile.openrouterProvider) body.provider = { order: [profile.openrouterProvider], allow_fallbacks: true }
       if (!profile.supportedParameters?.includes('temperature')) delete body.temperature
       if (profile.thinkingLevel != null) body.reasoning = profile.thinkingLevel === 'off' ? { enabled: false } : { effort: profile.thinkingLevel }
     }
@@ -127,12 +129,23 @@ export class ModelClient {
       const usageRecord = result.usage && typeof result.usage === 'object' && !Array.isArray(result.usage) ? result.usage as Record<string, unknown> : {}
       const inputTokens = tokenCount(isOllama ? result.prompt_eval_count : isAnthropic || isResponses ? usageRecord.input_tokens : usageRecord.prompt_tokens)
       const outputTokens = tokenCount(isOllama ? result.eval_count : isAnthropic || isResponses ? usageRecord.output_tokens : usageRecord.completion_tokens)
-      const cacheRead = isAnthropic ? tokenCount(usageRecord.cache_read_input_tokens) ?? 0 : 0
-      const cacheWrite = isAnthropic ? tokenCount(usageRecord.cache_creation_input_tokens) ?? 0 : 0
+      const details = isResponses ? usageRecord.input_tokens_details : usageRecord.prompt_tokens_details
+      const cacheDetails = details && typeof details === 'object' && !Array.isArray(details) ? details as Record<string, unknown> : {}
+      const cacheRead = isAnthropic ? tokenCount(usageRecord.cache_read_input_tokens)
+        : isOllama ? undefined : tokenCount(cacheDetails.cached_tokens) ?? tokenCount(usageRecord.prompt_cache_hit_tokens) ?? tokenCount(usageRecord.cached_tokens)
+      const cacheWrite = isAnthropic ? tokenCount(usageRecord.cache_creation_input_tokens) : isOllama ? undefined
+        : tokenCount(cacheDetails.cache_write_tokens) ?? tokenCount(usageRecord.prompt_cache_write_tokens) ?? tokenCount(usageRecord.cache_write_tokens)
+      usageFields = { input: inputTokens !== undefined, output: outputTokens !== undefined,
+        cacheRead: isOllama ? false : isAnthropic ? tokenCount(usageRecord.cache_read_input_tokens) !== undefined
+          : tokenCount(cacheDetails.cached_tokens) !== undefined || tokenCount(usageRecord.prompt_cache_hit_tokens) !== undefined || tokenCount(usageRecord.cached_tokens) !== undefined,
+        cacheWrite: isOllama ? false : isAnthropic ? tokenCount(usageRecord.cache_creation_input_tokens) !== undefined
+          : tokenCount(cacheDetails.cache_write_tokens) !== undefined || tokenCount(usageRecord.prompt_cache_write_tokens) !== undefined || tokenCount(usageRecord.cache_write_tokens) !== undefined }
       const rateLimits = profile.provider === 'openai' ? readRateLimits(response.headers) : []
       return { text, model: profile.model, elapsedMs: Math.round(performance.now() - startedAt), truncated,
-        ...(inputTokens !== undefined && outputTokens !== undefined ? { usage: { inputTokens: inputTokens + cacheRead + cacheWrite, outputTokens } } : {}),
-        ...(rateLimits.length ? { rateLimits } : {}) }
+        // Anthropic input_tokens 不含缓存；OpenAI 兼容协议的 prompt_tokens 已含缓存，不重复累加。
+        ...(inputTokens !== undefined && outputTokens !== undefined ? { usage: { inputTokens: inputTokens + (isAnthropic ? (cacheRead ?? 0) + (cacheWrite ?? 0) : 0), outputTokens,
+          ...(usageFields.cacheRead ? { cacheReadTokens: cacheRead } : {}), ...(usageFields.cacheWrite ? { cacheWriteTokens: cacheWrite } : {}) } } : {}),
+        usageFields, ...(rateLimits.length ? { rateLimits } : {}) }
     } catch (error) {
       if (signal.aborted) throw new ModelError('请求已取消或超时')
       if (error instanceof ModelError) throw error

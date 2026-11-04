@@ -1,5 +1,11 @@
 export type ModelProtocol = 'openai-compatible' | 'anthropic' | 'google-generative-ai'
 export type ProviderId = 'google' | 'chatgpt' | 'openai' | 'openrouter' | 'anthropic' | 'deepseek' | 'ollama' | 'vllm' | 'custom'
+export interface DeepseekBalance {
+  fetchedAt: number
+  available?: boolean
+  balances?: { currency: string; total: string; granted: string; toppedUp: string }[]
+  error?: string
+}
 export interface OpenrouterUsage {
   fetchedAt: number
   limit?: number | null
@@ -27,6 +33,10 @@ export interface ModelProfile {
   thinking?: boolean | null
   thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | null
   ollamaThinkingLevel?: string | null
+  /** 仅官方 Anthropic 或 OpenAI 接口可选延长缓存，默认使用供应商短缓存。 */
+  cacheRetention?: 'short' | 'long'
+  /** OpenRouter 首选上游；为空时由服务自动路由。 */
+  openrouterProvider?: string
   /** 目录提供的请求能力，仅由主进程在调用时填充。 */
   supportedParameters?: string[]
 }
@@ -112,23 +122,25 @@ export const MAX_CONVERSATION_ATTACHMENT_BYTES = 128 * 1024 * 1024
 export interface ChatAttachment { id: string; name: string; dataUrl: string }
 /** 沿用图片附件的类型与存储字段，兼容已有会话；现在可包含任意文件。 */
 export type ChatImage = ChatAttachment
-export interface ChatExecution { model: string; provider?: ProviderId; elapsedMs?: number; roundId?: string }
-export interface AiReviewDetail { decision: ReviewDecision; reason?: string; target?: string }
+export interface ChatExecution { model: string; provider?: ProviderId; profileId?: string; elapsedMs?: number; roundId?: string; roundStatistics?: { usage: ModelUsage; usageFields?: { input: boolean; output: boolean; cacheRead: boolean; cacheWrite: boolean }; roundUsage: ModelUsage; calls: ModelCallDetail[]; truncated: boolean }; auxiliaryCalls?: AuxiliaryCallDetail[] }
+export interface AuxiliaryCallDetail { purpose: 'context-summary' | 'permission-review'; model: string; elapsedMs: number; status: 'completed' | 'error' | 'aborted'; usage?: ModelUsage; usageFields?: { input: boolean; output: boolean; cacheRead: boolean; cacheWrite: boolean } }
+export interface AiReviewDetail { decision: ReviewDecision; reason?: string; target?: string; model?: string; provider?: ProviderId }
 export interface ChatWorkItem { id: string; kind: 'thinking' | 'tool'; name?: string; skillName?: string; args?: Record<string, unknown>; content: string; isError?: boolean; completed?: boolean; state?: 'queued' | 'running' | 'waiting' | 'interrupted'; stateText?: string; aiReview?: ReviewDecision; aiReviewDetails?: AiReviewDetail[] }
 export interface ChatCall { elapsedMs?: number; usage?: ModelUsage; work: ChatWorkItem[] }
 export interface ChatMessage { role: 'user' | 'assistant'; content: string; images?: ChatImage[]; skillIds?: string[]; execution?: ChatExecution; call?: ChatCall; snapshotHash?: string; codeSnapshotId?: string; historyId?: string }
 export interface ModelUsage { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number }
+export interface ModelCallDetail { cacheNotes?: string[]; elapsedMs: number; status: 'completed' | 'error' | 'aborted' | 'truncated'; usage?: ModelUsage; usageFields?: { input: boolean; output: boolean; cacheRead: boolean; cacheWrite: boolean } }
 export interface ModelRateLimit { kind: 'requests' | 'tokens'; limit: number; remaining: number; reset?: string }
 export interface ChatgptAuthStatus { state: 'signed-out' | 'authorizing' | 'signed-in'; url?: string; manualInput?: boolean; error?: string; catalogSource?: 'account' | 'sdk' }
 export interface SubscriptionWindow { seconds: number; usedPercent: number; resetsAt?: number }
 export interface ResetCredits { availableCount: number; earliestExpiresAt?: number | null }
 export interface ChatgptUsage { windows: SubscriptionWindow[]; fetchedAt: number; plan?: string; error?: string; resetCredits?: ResetCredits; resetCreditsError?: string }
-export interface ModelReply { text: string; elapsedMs: number; model: string; truncated: boolean; usage?: ModelUsage; roundUsage?: ModelUsage; rateLimits?: ModelRateLimit[]; compaction?: import('./context').ContextCompaction; messages?: ChatMessage[]; warnings?: string[] }
+export interface ModelReply { text: string; elapsedMs: number; model: string; truncated: boolean; usageFields?: { input: boolean; output: boolean; cacheRead: boolean; cacheWrite: boolean }; usage?: ModelUsage; roundUsage?: ModelUsage; calls?: ModelCallDetail[]; auxiliaryCalls?: AuxiliaryCallDetail[]; rateLimits?: ModelRateLimit[]; compaction?: import('./context').ContextCompaction; messages?: ChatMessage[]; warnings?: string[] }
 export type PermissionMode = 'default' | 'auto' | 'full'
 export const PERMISSION_MODES: PermissionMode[] = ['default', 'auto', 'full']
 /** 工具权限第二层自动审核的结论：放行 / 交给用户 / 拒绝。 */
 export type ReviewDecision = 'allow' | 'ask' | 'deny'
-export interface ToolReviewResult { decision: ReviewDecision; source: 'ai' | 'rule' | 'fallback'; reason?: string }
+export interface ToolReviewResult { decision: ReviewDecision; source: 'ai' | 'rule' | 'fallback'; reason?: string; model?: string; provider?: ProviderId }
 export interface ToolReviewRequest {
   tool: string
   args: Record<string, unknown>
@@ -138,6 +150,7 @@ export interface ToolReviewRequest {
   reason?: string
   userPrompt: string
   signal: AbortSignal
+  onAuxiliaryCall?: (call: AuxiliaryCallDetail) => void
 }
 export interface ToolApproval {
   id: string
@@ -150,6 +163,8 @@ export interface ToolApproval {
   /** 仅在 AI 有效返回 ask 时为 true；回退或强制人工确认不标记。 */
   aiReviewed?: boolean
   aiReviewReason?: string
+  aiReviewModel?: string
+  aiReviewProvider?: ProviderId
 }
 /** “每次询问”模式下命令审批的默认说明；命令弹窗不重复展示这条模式说明，只保留真正的扩权原因。 */
 export const DEFAULT_COMMAND_APPROVAL_REASON = '“每次询问”模式下，终端命令需要逐次确认。命令获准后可能读写项目外文件或访问网络'

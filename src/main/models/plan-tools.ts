@@ -3,7 +3,11 @@ import type { PlanInteraction, PlanQuestion, PlanResponse } from '../../shared/m
 import { isCustomPlanOption } from '../../shared/models'
 import { ModelError } from './model-validation'
 
-export const PLAN_INSTRUCTION = '当前为计划模式。若用户只要求技能生成文字结果（例如 Git 提交信息、摘要或说明），无需制定实施计划，可以先读取必要内容和技能，完成结果并用 report_skill_usage 报告本轮用途后直接回复并结束；不要在交付最终结果后再发起需求确认或计划审阅。此例外不允许修改文件或执行终端命令；已经开始的计划问答仍需完成原有流程。其他任务每次开始本轮计划，都必须先调用 ask_user_question 弹出需求确认窗口，至少完成一轮用户回答；历史对话或旧计划的回答不能替代本轮确认。即使需求看似明确，也应针对本次目标、实施范围或验收方式提出具体选项，请用户确认。可先读取必要的项目内容，问题应结合用户任务，不要重复询问已知事实；有不确定事项时可继续多轮提问。每题提供推荐方案和其他具体方案，界面自动提供自定义回答入口。禁止文件修改、终端命令或其他有副作用的操作。本轮收到用户回答并确认需求后，必须调用 submit_plan 提交完整中文计划（目标、具体步骤、验证方法），等待审阅；不能仅输出文字就结束。修改意见需要融入新计划并再次提交。只有工具明确返回用户已批准，才进入执行模式并按已批准的计划实施。'
+export const PLAN_INSTRUCTION = [
+  '当前为计划模式：只允许只读文件工具、技能读取/用途记录和计划交互工具；禁止终端命令（包括只读命令）及文件修改等副作用。完全访问权限也不豁免此限制。',
+  '常规流程：①可先读取必要资料，然后调用 ask_user_question，至少收到一轮本次任务的用户回答；历史回答不算本轮确认。需求明确时确认方案、范围或验收方式，不重复已知事实。②调用 submit_plan 提交完整计划（目标、步骤、验证方法），语言遵循用户指定或当前交流语言，不能仅用正文交付计划。③用户要求修改时整合反馈并重新提交；只有工具明确返回批准后才执行。',
+  '唯一直接回复例外：用户只要求技能产出文字结果（如提交信息、摘要），且本轮尚未发起计划交互、未尝试受禁操作。读取并使用相关技能，通过 read_skill_file.purpose 或 report_skill_usage 记录所有已加载技能的用途后，可交付结果结束，不再发起计划确认。此例外不开放终端或写入权限。'
+].join('\n')
 /** 计划模式的可执行文件工具；批量下载不得借内部单项调用绕过外层守卫。 */
 export const PLAN_READ_TOOLS = ['read', 'read_many', 'ls', 'find', 'grep', 'stat'] as const
 
@@ -13,7 +17,7 @@ const schema = (properties: Record<string, unknown>, required: string[]): ToolDe
 
 export function planTools(ask: (interaction: Omit<PlanInteraction, 'id'>, signal?: AbortSignal) => Promise<PlanResponse>, approve: (title: string, content: string) => void, isPlanning: () => boolean, hasAnswers: () => boolean): ToolDefinition[] {
   return [{
-    name: 'ask_user_question', label: '澄清计划需求', description: '向用户弹出 1–3 个问题。每题提供 2–4 个具体方案，标记推荐项。界面自动提供“其他”选项供用户填写自己的回答，不要重复生成“其他”或自定义回答选项。等待回答后再继续，可多轮调用。', executionMode: 'sequential',
+    name: 'ask_user_question', label: '澄清计划需求', description: '向用户提问，每题提供具体方案并标记推荐项。界面自动提供“其他”选项供用户填写自己的回答，不要重复生成“其他”或自定义回答选项。等待回答后再继续，可多轮调用。', executionMode: 'sequential',
     parameters: schema({ questions: { type: 'array', minItems: 1, maxItems: 3, items: { type: 'object', properties: { id: { type: 'string', minLength: 1, maxLength: 80 }, header: { type: 'string', maxLength: 80 }, question: { type: 'string', minLength: 1, maxLength: 2000 }, options: { type: 'array', minItems: 2, maxItems: 4, items: { type: 'object', properties: { label: { type: 'string', minLength: 1, maxLength: 200 }, description: { type: 'string', maxLength: 1000 }, recommended: { type: 'boolean' } }, required: ['label'], additionalProperties: false } } }, required: ['id', 'header', 'question', 'options'], additionalProperties: false } } }, ['questions']),
     execute: async (_id, args, signal) => {
       if (!isPlanning()) throw new ModelError('当前任务已进入执行模式')
@@ -24,7 +28,7 @@ export function planTools(ask: (interaction: Omit<PlanInteraction, 'id'>, signal
       return result(await ask({ kind: 'questions', questions }, signal))
     }
   }, {
-    name: 'submit_plan', label: '审阅计划', description: '提交最终中文计划（目标、步骤、验收方法）供批准。批准后自动执行；要求修改时继续沟通并再次提交。', executionMode: 'sequential',
+    name: 'submit_plan', label: '审阅计划', description: '本轮 ask_user_question 已收到回答后，以用户指定或当前交流语言提交完整计划（目标、步骤、验证方法）供审阅。返回批准后进入执行模式，由你按计划实施；要求修改则整合反馈后重新提交。', executionMode: 'sequential',
     parameters: schema({ title: { type: 'string', minLength: 1, maxLength: 200 }, content: { type: 'string', minLength: 1, maxLength: 32000 } }, ['title', 'content']),
     execute: async (_id, args, signal) => {
       if (!isPlanning()) throw new ModelError('该计划已经批准，请按计划执行')

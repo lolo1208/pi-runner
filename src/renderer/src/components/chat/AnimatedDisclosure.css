@@ -1,0 +1,27 @@
+.chat-animated-disclosure {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  visibility: hidden;
+  transition: grid-template-rows 150ms cubic-bezier(0.16, 1, 0.3, 1), opacity 100ms ease-out, visibility 0s 150ms;
+}
+
+.chat-animated-disclosure[data-open='true'] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  visibility: visible;
+  transition-duration: 190ms, 140ms, 0s;
+  transition-delay: 0s;
+}
+
+.chat-animated-disclosure-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-animated-disclosure,
+  .chat-animated-disclosure[data-open='true'] {
+    transition: opacity 60ms ease-out;
+  }
+}

@@ -22,17 +22,28 @@ export class ToolApprovalManager {
     signal.throwIfAborted()
     const id = randomUUID()
     const allowed = await new Promise<boolean>((resolve, reject) => {
+      let settled = false
       const cleanup = (): void => {
         this.pending.delete(id)
         signal.removeEventListener('abort', abort)
-        onWaiting(false)
-        this.emit({ type: 'approval-end', requestId, conversationId, approvalId: id })
+        try { onWaiting(false) } catch { /* 展示失败不能遗留待审批权限。 */ }
+        try { this.emit({ type: 'approval-end', requestId, conversationId, approvalId: id }) } catch { /* 权限已失效。 */ }
       }
-      const abort = (): void => { cleanup(); reject(new ModelError('工具审批已取消')) }
-      this.pending.set(id, { requestId, conversationId, details: structuredClone({ ...details, id }), finish: allow => { cleanup(); resolve(allow) } })
+      const finish = (allow: boolean, error?: unknown): void => {
+        if (settled) return
+        settled = true
+        cleanup()
+        if (error !== undefined) reject(error)
+        else resolve(allow)
+      }
+      const abort = (): void => finish(false, new ModelError('工具审批已取消'))
+      this.pending.set(id, { requestId, conversationId, details: structuredClone({ ...details, id }), finish: allow => finish(allow) })
       signal.addEventListener('abort', abort, { once: true })
-      onWaiting(true)
-      this.emit({ type: 'approval', requestId, conversationId, approval: { ...details, id } })
+      if (signal.aborted) { abort(); return }
+      try {
+        onWaiting(true)
+        if (!settled) this.emit({ type: 'approval', requestId, conversationId, approval: structuredClone({ ...details, id }) })
+      } catch (error) { finish(false, error ?? new ModelError('无法展示工具审批')) }
     })
     signal.throwIfAborted()
     if (!allowed && rejectOnDeny) throw new ModelError('用户拒绝了本次工具操作；请调整方案，不要重复尝试相同操作')

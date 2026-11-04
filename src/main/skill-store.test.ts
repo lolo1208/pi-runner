@@ -20,6 +20,19 @@ describe('SkillStore replacement installation', () => {
 
   const document = (description: string): string => `---\nname: Example\ndescription: ${description}\n---\n\nInstructions\n`
 
+  it('只信任本轮加载且启用的技能脚本', async () => {
+    await writeFile(path.join(source, 'SKILL.md'), document('test'))
+    await mkdir(path.join(source, 'scripts'))
+    await writeFile(path.join(source, 'scripts', 'context.mjs'), 'console.log(1)')
+    const [skill] = await store.install(source)
+    const script = path.join(directory, skill.id, 'scripts', 'context.mjs')
+    expect(await store.trustedScript(script, [skill.id])).toBe(true)
+    expect(await store.trustedScript(script, [])).toBe(false)
+    expect(await store.trustedScript(path.join(directory, skill.id, 'SKILL.md'), [skill.id])).toBe(false)
+    await store.setEnabled(skill.id, false)
+    expect(await store.trustedScript(script, [skill.id])).toBe(false)
+  })
+
   it('replaces files and metadata while preserving the skill ID and enabled state', async () => {
     await writeFile(path.join(source, 'SKILL.md'), document('old'))
     await writeFile(path.join(source, 'removed.txt'), 'old file')

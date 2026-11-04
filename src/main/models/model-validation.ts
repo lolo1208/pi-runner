@@ -47,6 +47,8 @@ export function parseProfile(value: unknown): ModelProfile {
   if (item.thinking !== undefined && item.thinking !== null && typeof item.thinking !== 'boolean') throw new ModelError('推理模式无效')
   if (item.thinkingLevel != null && (typeof item.thinkingLevel !== 'string' || !['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(item.thinkingLevel))) throw new ModelError('推理强度无效')
   if (item.ollamaThinkingLevel != null && (typeof item.ollamaThinkingLevel !== 'string' || !item.ollamaThinkingLevel.trim() || item.ollamaThinkingLevel.length > 80)) throw new ModelError('Ollama 推理档位无效')
+  if (item.cacheRetention !== undefined && item.cacheRetention !== 'short' && item.cacheRetention !== 'long') throw new ModelError('缓存保留时间无效')
+  if (item.openrouterProvider !== undefined && (typeof item.openrouterProvider !== 'string' || item.openrouterProvider.length > 100 || (item.openrouterProvider !== '' && !/^[a-zA-Z0-9][a-zA-Z0-9._/-]*$/.test(item.openrouterProvider)))) throw new ModelError('OpenRouter 上游名称无效')
   const contextTokens = item.contextTokens === undefined || item.contextTokens === null ? null : numberInRange(item.contextTokens, 1, 2097152, '上下文上限', true)
   if (item.provider === 'chatgpt' && (item.baseUrl !== 'https://chatgpt.com/backend-api' || item.protocol !== 'openai-compatible' || item.temperature !== null)) throw new ModelError('ChatGPT 订阅使用固定服务地址，Temperature 由服务决定')
   if (item.provider === 'openrouter' && (normalizeBaseUrl(item.baseUrl) !== OPENROUTER_BASE_URL || item.protocol !== 'openai-compatible' || item.tokenParameter !== 'max_tokens')) throw new ModelError('OpenRouter 使用固定官方地址、OpenAI 兼容协议及 max_tokens 参数')
@@ -58,6 +60,8 @@ export function parseProfile(value: unknown): ModelProfile {
     provider: item.provider as ModelProfile['provider'], protocol: item.protocol,
     baseUrl: item.provider === 'ollama' ? normalizeOllamaUrl(item.baseUrl) : normalizeBaseUrl(item.baseUrl), model: requiredString(item.model, '模型 ID', 200),
     contextTokens, enabled: item.enabled === undefined ? true : item.enabled,
+    ...(item.cacheRetention === 'long' ? { cacheRetention: 'long' as const } : {}),
+    ...(item.provider === 'openrouter' && typeof item.openrouterProvider === 'string' && item.openrouterProvider ? { openrouterProvider: item.openrouterProvider } : {}),
     thinking: item.thinking ?? null,
     thinkingLevel: item.thinkingLevel as ModelProfile['thinkingLevel'] ?? null,
     ollamaThinkingLevel: item.ollamaThinkingLevel as string ?? null,

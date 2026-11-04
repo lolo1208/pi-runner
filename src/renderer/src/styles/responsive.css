@@ -11,7 +11,7 @@
 }
 
 .app.tools-open {
-  grid-template-columns: var(--task-sidebar-width) minmax(300px, 1fr) 330px;
+  grid-template-columns: var(--task-sidebar-width) minmax(320px, 1fr) clamp(min(360px, 100% - var(--task-sidebar-width) - 320px), var(--tool-panel-width, 360px), max(min(360px, 100% - var(--task-sidebar-width) - 320px), (100% - var(--task-sidebar-width)) * 0.5));
 }
 
 .settings-content {
@@ -21,6 +21,10 @@
 }
 
 @media (max-width: 850px) {
+.tool-panel-resizer {
+  display: none;
+}
+
 .app.tools-open {
   grid-template-columns: var(--task-sidebar-width) minmax(0, 1fr);
 }

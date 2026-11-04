@@ -51,6 +51,25 @@ describe('开发命令审核回归', () => {
     expect(commandRisk(command, process.cwd())).toEqual({ risk: 'safe' })
   })
 
+  it.each([
+    'node --check scripts/export-updates.mjs; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; git diff --stat; git diff --check',
+    'node --check scripts/export-updates.mjs; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; node --check scripts/archive-release.mjs; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; git diff --check',
+  ])('放行退出码检查组合：%s', command => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    expect(readOnlyCommand(command)).toBe(true)
+    expect(commandRisk(command, process.cwd()).risk).toBe('safe')
+  })
+
+  it.each([
+    'node --check x.js; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE; unknown-command }',
+    'node --check x.js; if ($LASTEXITCODE -ne 0) { exit $(Start-Process calc) }',
+    'node --check x.js; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE + (Start-Process calc) }',
+  ])('退出码检查不放行未知操作：%s', command => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    expect(readOnlyCommand(command)).toBe(false)
+    expect(commandRisk(command).risk).not.toBe('safe')
+  })
+
   it('目录切换不能绕过项目外目标审核', () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
     expect(commandRisk('cd ..; npm test; cd project', process.cwd()).risk).toBe('approve')

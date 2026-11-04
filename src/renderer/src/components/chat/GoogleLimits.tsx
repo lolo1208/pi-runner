@@ -5,7 +5,7 @@ import { LatestRound } from './LatestRound'
 
 const tokens = (value: number): string => value >= 1000 ? `${Number((value / 1000).toFixed(1))}k` : value.toLocaleString('zh-CN')
 
-export function GoogleLimits({ latestReply, contextLimit }: { latestReply?: ModelReply; contextLimit?: number | null }): React.JSX.Element | null {
+export function GoogleLimits({ latestReply, contextLimit, onDetails }: { latestReply?: ModelReply; contextLimit?: number | null; onDetails(): void }): React.JSX.Element | null {
   const usage = latestReply?.roundUsage ?? latestReply?.usage
   if (!usage) return null
   const summary = `本轮 ${tokens(usage.inputTokens + usage.outputTokens)} tokens`
@@ -17,6 +17,6 @@ export function GoogleLimits({ latestReply, contextLimit }: { latestReply?: Mode
       <div><dt>上下文上限</dt><dd>{contextLimit ? `${contextLimit.toLocaleString('zh-CN')} tokens` : '模型目录未提供'}</dd></div>
       <div><dt>计费方式</dt><dd>按输入、输出 Token 计费</dd></div>
     </dl>
-    <LatestRound reply={latestReply} />
+    <LatestRound reply={latestReply} onDetails={onDetails} />
   </Tooltip.Content></Tooltip.Portal></Tooltip.Root>
 }

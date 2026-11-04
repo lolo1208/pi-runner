@@ -9,13 +9,14 @@ import { TranscriptPagedList } from './TranscriptPagedList'
 import { hasPlanResult, PlanResultCard } from './PlanResultCard'
 import { AiReviewBadge } from './AiReviewBadge'
 import { AiReviewReason } from './AiReviewReason'
+import { AnimatedDisclosure } from './AnimatedDisclosure'
 
-const toolLabels: Record<string, string> = { bash: '运行命令', powershell: '运行命令', read: '读取文件', read_many: '批量读取文件', download_many: '批量下载文件', write: '写入文件', download: '下载文件', edit: '编辑文件', delete: '删除文件', mkdir: '创建目录', rmdir: '删除目录', move: '移动或重命名', copy: '复制文件或目录', stat: '查看文件或目录信息', ls: '查看目录', find: '查找文件或目录', grep: '搜索内容', read_skill_file: '读取技能文件', report_skill_usage: '说明技能用途', ask_user_question: '确认需求', submit_plan: '提交计划' }
+const toolLabels: Record<string, string> = { bash: '运行命令', powershell: '运行命令', read: '读取文件', read_many: '批量读取文件', download_many: '批量下载文件', write_many: '批量写入文件', edit_many: '批量编辑文件', write: '写入文件', download: '下载文件', edit: '编辑文件', delete: '删除文件', mkdir: '创建目录', rmdir: '删除目录', move: '移动或重命名', copy: '复制文件或目录', stat: '查看文件或目录信息', ls: '查看目录', find: '查找文件或目录', grep: '搜索内容', read_skill_file: '读取技能文件', report_skill_usage: '说明技能用途', ask_user_question: '确认需求', submit_plan: '提交计划' }
 
 function WorkItem({ item, busy = false }: { item: ChatWorkItem; busy?: boolean }): React.JSX.Element {
   const [open, setOpen] = useTranscriptState('work-open', false)
   const label = item.kind === 'thinking' ? '思考' : toolLabels[item.name ?? ''] ?? item.name ?? '工具调用'
-  const batchItems = ['read_many', 'download_many'].includes(item.name ?? '') && Array.isArray(item.args?.items) ? item.args.items : undefined
+  const batchItems = ['read_many', 'download_many', 'write_many', 'edit_many'].includes(item.name ?? '') && Array.isArray(item.args?.items) ? item.args.items : undefined
   const preview = item.kind === 'thinking' ? item.content : batchItems ? `${batchItems.length} 个文件` : String(item.args?.command ?? item.args?.path ?? item.args?.file ?? JSON.stringify(item.args ?? {}))
   const interrupted = item.state === 'interrupted' || (!busy && !item.completed && item.kind === 'tool')
   const waiting = busy && !item.completed && (item.state === 'queued' || item.state === 'waiting')
@@ -32,10 +33,10 @@ function WorkItem({ item, busy = false }: { item: ChatWorkItem; busy?: boolean }
       <ChevronRight size={14} className={open ? 'chat-disclosure-chevron open' : 'chat-disclosure-chevron'} />
     </Button>
     {item.aiReviewDetails && <AiReviewReason reviews={item.aiReviewDetails} showTarget={Boolean(batchItems)} />}
-    {open && <div className="chat-work-detail">
+    <AnimatedDisclosure open={open}><div className="chat-work-detail">
       {item.kind === 'tool' && <><div className="chat-work-detail-label">{command ? '命令' : '输入参数'}</div><pre>{command ? String(item.args?.command ?? '') : JSON.stringify(item.args, null, 2)}</pre><div className="chat-work-detail-label">执行结果</div></>}
       <pre>{item.content || emptyContent}</pre>
-    </div>}
+    </div></AnimatedDisclosure>
   </div>
 }
 
@@ -75,13 +76,13 @@ function CallActivity({ group, executing = false, status }: { group: CallGroup; 
     <Button variant="ghost" className="chat-call-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
       {executing ? <LoaderCircle size={14} className="chat-execution-spinner" aria-label="正在执行" /> : <Layers size={14} />}<span>{duration}</span>{group.messages.length > 1 && <span className="chat-call-count" aria-label={`${group.messages.length} 次调用`}>{group.messages.length}</span>}<ChevronRight size={14} className={open ? 'chat-disclosure-chevron open' : 'chat-disclosure-chevron'} />
     </Button>
-    {open && <div className="chat-work-list"><TranscriptPagedList preferLatest={executing} items={group.messages} label="组内调用记录">{(page, start) => page.map((message, offset) => <TranscriptScope key={start + offset} id={`call:${group.start + start + offset}`}>
+    <AnimatedDisclosure open={open}><div className="chat-work-list"><TranscriptPagedList preferLatest={executing} items={group.messages} label="组内调用记录">{(page, start) => page.map((message, offset) => <TranscriptScope key={start + offset} id={`call:${group.start + start + offset}`}>
       {message.call?.work.length ? <TranscriptPagedList preferLatest={executing && start + offset === group.messages.length - 1} items={message.call.work} label="工具记录">{work => work.map(item => <TranscriptScope key={item.id} id={`work:${item.id}`}><WorkItem item={item} busy={executing && start + offset === group.messages.length - 1} /></TranscriptScope>)}</TranscriptPagedList> : !(executing && start + offset === group.messages.length - 1) && <p className="chat-call-empty">{message.call ? '本次调用仅生成回复，没有工具执行或可展示的思考记录。' : '此历史调用未保存工作详情。'}</p>}
     </TranscriptScope>)}</TranscriptPagedList>
       {executing && <div className="chat-work-item" role="status" aria-live="polite">
         <div className="chat-work-progress"><LoaderCircle size={14} className="chat-execution-spinner" aria-hidden="true" /><span>{currentStatus}</span></div>
       </div>}
-    </div>}
+    </div></AnimatedDisclosure>
   </div>
 }
 
@@ -98,13 +99,15 @@ export function RoundActivity({ project, messages, execution, startedAt, status,
     <Button variant="ghost" className="chat-round-toggle" aria-expanded={open} onClick={() => setDisclosure({ busy, open: !open })}>
       <ExecutionLabel execution={execution ?? final?.execution} startedAt={startedAt} status={status} busy={busy} /><ChevronRight size={14} className={open ? 'chat-disclosure-chevron open' : 'chat-disclosure-chevron'} />
     </Button>
-    {open && busy && !groups.length && <div className="chat-round-calls">
+    <AnimatedDisclosure open={open}>
+    {busy && !groups.length && <div className="chat-round-calls">
       <div className="chat-work-item" role="status" aria-live="polite"><div className="chat-work-progress"><LoaderCircle size={14} className="chat-execution-spinner" aria-hidden="true" /><span>{status || '正在等待模型回复…'}</span></div></div>
     </div>}
-    {open && groups.length > 0 && <div className="chat-round-calls"><TranscriptPagedList preferLatest={busy} items={groups} label="调用记录">{page => page.map(group => { const message = group.messages.at(-1)!; const index = group.start + group.messages.length - 1; return <TranscriptScope id={`call:${group.start}`} key={group.start}><div className="chat-call-section">
+    {groups.length > 0 && <div className="chat-round-calls"><TranscriptPagedList preferLatest={busy} items={groups} label="调用记录">{page => page.map(group => { const message = group.messages.at(-1)!; const index = group.start + group.messages.length - 1; return <TranscriptScope id={`call:${group.start}`} key={group.start}><div className="chat-call-section">
       <CallActivity group={group} executing={busy && index === messages.length - 1} status={status} />
       {(!hasPlanCards || busy) && message.content && (busy || index < messages.length - 1) && <ChatMarkdown project={project} content={message.content} snapshotId={message.codeSnapshotId} />}
     </div></TranscriptScope> })}</TranscriptPagedList></div>}
+    </AnimatedDisclosure>
     {hasPlanCards ? <div className="chat-round-result plan-round-results">{messages.map((message, index) => <TranscriptScope key={index} id={`plan-call:${index}`}>
       {!busy && message.content && <ChatMarkdown project={project} content={message.content} snapshotId={message.codeSnapshotId} />}
       {message.call?.work.filter(hasPlanResult).map(item => <TranscriptScope key={item.id} id={`plan-result:${item.id}`}><PlanResultCard item={item} project={project} /></TranscriptScope>)}

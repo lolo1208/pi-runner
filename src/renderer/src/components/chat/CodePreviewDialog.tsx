@@ -36,7 +36,7 @@ export function CodePreviewDialog({ project, reference, snapshotId, onClose }: {
     return () => { active = false }
   }, [project, reference, snapshotId, retry])
   const lineLabel = reference.ranges.map(range => range.start === range.end ? `${range.start}` : `${range.start}–${range.end}`).join('、')
-  return <Modal open onOpenChange={open => { if (!open) onClose() }} closeOnBackdropClick title={<span className="code-preview-title"><FileCode2 size={18} aria-hidden="true" /><span>{reference.path}</span></span>} description={`第 ${lineLabel} 行 · 各段前后 10 行 · ${snapshotId ? '审查时代码快照' : '当前文件内容'}`} contentClassName="code-preview-dialog">
+  return <Modal open onOpenChange={open => { if (!open) onClose() }} closeOnBackdropClick title={<span className="code-preview-title"><FileCode2 size={18} aria-hidden="true" /><span>{reference.path}</span></span>} description={`第 ${lineLabel} 行 · ${snapshotId ? '审查时代码快照' : '实时文件内容'}`} contentClassName="code-preview-dialog">
     {error ? <div className="code-preview-state" role="alert"><p>{error}</p><Button variant="outline" onClick={() => setRetry(value => value + 1)}>重试</Button></div>
       : !preview ? <div className="code-preview-state" role="status">正在加载代码…</div>
         : rows.length > 200 ? <Virtuoso className="code-preview-scroll" tabIndex={0} aria-label="代码预览" data={rows} defaultItemHeight={22} increaseViewportBy={200}

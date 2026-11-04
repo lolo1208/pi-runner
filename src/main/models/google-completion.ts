@@ -8,7 +8,8 @@ import { ModelError } from './model-validation'
 export async function completeGoogle(profile: ModelProfile, apiKey: string, messages: ChatMessage[], signal: AbortSignal, system: string, onProgress: () => void, fetchRequest: typeof fetch = fetch): Promise<ModelReply> {
   const started = performance.now()
   const attachments = new PiAttachments(SessionManager.inMemory())
-  const provider = await createPiProvider(profile, apiKey, attachments, false, () => {}, fetchRequest, undefined, active => { if (active) onProgress() })
+  let fields: { input: boolean; output: boolean; cacheRead: boolean; cacheWrite: boolean } | undefined
+  const provider = await createPiProvider(profile, apiKey, attachments, false, () => {}, fetchRequest, undefined, active => { if (active) onProgress() }, undefined, info => { if (info.fields) fields = info.fields })
   signal.throwIfAborted()
   const reply = await provider.runtime.completeSimple(provider.model, { messages: [
     ...(system ? [{ role: 'system' as const, content: system, timestamp: Date.now() }] : []),
@@ -24,6 +25,13 @@ export async function completeGoogle(profile: ModelProfile, apiKey: string, mess
   const text = reply.content.filter(block => block.type === 'text').map(block => block.text).join('\n')
   if (reply.stopReason === 'length' && !text.trim()) throw new ModelError('Google 输出额度已被思考耗尽，请增加输出 Token 上限或降低推理强度')
   if (!text.trim()) throw new ModelError('Google 未返回文本，可能被安全策略拦截，请调整输入后重试')
+  const rawUsage = reply.usage as typeof reply.usage & { input?: number; output?: number; cacheRead?: number; cacheWrite?: number }
+  // pi-ai 将缺失的 usageMetadata 字段也归零；零值不能证明服务端明确报告了零。
+  const cacheReadReported = fields?.cacheRead || Number.isSafeInteger(rawUsage.cacheRead) && rawUsage.cacheRead! > 0
+  const cacheWriteReported = fields?.cacheWrite || Number.isSafeInteger(rawUsage.cacheWrite) && rawUsage.cacheWrite! > 0
   return { text, model: profile.model, elapsedMs: Math.round(performance.now() - started), truncated: reply.stopReason === 'length',
-    usage: { inputTokens: reply.usage.input, outputTokens: reply.usage.output, cacheReadTokens: reply.usage.cacheRead, cacheWriteTokens: reply.usage.cacheWrite } }
+    usageFields: { input: Boolean(fields?.input || Number.isSafeInteger(rawUsage.input) && rawUsage.input! > 0), output: Boolean(fields?.output || Number.isSafeInteger(rawUsage.output) && rawUsage.output! > 0), cacheRead: cacheReadReported, cacheWrite: cacheWriteReported },
+    // pi 将 Google 的缓存读取从 input 中扣除；写入量目前未由该 SDK 提供。
+    usage: { inputTokens: reply.usage.input + reply.usage.cacheRead + reply.usage.cacheWrite, outputTokens: reply.usage.output,
+      ...(cacheReadReported ? { cacheReadTokens: reply.usage.cacheRead } : {}), ...(cacheWriteReported ? { cacheWriteTokens: reply.usage.cacheWrite } : {}) } }
 }

@@ -109,7 +109,46 @@
 }
 
 .app.tools-open {
-  grid-template-columns: var(--task-sidebar-width) minmax(320px, 1fr) minmax(320px, calc((100% - var(--task-sidebar-width)) * 0.5));
+  grid-template-columns: var(--task-sidebar-width) minmax(320px, 1fr) clamp(min(360px, 100% - var(--task-sidebar-width) - 320px), var(--tool-panel-width, calc((100% - var(--task-sidebar-width)) * 0.5)), max(min(360px, 100% - var(--task-sidebar-width) - 320px), (100% - var(--task-sidebar-width)) * 0.5));
+}
+
+.app > .task-sidebar {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+}
+
+.app > .conversation {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.task-panel-resizer {
+  grid-column: 1;
+}
+
+.tool-panel-resizer {
+  grid-column: 2;
+}
+
+.panel-resizer {
+  grid-row: 1;
+  justify-self: end;
+  z-index: 6;
+  width: 10px;
+  margin-right: -5px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.panel-resizer:focus-visible {
+  outline: none;
+  background: linear-gradient(to right, transparent 4px, var(--accent) 4px, var(--accent) 5px, transparent 5px);
+}
+
+.app.tools-open > .tool-sidebar {
+  grid-column: 3;
+  grid-row: 1;
 }
 
 .task-sidebar {
@@ -182,7 +221,12 @@
   overflow-x: hidden;
   overflow-y: auto;
   /* 虚拟列表视口按滚动容器全宽定位，改用外边距，避免右侧圆角被裁切。 */
-  margin: 2px;
+  margin: 2px -2px 2px 2px;
+}
+
+/* 间距放在虚拟列表内容上，避免滚动容器的 padding 裁切列表项圆角。 */
+.task-list [data-viewport-type] {
+  padding-right: 6px;
 }
 
 .project-group {
@@ -195,7 +239,7 @@
   min-height: calc(36rem / 14);
   margin-bottom: 2px;
   display: flex;
-  border-radius: 16px;
+  border-radius: 9999px;
 }
 
 /* 与对话行（.task-row）悬停背景一致 */
@@ -410,7 +454,7 @@ to {
 
 .task-row {
   position: relative;
-  border-radius: 16px;
+  border-radius: 9999px;
   margin-bottom: 2px;
 }
 
@@ -514,7 +558,7 @@ to {
 
 .project-task-item {
   border: 0;
-  border-radius: 16px;
+  border-radius: 9999px;
   width: 100%;
   margin-left: 0;
 }
@@ -615,7 +659,8 @@ to {
   padding-right: 122px;
 }
 
-.project-running .project-running-status { right: 89px; }
+.project-running:hover .project-running-status,
+.project-running:focus-within .project-running-status { right: 89px; }
 
 .project-heading-conversations .project-create-tooltip { right: 5px; }
 .project-heading-conversations:hover .project-heading,
@@ -649,12 +694,22 @@ to {
   padding-right: 10px;
 }
 
+.task-row.running:hover .task-item,
+.task-row.running:has(:focus-visible) .task-item {
+  padding-right: calc(66rem / 14);
+}
+
+@media (hover: none) {
+  .task-row.running .task-item { padding-right: calc(66rem / 14); }
+}
+
 .task-row.running .task-delete-button:disabled {
   display: none;
 }
 
 @media (hover: none) {
   .project-running .project-heading { padding-right: 122px; }
+  .project-running:not(.project-heading-conversations) .project-running-status { right: 89px; }
 }
 
 .task-spinner {

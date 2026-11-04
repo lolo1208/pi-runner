@@ -1,16 +1,23 @@
-import { lstat, realpath, readdir, readFile } from 'node:fs/promises'
+import { lstat, realpath } from 'node:fs/promises'
 import path from 'node:path'
 import os from 'node:os'
-import { createReadToolDefinition, createEditToolDefinition, createWriteToolDefinition, createLsToolDefinition, createFindToolDefinition, createGrepToolDefinition, createPowerShellToolDefinition, createBashToolDefinition, type ToolDefinition } from '@earendil-works/pi-coding-agent'
+import { createReadToolDefinition, createLsToolDefinition, createFindToolDefinition, createGrepToolDefinition, createPowerShellToolDefinition, createBashToolDefinition, type ToolDefinition } from '@earendil-works/pi-coding-agent'
 import { ModelError } from './model-validation'
 import { DEFAULT_COMMAND_APPROVAL_REASON, type PermissionMode } from '../../shared/models'
 import { commandRisk, highRiskFileMutation, readOnlyCommand } from './tool-permissions'
 import { createDeleteToolDefinition, validateDeleteFile } from './delete-tool'
 import { filesystemToolDefinitions, validateOrdinaryPath, validateOrdinaryTree } from './filesystem-tools'
 import { createDownloadToolDefinition, validateDownloadArgs } from './download-tool'
-import { canonicalToolPath, credentialBlacklist, hiddenProjectData, within } from './security-paths'
+import { canonicalToolPath, credentialBlacklist, hiddenProjectData, within, validateToolPathSyntax } from './security-paths'
+import { restrictedSearch, restrictedLs } from './restricted-search'
+import { validateToolInput } from './tool-inputs'
 import { dependencyReadPath } from './dependency-read-path'
 import { batchToolDefinitions, ToolApprovalStopped } from './batch-tools'
+import { literalCommand } from './windows-command-parser'
+import { validateReadArgs } from './read-tool-input'
+import { textMutationToolDefinitions, validateTextMutationInput, validateTextMutationTarget } from './text-mutation-tools'
+import { FileSnapshotStopped } from './tool-execution-errors'
+import { skillScriptExtension, skillInterpreterScript } from './skill-script-policy'
 
 const fileMutations = new Set(['edit', 'write', 'download', 'delete', 'mkdir', 'rmdir', 'move', 'copy'])
 const treeOperations = new Set(['rmdir', 'move', 'copy'])
@@ -27,56 +34,8 @@ export interface ToolPermissionContext {
   workspace?: string
   protectedDirectories: string[]
   downloadFetch?: typeof fetch
+  trustedSkillScript?(script: string): Promise<boolean>
   approve(id: string, tool: string, args: Record<string, unknown>, reason: string, signal?: AbortSignal, mustConfirm?: boolean): Promise<void>
-}
-
-/** 搜索逐项检查边界，不跟随链接，也不扫描应用内部数据。 */
-async function* ordinaryFiles(target: string, protectedDirectories: string[], signal?: AbortSignal, includeDirectories = false, workspace?: string): AsyncGenerator<string> {
-  signal?.throwIfAborted()
-  const info = await lstat(target)
-  const inWorkspace = Boolean(workspace && within(workspace, target))
-  if (info.isSymbolicLink() || hiddenProjectData(path.basename(target)) || protectedDirectories.some(directory => within(directory, target)) && !inWorkspace) return
-  if (info.isFile()) { yield target; return }
-  if (!info.isDirectory()) return
-  if (includeDirectories) yield target
-  for (const entry of await readdir(target, { withFileTypes: true })) {
-    if (entry.name === 'node_modules' || entry.isSymbolicLink()) continue
-    yield* ordinaryFiles(path.join(target, entry.name), protectedDirectories, signal, includeDirectories, workspace)
-  }
-}
-
-async function restrictedSearch(tool: string, args: Record<string, unknown>, protectedDirectories: string[], signal?: AbortSignal, workspace?: string) {
-  const target = String(args.path)
-  const limit = Math.max(1, Math.min(1000, Number(args.limit) || 100))
-  const lines: string[] = []
-  let visited = 0
-  let matcher: RegExp | undefined
-  if (tool === 'grep' && args.literal !== true) {
-    try { matcher = new RegExp(String(args.pattern), args.ignoreCase ? 'i' : '') }
-    catch { throw new ModelError('搜索正则表达式无效') }
-  }
-  for await (const file of ordinaryFiles(target, protectedDirectories, signal, tool === 'find', workspace)) {
-    if (++visited > 20000 || lines.length >= limit) break
-    const relative = path.relative(target, file).split(path.sep).join('/') || path.basename(file)
-    if (tool === 'find') {
-      if (path.matchesGlob(relative, String(args.pattern)) || path.matchesGlob(path.basename(file), String(args.pattern))) lines.push(relative)
-      continue
-    }
-    if (args.glob && !path.matchesGlob(relative, String(args.glob)) && !path.matchesGlob(path.basename(file), String(args.glob))) continue
-    if ((await lstat(file)).size > 1024 * 1024) continue
-    const text = await readFile(file, 'utf8')
-    if (text.includes('\0')) continue
-    const contents = text.split(/\r?\n/)
-    const pattern = args.ignoreCase ? String(args.pattern).toLowerCase() : String(args.pattern)
-    const context = Math.max(0, Math.min(10, Number(args.context) || 0))
-    for (let index = 0; index < contents.length && lines.length < limit; index++) {
-      signal?.throwIfAborted()
-      if (matcher ? matcher.test(contents[index]) : (args.ignoreCase ? contents[index].toLowerCase() : contents[index]).includes(pattern)) {
-        lines.push(contents.slice(Math.max(0, index - context), index + context + 1).map((line, offset) => `${relative}:${Math.max(0, index - context) + offset + 1}: ${line.slice(0, 500)}`).join('\n'))
-      }
-    }
-  }
-  return { content: [{ type: 'text' as const, text: lines.join('\n').slice(0, 50000) || '未找到匹配结果。' }], details: { resultLimitReached: lines.length >= limit || visited > 20000 } }
 }
 
 /** 解析父目录与联接点，禁止文件工具越出当前项目或修改 Git 元数据。 */
@@ -97,6 +56,7 @@ export async function projectToolPath(root: string, value: string): Promise<stri
 
 export function piProjectTools(root: string, beforeMutation: () => Promise<void>, permissions?: ToolPermissionContext): ToolDefinition[] {
   const protectPath = async (target: string): Promise<void> => {
+    validateToolPathSyntax(target)
     if (await canonicalToolPath(target) !== target) throw new ModelError('操作期间目标路径发生变化，请重新请求操作')
     const inWorkspace = Boolean(permissions?.workspace && within(permissions.workspace, target))
     for (const directory of permissions?.protectedDirectories ?? []) {
@@ -113,11 +73,11 @@ export function piProjectTools(root: string, beforeMutation: () => Promise<void>
     TMPDIR: os.tmpdir(), TMP: os.tmpdir(), TEMP: os.tmpdir(), PSModuleAnalysisCachePath: path.join(os.tmpdir(), 'pi-runner-ModuleAnalysisCache'),
     PYTHONPYCACHEPREFIX: path.join(os.tmpdir(), 'pi-runner-python-cache'), PIP_CACHE_DIR: path.join(os.tmpdir(), 'pi-runner-pip-cache')
   } }) }
-  const definitions: ToolDefinition<any, any>[] = [createReadToolDefinition(root), createEditToolDefinition(root), createWriteToolDefinition(root), createDownloadToolDefinition(protectPath, { fetchRequest: permissions?.downloadFetch }), createDeleteToolDefinition(), ...filesystemToolDefinitions(protectPath), createLsToolDefinition(root), createFindToolDefinition(root), createGrepToolDefinition(root), process.platform === 'win32' ? createPowerShellToolDefinition(root, localShellOptions) : createBashToolDefinition(root, localShellOptions)]
+  const definitions: ToolDefinition<any, any>[] = [createReadToolDefinition(root), ...textMutationToolDefinitions(root, protectPath), createDownloadToolDefinition(protectPath, { fetchRequest: permissions?.downloadFetch }), createDeleteToolDefinition(), ...filesystemToolDefinitions(protectPath), createLsToolDefinition(root), createFindToolDefinition(root), createGrepToolDefinition(root), process.platform === 'win32' ? createPowerShellToolDefinition(root, localShellOptions) : createBashToolDefinition(root, localShellOptions)]
   const terminalOptions = (tool: ToolDefinition<any, any>) => ({
     parameters: tool.parameters,
     description: [tool.description,
-      permissions?.mode === 'auto' ? '项目自审：只读命令和常见开发命令（安装、构建、测试、Git 等）直接执行；其余命令先由应用自动审核，无法确定时询问你。禁止通过终端写文件，修改文件请使用专用文件工具，下载落盘请使用 download 或 download_many。网络请求无需单独审批，下载文件仍遵循写入审核。' : '',
+      permissions?.mode === 'auto' ? '项目自审：命令由应用规则或审核模型判断，必要时请求用户确认；常见开发命令并非无条件放行。直接文件操作和下载落盘须用专用工具，不得以脚本绕过。' : '',
       'partial-or-unknown 时先核对结果，只补做剩余步骤；denied 或 awaiting-approval 时不要重复申请相同授权。'
     ].filter(Boolean).join(' ')
   })
@@ -127,21 +87,49 @@ export function piProjectTools(root: string, beforeMutation: () => Promise<void>
   }
   const wrapped: ToolDefinition<any, any>[] = definitions.map(tool => ({ ...tool,
     ...(['bash', 'powershell'].includes(tool.name) ? terminalOptions(tool) : {}),
+    ...(tool.name === 'ls' ? { description: '列出目录，默认最多 500 项，可用 limit 指定 1–1000 项；输出最多 50000 字符，扫描最多 20000 项。按名称排序，目录带 / 后缀，过滤链接和受保护内容；结果不完整时明确提示，请用 find 缩小范围。' } : {}),
     ...(tool.name === 'read' ? { description: `${tool.description} 允许读取项目 node_modules 内、解析后仍位于该目录内的依赖链接文件（如 pnpm）；其他链接和链接写入仍禁止。` } : {}),
-    ...(['find', 'grep'].includes(tool.name) ? { description: `${tool.name === 'find' ? '按 glob 查找普通文件和目录' : '按模式搜索普通文件内容'}；不跟随链接，排除 Git 元数据、应用内部数据和 node_modules。` } : {}),
+    ...(['find', 'grep'].includes(tool.name) ? { description: [
+      tool.name === 'find' ? '按 glob 查找普通文件和目录，默认及最多返回 1000 项。' : '搜索普通文件内容，默认返回 100 项，最多 1000 项。跳过二进制和大于 1 MiB 的文件，匹配行最多展示 500 字符；正则单文件限时 100 毫秒，字面搜索用 literal=true。',
+      '不跟随链接，排除 Git 元数据、应用内部数据和 node_modules；输出最多 50000 字符、扫描最多 20000 项。截断或跳过时缩小范围，不能据此断言无匹配。'
+    ].join(' ') } : {}),
     execute: async (id, args, signal, update, context) => {
     signal?.throwIfAborted()
     // 固定批准的参数，调用方后续修改原对象不能改变实际执行内容。
-    const input = structuredClone(args) as Record<string, unknown>
+    const input = validateToolInput(tool.name, structuredClone(args))
+    if (tool.name === 'read') validateReadArgs(input)
     let revalidate: (() => Promise<void>) | undefined
     let forceApproval = false
     if (!permissions) {
       // 未提供权限上下文时不允许具有副作用的工具悄悄执行。
       if (fileMutations.has(tool.name) || ['bash', 'powershell'].includes(tool.name)) throw new ModelError('工具执行缺少权限上下文')
-      input.path = await projectToolPath(root, typeof input.path === 'string' ? input.path : '.')
+      input.path = await projectToolPath(root, String(input.path))
+      await protectPath(String(input.path))
+      const scope = { protectedDirectories: credentialBlacklist(), check: protectPath, signal }
+      if (['find', 'grep'].includes(tool.name)) return restrictedSearch(tool.name, input, scope)
+      if (tool.name === 'ls') return restrictedLs(input, scope)
     } else if (['bash', 'powershell'].includes(tool.name)) {
       const command = String(input.command ?? '')
-      const risk = commandRisk(command, root)
+      let risk = commandRisk(command, root)
+      // 仅信任本轮已加载技能的单条字面量调用；禁止规则和强制人工确认优先。
+      if (permissions.mode === 'auto' && risk.risk === 'approve' && !risk.mustConfirm && permissions.trustedSkillScript) {
+        const words = literalCommand(command)
+        const plainArguments = words?.every(word => !/[&|<>^%!\r\n"`$]/.test(word))
+        const interpretedScript = words && plainArguments && (process.platform === 'win32'
+          ? tool.name === 'powershell' : tool.name === 'bash' && !/[\\`$*?\[\]{}~\r\n]/.test(command) && !/^\s*&/.test(command))
+          ? skillInterpreterScript(words) : undefined
+        // CMD 会再次解释参数，连引号内的元字符、环境变量和转义符也不能信任。
+        const cmdScript = process.platform === 'win32' && tool.name === 'powershell' && words?.length
+          && /^(?:|\.(?:cmd|bat|ps1))$/i.test(path.extname(words[0])) && plainArguments
+          ? words[0] : undefined
+        // POSIX 不使用 PowerShell 的 & 调用符，也不接受转义、展开或通配符。
+        // literalCommand 负责检查引号外的命令连接、管道与重定向。
+        const posixScript = process.platform !== 'win32' && tool.name === 'bash' && words?.length
+          && !/[\\`$*?\[\]{}~\r\n]/.test(command) && !/^\s*&/.test(command)
+          && skillScriptExtension(words[0]) ? words[0] : undefined
+        const script = interpretedScript ?? cmdScript ?? posixScript
+        if (script && path.isAbsolute(script) && await permissions.trustedSkillScript(script)) risk = { risk: 'safe' }
+      }
       if (risk.risk === 'block') throw new ModelError(risk.reason ?? '终端命令被安全策略拦截')
       if (permissions.mode === 'default') {
         await approve(id, tool.name, input, DEFAULT_COMMAND_APPROVAL_REASON, signal)
@@ -151,6 +139,10 @@ export function piProjectTools(root: string, beforeMutation: () => Promise<void>
       signal?.throwIfAborted()
     } else {
       if (tool.name === 'download') validateDownloadArgs(input)
+      if (['write', 'edit'].includes(tool.name)) {
+        validateTextMutationInput(tool.name, input)
+        await validateTextMutationTarget(path.resolve(root, String(input.path)))
+      }
       const originalPath = path.resolve(root, typeof input.path === 'string' ? input.path : '.')
       const requestedPath = tool.name === 'read' ? await dependencyReadPath(root, originalPath) : originalPath
       if (tool.name === 'download') await validateOrdinaryPath(requestedPath)
@@ -210,6 +202,7 @@ export function piProjectTools(root: string, beforeMutation: () => Promise<void>
       }
       revalidate = async () => {
         if (tool.name === 'read' && await dependencyReadPath(root, originalPath) !== requestedPath) throw new ModelError('依赖链接目标发生变化，请重新请求读取')
+        if (['write', 'edit'].includes(tool.name)) await validateTextMutationTarget(target)
         if (tool.name === 'download') await validateOrdinaryPath(target)
         if (['read', 'write', 'edit', 'ls', 'find', 'grep'].includes(tool.name)) await validateOrdinaryPath(target, tool.name !== 'write')
         if (tool.name === 'delete') await validateDeleteFile(target)
@@ -227,19 +220,14 @@ export function piProjectTools(root: string, beforeMutation: () => Promise<void>
       if (await canonicalToolPath(target) !== target) throw new ModelError('审批期间目标路径发生变化，请重新请求操作')
       // 固定已校验的规范路径，不再使用原始链接路径。
       input.path = target
-      if (['find', 'grep'].includes(tool.name)) return restrictedSearch(tool.name, input, [...protectedDirectories, ...credentialDirectories], signal, workspace)
-      if (tool.name === 'ls') {
-        const entries: string[] = []
-        for (const entry of await readdir(target, { withFileTypes: true })) {
-          signal?.throwIfAborted()
-          const child = path.join(target, entry.name)
-          if (entry.isSymbolicLink() || hiddenProjectData(entry.name) || [...protectedDirectories, ...credentialDirectories].some(directory => within(directory, child) && !inWorkspace(child))) continue
-          entries.push(entry.name + (entry.isDirectory() ? '/' : ''))
-        }
-        return { content: [{ type: 'text' as const, text: entries.sort().join('\n') || '目录为空。' }], details: {} }
-      }
+      const scope = { protectedDirectories: [...protectedDirectories, ...credentialDirectories], check: protectPath, signal, workspace }
+      if (['find', 'grep'].includes(tool.name)) return restrictedSearch(tool.name, input, scope)
+      if (tool.name === 'ls') return restrictedLs(input, scope)
     }
-    if (fileMutations.has(tool.name) || (['bash', 'powershell'].includes(tool.name) && !readOnlyCommand(String(input.command ?? '')))) await beforeMutation()
+    if (fileMutations.has(tool.name) || (['bash', 'powershell'].includes(tool.name) && !readOnlyCommand(String(input.command ?? '')))) {
+      try { await beforeMutation() }
+      catch (error) { throw new FileSnapshotStopped(`保存修改前快照失败，已停止后续操作：${error instanceof Error ? error.message : String(error)}`) }
+    }
     signal?.throwIfAborted()
     if (revalidate) await revalidate()
     return tool.execute(id, input, signal, update, context)

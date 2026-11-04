@@ -3,23 +3,23 @@ import { Kbd } from '@/components/ui/kbd'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { GroupedModelSelect } from './GroupedModelSelect'
 import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { ArrowRightToLine, Check, Copy, GitCompare, Lock, Monitor, Moon, RotateCcw, ShieldCheck, Sliders, Sun } from 'lucide-react'
 import type { Preferences, ThemePreference } from '../../preferences'
 import { useLayoutEffect, useRef, useState } from 'react'
-import { findModelDescriptor, MAX_CUSTOM_PROMPT_LENGTH, PROVIDER_PRESETS, REVIEW_MODEL_OFF, type ModelSettings } from '../../../../shared/models'
+import { MAX_CUSTOM_PROMPT_LENGTH, REVIEW_MODEL_OFF, type ModelSettings } from '../../../../shared/models'
 import { unwrapModelResult } from '../../model-result'
-import { ModelIcon } from '../chat/ModelIcon'
-import { ModelPriceTag } from '../ModelPriceTag'
+import { compareModelProfiles } from '../../model-sort'
 
 interface PreferencesSectionProps {
   preferences: Preferences
   onPreferences: (preferences: Preferences) => void
 }
 
-const CUSTOM_PROMPT_EXAMPLE = '默认使用简体中文，包括与我的对话、文档、代码注释和日志；必要的技术术语与标识符保留原文。'
+const CUSTOM_PROMPT_EXAMPLE = '优先使用我明确指定的语言，否则沿用交流中的主要语言；必要的技术术语与标识符保留原文。'
 const CUSTOM_PROMPT_PLACEHOLDER = CUSTOM_PROMPT_EXAMPLE
 
 export function GeneralSettingsSection({ preferences, onPreferences, isMac, settings, onModelSettingsChange, onBusyChange }: PreferencesSectionProps & {
@@ -40,7 +40,7 @@ export function GeneralSettingsSection({ preferences, onPreferences, isMac, sett
   const [error, setError] = useState('')
   const [promptFocused, setPromptFocused] = useState(false)
   const showPromptSuggestion = promptFocused && preferences.customPrompt === ''
-  const usableProfiles = settings?.profiles.filter(item => item.enabled !== false && item.available !== false) ?? []
+  const usableProfiles = settings?.profiles.filter(item => item.enabled !== false && item.available !== false).sort(compareModelProfiles) ?? []
   const reviewValue = usableProfiles.some(item => item.id === settings?.reviewProfileId) ? settings!.reviewProfileId! : settings?.reviewDisabled ? REVIEW_MODEL_OFF : 'follow-default'
   const changeDefault = async (id: string): Promise<void> => {
     if (savingRef.current || id === settings?.activeProfileId) return
@@ -81,19 +81,13 @@ export function GeneralSettingsSection({ preferences, onPreferences, isMac, sett
     <section className="settings-card">
       <div className="setting-row">
         <div><h3>默认模型</h3><p>新建会话时使用，可在会话中单独切换。</p></div>
-        <div className="settings-select-control settings-model-select"><Select value={usableProfiles.some(item => item.id === settings?.activeProfileId) ? settings!.activeProfileId! : ''} disabled={saving || !usableProfiles.length} onValueChange={id => { void changeDefault(id) }}>
-          <SelectTrigger aria-label="默认模型"><SelectValue placeholder={settings ? '请先在模型供应商中启用模型' : '正在读取模型…'} /></SelectTrigger>
-          <SelectContent>{usableProfiles.map(item => <SelectItem key={item.id} value={item.id} textValue={`${item.name} · ${PROVIDER_PRESETS.find(provider => provider.id === item.provider)?.label ?? item.provider}`}><span className="model-name-with-icon model-priced-name"><span aria-hidden="true"><ModelIcon model={item.model} provider={item.provider} /></span><span className="model-price-name-text">{item.name} · {PROVIDER_PRESETS.find(provider => provider.id === item.provider)?.label ?? item.provider}</span><ModelPriceTag descriptor={findModelDescriptor(settings?.providers, item)} /></span></SelectItem>)}</SelectContent>
-        </Select></div>
+        <div className="settings-select-control settings-model-select"><GroupedModelSelect label="默认模型" value={settings?.activeProfileId ?? ''} placeholder={settings ? '请先在模型供应商中启用模型' : '正在读取模型…'} disabled={saving || !usableProfiles.length} profiles={usableProfiles} providers={settings?.providers} onChange={id => { void changeDefault(id) }} /></div>
       </div>
       {error && <p className="error" role="alert">{error}</p>}
       <div className="settings-divider" />
       <div className="setting-row">
         <div><h3>审核模型</h3><p>项目自审模式下辅助审核文件修改与命令，审核结果存疑或模型不可用时交由用户确认。</p></div>
-        <div className="settings-select-control settings-model-select"><Select value={reviewValue} disabled={saving || !settings} onValueChange={id => { void changeReviewModel(id) }}>
-          <SelectTrigger aria-label="审核模型"><SelectValue placeholder="使用默认模型" /></SelectTrigger>
-          <SelectContent><SelectItem value={REVIEW_MODEL_OFF}>关闭</SelectItem><SelectItem value="follow-default">使用默认模型</SelectItem>{usableProfiles.map(item => <SelectItem key={item.id} value={item.id} textValue={`${item.name} · ${PROVIDER_PRESETS.find(provider => provider.id === item.provider)?.label ?? item.provider}`}><span className="model-name-with-icon model-priced-name"><span aria-hidden="true"><ModelIcon model={item.model} provider={item.provider} /></span><span className="model-price-name-text">{item.name} · {PROVIDER_PRESETS.find(provider => provider.id === item.provider)?.label ?? item.provider}</span><ModelPriceTag descriptor={findModelDescriptor(settings?.providers, item)} /></span></SelectItem>)}</SelectContent>
-        </Select></div>
+        <div className="settings-select-control settings-model-select"><GroupedModelSelect label="审核模型" value={reviewValue} placeholder="使用默认模型" disabled={saving || !settings} profiles={usableProfiles} providers={settings?.providers} choices={[{ value: REVIEW_MODEL_OFF, label: '关闭' }, { value: 'follow-default', label: '使用默认模型' }]} onChange={id => { void changeReviewModel(id) }} /></div>
       </div>
       <div className="settings-divider" />
       <div className="setting-row">

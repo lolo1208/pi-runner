@@ -1,5 +1,5 @@
 import { Button } from '@/components/ui/button'
-import { Camera, Files, Globe, Terminal, X } from 'lucide-react'
+import { Camera, Files, Globe, Terminal } from 'lucide-react'
 import type { Checkpoint } from '../../../shared/api'
 import { useEffect, useState } from 'react'
 import { ProjectFileTree } from './ProjectFileTree'
@@ -13,7 +13,6 @@ interface ToolSidebarProps {
   checkpoints: Checkpoint[]
   revealFile: { path: string; id: number } | null
   onToolChange: (tool: ToolId) => void
-  onClose: () => void
 }
 
 const tools: { id: ToolId; label: string; icon: typeof Camera }[] = [
@@ -39,7 +38,7 @@ function PlaceholderTool({ tool }: { tool: Exclude<ToolId, 'snapshots'> }): Reac
   </div>
 }
 
-export function ToolSidebar({ project, isBusy, activeTool, checkpoints, revealFile, onToolChange, onClose }: ToolSidebarProps): React.JSX.Element {
+export function ToolSidebar({ project, isBusy, activeTool, checkpoints, revealFile, onToolChange }: ToolSidebarProps): React.JSX.Element {
   const [history, setHistory] = useState<{ project: string; checkpoints: Checkpoint[] } | null>(null)
   const [historyError, setHistoryError] = useState('')
   useEffect(() => {
@@ -58,10 +57,6 @@ export function ToolSidebar({ project, isBusy, activeTool, checkpoints, revealFi
   ].map(checkpoint => [checkpoint.hash, checkpoint])).values()]
     .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
   return <section className="tool-sidebar" aria-label="侧栏工具">
-    <header>
-      <span>侧栏工具</span>
-      <Button className="icon-button" aria-label="关闭工具栏" onClick={onClose}><X size={17} /></Button>
-    </header>
     <nav className="tool-tabs" aria-label="工具选择">
       {tools.map(({ id, label, icon: Icon }) => <Button key={id} aria-pressed={activeTool === id} onClick={() => onToolChange(id)}><Icon size={16} />{label}</Button>)}
     </nav>

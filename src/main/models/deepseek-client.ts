@@ -10,6 +10,34 @@ export { DEEPSEEK_BASE_URL } from '../../shared/deepseek'
 export class DeepseekClient {
   constructor(private readonly fetchRequest: typeof fetch = fetch) {}
 
+  async balance(apiKey: string): Promise<import('../../shared/models').DeepseekBalance> {
+    const signal = AbortSignal.timeout(15000)
+    try {
+      const response = await this.fetchRequest(`${new URL(DEEPSEEK_BASE_URL).origin}/user/balance`, {
+        headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' }, signal, redirect: 'error'
+      })
+      if (!response.ok) {
+        await response.body?.cancel().catch(() => undefined)
+        throw new ModelError(response.status === 401 ? 'DeepSeek API Key 无效，请重新配置连接' : `DeepSeek 余额读取失败（HTTP ${response.status}）`)
+      }
+      const data = await readModelJson(response, 1024 * 1024)
+      if (typeof data.is_available !== 'boolean' || !Array.isArray(data.balance_infos) || data.balance_infos.length > 20) throw new ModelError('DeepSeek 余额数据格式无效')
+      const balances = data.balance_infos.map(value => {
+        const item = asRecord(value)
+        const amount = (value: unknown): string => {
+          if (typeof value !== 'string' || !/^\d+(?:\.\d+)?$/.test(value) || value.length > 40) throw new ModelError('DeepSeek 余额数据格式无效')
+          return value
+        }
+        return { currency: requiredString(item.currency, '币种', 10), total: amount(item.total_balance), granted: amount(item.granted_balance), toppedUp: amount(item.topped_up_balance) }
+      })
+      return { fetchedAt: Date.now(), available: data.is_available, balances }
+    } catch (error) {
+      if (signal.aborted) throw new ModelError('DeepSeek 余额读取超时，将自动重试')
+      if (error instanceof ModelError) throw error
+      throw new ModelError('无法读取 DeepSeek 余额，请检查网络后重试')
+    }
+  }
+
   async list(apiKey: string): Promise<ModelDescriptor[]> {
     const signal = AbortSignal.timeout(30000)
     try {

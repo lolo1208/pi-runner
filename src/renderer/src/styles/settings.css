@@ -1,3 +1,13 @@
+.grouped-model-select-content .ui-button {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.grouped-model-select-content .ui-button:not(:disabled):is(:hover, :focus-visible) {
+  background: var(--hover);
+}
+
 .settings-layout {
   --settings-description-color: var(--muted);
   grid-template-columns: var(--task-sidebar-width) minmax(0, 1fr);

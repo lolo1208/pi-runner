@@ -10,7 +10,7 @@ const referenceMarkdown = new Marked({ gfm: true }).use({ extensions: [{
   start(source) { return new RegExp(CODE_REFERENCE_SOURCE, 'u').exec(source)?.index },
   tokenizer(source) {
     const parsed = parseCodeReference(source)
-    if (parsed) return { type: 'codeReference', raw: parsed.raw, reference: parsed.reference, label: parsed.raw.slice(parsed.raw.indexOf('第')) }
+    if (parsed) return { type: 'codeReference', raw: parsed.raw, reference: parsed.reference, label: parsed.raw.slice(parsed.raw.indexOf(parsed.reference.path) + parsed.reference.path.length).replace(/^[`\]]+|[`\]]+$/g, '') }
   }
 }] })
 

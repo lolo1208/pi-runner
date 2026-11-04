@@ -31,7 +31,7 @@ export function CommandApprovalDialog({ open, onOpenChange, approval, repeat, on
   return <Modal open={open} onOpenChange={onOpenChange} title={<span className="tool-approval-file-title"><Terminal size={18} aria-hidden="true" /><span>请求执行终端命令</span><AiReviewBadge show={approval.aiReviewed} /></span>}
     description={notice} contentClassName="command-approval-dialog">
     <div className="command-approval-body">
-      {approval.aiReviewed && <AiReviewReason reviews={[{ decision: 'ask', reason: approval.aiReviewReason }]} />}
+      {approval.aiReviewed && <AiReviewReason reviews={[{ decision: 'ask', reason: approval.aiReviewReason, model: approval.aiReviewModel, provider: approval.aiReviewProvider }]} />}
       <div className="command-approval-meta"><span>工作目录</span><span className="command-approval-cwd" title={approval.cwd}>{approval.cwd}</span></div>
       <div className="command-approval-command">
         <span className="command-approval-label">命令</span>

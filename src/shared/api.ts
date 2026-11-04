@@ -42,6 +42,7 @@ export interface PiRunnerApi {
   getChatgptUsage(): Promise<ModelResult<import('./models').ChatgptUsage>>
   loadConversations(): Promise<ConversationState>
   saveConversations(state: ConversationState): Promise<void>
+  saveConversationDrafts(drafts: import('./conversations').ConversationDraftUpdate[]): Promise<void>
   /** 退出前收集草稿并等待待保存的会话全部落盘；失败时阻止正常退出。 */
   onFlushConversations(callback: () => Promise<void>): () => void
   selectProject(): Promise<string | null>
@@ -73,6 +74,7 @@ export interface PiRunnerApi {
   connectDeepseek(apiKey?: string): Promise<ModelResult<ModelSettings>>
   connectOpenrouter(apiKey?: string): Promise<ModelResult<ModelSettings>>
   getOpenrouterUsage(): Promise<ModelResult<import('./models').OpenrouterUsage>>
+  getDeepseekBalance(): Promise<ModelResult<import('./models').DeepseekBalance>>
   getOllamaModelInfo(baseUrl: string, model: string): Promise<ModelResult<ModelDescriptor>>
   minimizeWindow(): Promise<void>
   toggleMaximizeWindow(): Promise<boolean>
@@ -84,6 +86,7 @@ export interface PiRunnerApi {
 export const IPC_CHANNELS = {
   googleConnect: 'models:google-connect',
   deepseekConnect: 'models:deepseek-connect',
+  deepseekBalance: 'models:deepseek-balance',
   codePreview: 'files:code-preview',
   skillsExport: 'models:skills-export',
   skillsList: 'models:skills-list', skillsInstall: 'models:skills-install', skillsEnable: 'models:skills-enable', skillsDelete: 'models:skills-delete', skillsRefresh: 'models:skills-refresh', skillsDirectory: 'models:skills-directory', skillsOpenDirectory: 'models:skills-open-directory',
@@ -96,7 +99,7 @@ export const IPC_CHANNELS = {
   permissionMode: 'models:permission-mode', toolApproval: 'models:tool-approval',
   chatgptStatus: 'models:chatgpt-status', chatgptStart: 'models:chatgpt-start', chatgptOpen: 'models:chatgpt-open', chatgptCopy: 'models:chatgpt-copy',
   chatgptSubmit: 'models:chatgpt-submit', chatgptCancel: 'models:chatgpt-cancel', chatgptLogout: 'models:chatgpt-logout', chatgptModels: 'models:chatgpt-models', chatgptInfo: 'models:chatgpt-info', chatgptUsage: 'models:chatgpt-usage',
-  conversationsLoad: 'conversations:load', conversationsSave: 'conversations:save',
+  conversationsLoad: 'conversations:load', conversationsSave: 'conversations:save', conversationsDraftsSave: 'conversations:drafts-save',
   conversationsFlush: 'conversations:flush', conversationsFlushed: 'conversations:flushed',
   selectProject: 'project:select', checkpoint: 'snapshot:create',
   checkpoints: 'snapshot:list',

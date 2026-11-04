@@ -43,6 +43,9 @@ export class ModelService {
     if (!(await this.store.list()).encryptionAvailable) throw new ModelError('系统安全存储不可用，无法保存或读取 API Key')
     return this.store.syncDeepseek(await this.deepseek.list(key), value === undefined ? undefined : key)
   }
+  async deepseekBalance() {
+    return this.deepseek.balance(await this.store.deepseekKey())
+  }
   async openrouterUsage() {
     return this.openrouter.usage(await this.store.openrouterKey())
   }
@@ -171,10 +174,11 @@ export class ModelService {
         try { return await client.complete(args[0], args[1], args[2], args[3], args[4], () => { modelRequestActive(true); args[5]?.() }) }
         finally { modelRequestActive(false) }
       } }
-      const prepared = isTest ? { messages: conversation } : await compactContext(timedClient, config.profile, config.apiKey, conversation, controller.signal, instruction, context as ContextOptions | undefined)
+      const auxiliaryCalls: import('../../shared/models').AuxiliaryCallDetail[] = []
+      const prepared = isTest ? { messages: conversation } : await compactContext(timedClient, config.profile, config.apiKey, conversation, controller.signal, instruction, context as ContextOptions | undefined, call => auxiliaryCalls.push(call))
       const result = await timedClient.complete(config.profile, config.apiKey, prepared.messages, controller.signal, instruction)
       controller.signal.throwIfAborted()
-      return { ...result, ...('compaction' in prepared && prepared.compaction ? { compaction: prepared.compaction } : {}) }
+      return { ...result, ...(auxiliaryCalls.length ? { auxiliaryCalls } : {}), ...('compaction' in prepared && prepared.compaction ? { compaction: prepared.compaction } : {}) }
     } catch (error) {
       if (controller.signal.aborted) throw new ModelError(timedOut ? '模型响应长时间无进展，请检查服务或增加超时秒数' : '模型请求已取消')
       throw error

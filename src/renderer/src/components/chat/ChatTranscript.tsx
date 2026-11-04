@@ -6,6 +6,7 @@ import { Settings2 } from 'lucide-react'
 import type { AgentSnapshot, ChatMessage, ProviderId } from '../../../../shared/models'
 import { ChatImages } from './ChatImages'
 import { CopyMessageButton } from './CopyMessageButton'
+import { RoundUsageButton } from './RoundUsageButton'
 import { DeleteRoundButton } from './DeleteRoundButton'
 import { RoundChanges } from './RoundChanges'
 import { RoundActivity } from './RoundActivity'
@@ -77,6 +78,8 @@ interface TranscriptRow {
   roundIndex: number
   snapshots: AgentSnapshot[]
   kind: 'message' | 'pending' | 'stream'
+  roundExecution?: ChatMessage['execution']
+  roundPending?: boolean
 }
 
 interface ReadingPosition {
@@ -135,12 +138,20 @@ export const ChatTranscript = memo(function ChatTranscript(props: ChatTranscript
       const target = anchors.get(round.after.hash) ?? round.messageIndex
       if (target !== undefined) messageGroups.get(target)?.snapshots.push(round)
     }
+    const roundExecutions = new Map<number, ChatMessage['execution']>()
+    for (const row of groups) for (const message of row.messages) {
+      if (message.role === 'assistant' && message.execution) roundExecutions.set(row.roundIndex, message.execution)
+    }
     return groups.map((row, index) => {
+      if (row.messages[0]?.role === 'user') {
+        row.roundExecution = roundExecutions.get(row.roundIndex)
+        row.roundPending = Boolean(isBusy && row.roundIndex === roundIndex)
+      }
       const old = previousGroups.current[index]
-      return old?.key === row.key && old.messages.length === row.messages.length && old.messages.every((message, i) => message === row.messages[i])
+      return old?.key === row.key && old.roundExecution === row.roundExecution && old.roundPending === row.roundPending && old.messages.length === row.messages.length && old.messages.every((message, i) => message === row.messages[i])
         && old.snapshots.length === row.snapshots.length && old.snapshots.every((round, i) => round === row.snapshots[i]) ? old : row
     })
-  }, [messages, snapshots])
+  }, [messages, snapshots, isBusy])
   useLayoutEffect(() => { previousGroups.current = groups }, [groups])
 
   const hasActiveAssistant = Boolean(isBusy && execution && groups.some(row => row.messages[0]?.role === 'assistant' && row.index + row.messages.length > execution.firstMessage))
@@ -637,6 +648,7 @@ const TranscriptMessage = memo(function TranscriptMessage({ row, project, isBusy
     {Boolean(message.images?.length) && <ChatImages images={message.images!} />}
     {message.role === 'user' && message.content && <p>{bubbleText(message.content)}</p>}
     {message.role === 'user' && <div className="message-actions">
+      {row.roundExecution && !row.roundPending && <RoundUsageButton execution={row.roundExecution} />}
       {bubbleText(message.content) && <CopyMessageButton text={bubbleText(message.content)} />}
       {onDeleteRound && row.kind === 'message' && <DeleteRoundButton disabled={isBusy || settingsDisabled || deletingRound} onDelete={() => onDeleteRound(row.index)} />}
     </div>}

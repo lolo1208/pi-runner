@@ -1,5 +1,5 @@
 import { Tooltip } from 'radix-ui'
-import { useDeferredValue, useMemo } from 'react'
+import { useDeferredValue, useMemo, useState } from 'react'
 import { Monitor } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { ChatAttachment, ChatMessage, ModelProfileView, ModelRateLimit, ModelReply, ModelUsage, OutputSpeed } from '../../../../shared/models'
@@ -9,6 +9,8 @@ export { estimateTextTokens } from '../../../../shared/context'
 import { SubscriptionLimits } from './SubscriptionLimits'
 import { OpenrouterLimits } from './OpenrouterLimits'
 import { GoogleLimits } from './GoogleLimits'
+import { DeepseekBalance } from './DeepseekBalance'
+import { RoundUsageDialog } from './RoundUsageDialog'
 
 interface Props {
   project?: string | null
@@ -25,13 +27,16 @@ interface Props {
   rateLimits?: ModelRateLimit[]
   subscriptionUsage?: import('../../../../shared/models').ChatgptUsage
   openrouterUsage?: import('../../../../shared/models').OpenrouterUsage
+  deepseekBalance?: import('../../../../shared/models').DeepseekBalance
   onOpenProject(): void
 }
 
 const compact = (value: number): string => value >= 1000 ? `${Number((value / 1000).toFixed(1))}K` : String(value)
 const number = (value: number): string => value.toLocaleString('en-US')
 
-export function ComposerStatus({ project, profile, contextLimit, messages, prompt, instruction = '', attachments, usage, outputSpeed, latestReply, rateLimits, subscriptionUsage, openrouterUsage, compressionThreshold = DEFAULT_COMPRESSION_THRESHOLD, onOpenProject }: Props): React.JSX.Element {
+export function ComposerStatus({ project, profile, contextLimit, messages, prompt, instruction = '', attachments, usage, outputSpeed, latestReply, rateLimits, subscriptionUsage, openrouterUsage, deepseekBalance, compressionThreshold = DEFAULT_COMPRESSION_THRESHOLD, onOpenProject }: Props): React.JSX.Element {
+  const [detailsReply, setDetailsReply] = useState<ModelReply>()
+  const openDetails = (): void => { if (latestReply) setDetailsReply(latestReply) }
   const measured = usage && usage.inputTokens + usage.outputTokens > 0 ? usage : undefined
   const history = useMemo(() => {
     if (!measured) return { tokens: estimateContextTokens(messages, instruction), trailing: false }
@@ -59,9 +64,10 @@ export function ComposerStatus({ project, profile, contextLimit, messages, promp
       {project && <Button type="button" variant="ghost" className="composer-project" title={project} aria-label={`打开项目目录：${projectName}`} onClick={onOpenProject}><Monitor size={13} aria-hidden="true" /><span>{projectName}</span></Button>}
       <div className="composer-status-details">
         {outputSpeed && outputSpeed.outputTokens > 0 && <SpeedIndicator speed={outputSpeed} />}
-        {profile?.provider === 'chatgpt' && <SubscriptionLimits usage={subscriptionUsage} latestReply={latestReply} />}
-        {profile?.provider === 'openrouter' && <OpenrouterLimits model={profile.model} usage={openrouterUsage} latestReply={latestReply} />}
-        {profile?.provider === 'google' && <GoogleLimits latestReply={latestReply} contextLimit={contextLimit} />}
+        {profile?.provider === 'chatgpt' && <SubscriptionLimits usage={subscriptionUsage} latestReply={latestReply} onDetails={openDetails} />}
+        {profile?.provider === 'openrouter' && <OpenrouterLimits model={profile.model} usage={openrouterUsage} latestReply={latestReply} onDetails={openDetails} />}
+        {profile?.provider === 'deepseek' && <DeepseekBalance balance={deepseekBalance} latestReply={latestReply} onDetails={openDetails} />}
+        {profile?.provider === 'google' && <GoogleLimits latestReply={latestReply} contextLimit={contextLimit} onDetails={openDetails} />}
         {profile?.provider === 'openai' && <Tooltip.Root>
           <Tooltip.Trigger asChild><Button type="button" variant="ghost" className="composer-limits" aria-label="当前模型使用限制">
             {rateLimits?.length ? rateLimits.map(item => <span key={item.kind}>{item.kind === 'requests' ? '请求' : 'Token'} 剩余 {Math.round(item.remaining / item.limit * 100)}%</span>) : '使用限制：暂未提供'}
@@ -87,5 +93,6 @@ export function ComposerStatus({ project, profile, contextLimit, messages, promp
         </Tooltip.Root>
       </div>
     </div>
+    {detailsReply && <RoundUsageDialog reply={detailsReply} onClose={() => setDetailsReply(undefined)} />}
   </Tooltip.Provider>
 }

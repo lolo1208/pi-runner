@@ -276,13 +276,39 @@ function ModelChat({ notificationNavigationRequest = 0, snapshots, onSnapshotsCh
     }
   }), [conversationId])
   const [statistics, setStatistics] = useState<{ profileId: string; reply: ModelReply } | null>(null)
-  const matchingStatistics = statistics && statistics.profileId === profile?.id ? statistics : null
   const lastAssistant = useMemo(() => [...messages].reverse().find(message => message.role === 'assistant'), [messages])
+  const savedExecution = lastAssistant?.execution
+  const savedRound = savedExecution?.profileId === profile?.id ? savedExecution?.roundStatistics : undefined
+  const restoredReply: ModelReply | undefined = savedRound && savedExecution ? { text: '', model: savedExecution.model, elapsedMs: savedExecution.elapsedMs ?? 0, ...savedRound,
+    ...(savedExecution.auxiliaryCalls?.length ? { auxiliaryCalls: savedExecution.auxiliaryCalls } : {}) } : undefined
+  const matchingStatistics = statistics && statistics.profileId === profile?.id ? statistics : restoredReply ? { profileId: profile!.id, reply: restoredReply } : null
   const statusMessages = useMemo(() => contextMessages(messages, compaction), [messages, compaction])
   const contextUsage = nativeHistory.current && lastAssistant?.execution?.model === profile?.model
     ? lastAssistant?.call?.usage : matchingStatistics?.reply.usage
   const [subscriptionUsage, setSubscriptionUsage] = useState<ChatgptUsage>()
   const [openrouterUsage, setOpenrouterUsage] = useState<OpenrouterUsage>()
+  const [deepseekBalance, setDeepseekBalance] = useState<import('../../shared/models').DeepseekBalance>()
+  useEffect(() => {
+    setDeepseekBalance(undefined)
+    if (!active || profile?.provider !== 'deepseek') return
+    let disposed = false
+    let loading = false
+    const refresh = async (): Promise<void> => {
+      if (loading) return
+      loading = true
+      try {
+        const value = unwrapModelResult(await window.piRunner.getDeepseekBalance())
+        if (!disposed) setDeepseekBalance(value)
+      } catch (error) {
+        if (!disposed) setDeepseekBalance({ fetchedAt: 0, error: error instanceof Error ? error.message : 'DeepSeek 余额读取失败，将自动重试' })
+      } finally { loading = false }
+    }
+    void refresh()
+    const timer = setInterval(() => void refresh(), 60000)
+    const onFocus = (): void => { void refresh() }
+    window.addEventListener('focus', onFocus)
+    return () => { disposed = true; clearInterval(timer); window.removeEventListener('focus', onFocus) }
+  }, [active, profile?.provider, profile?.model, requestId])
   useEffect(() => {
     setOpenrouterUsage(undefined)
     if (!active || profile?.provider !== 'openrouter') return
@@ -452,7 +478,7 @@ function ModelChat({ notificationNavigationRequest = 0, snapshots, onSnapshotsCh
       {active && error && <p className="error" role="alert">{error}</p>}
       {active && notice && <p className="request-notice" role="status">{notice}</p>}
       <ChatComposer stopping={stopping} active={active} queue={queue} editingId={editingId} queuePaused={queuePaused} onResumeQueue={() => setQueuePaused(false)} onCancelEdit={restoreDraft} onEditQueued={editQueued} onDeleteQueued={deleteQueued} onReorderQueued={reorderQueued} intentMode={intentMode} onIntentChange={changeIntent} permissionMode={permissionMode} onPermissionChange={conversationId ? changePermission : undefined} profile={profile} profiles={availableProfiles} providers={providers} onSelectModel={id => { setSelectedModelId(id); onModelChange?.(id) }} onThinkingChange={changeThinking} prompt={prompt} images={images} skillIds={skillIds} onSkillsChange={setSkillIds} onImagesChange={setImages} isBusy={Boolean(requestId)} hasMessages={messages.length > 0} settingsDisabled={settingsDisabled || permissionChanging || deletingRound || !projectReady} sendWithCtrlEnter={sendWithCtrlEnter} onPromptChange={setPrompt} onOpenSettings={onOpenSettings} onSend={submit} onCancel={() => { void stopRequest().catch(() => setError('取消请求失败，请重试')) }} />
-      {active && <ComposerStatus outputSpeed={outputSpeed} latestReply={matchingStatistics?.reply} subscriptionUsage={subscriptionUsage} openrouterUsage={openrouterUsage} compressionThreshold={compressionThreshold} project={project} profile={profile} contextLimit={providers?.find(item => item.provider === profile?.provider && item.baseUrl === profile?.baseUrl)?.models.find(item => item.id === profile?.model)?.maxContextTokens} messages={statusMessages} prompt={prompt} instruction={customPrompt} attachments={images} usage={contextUsage} rateLimits={matchingStatistics?.reply.rateLimits} onOpenProject={() => {
+      {active && <ComposerStatus outputSpeed={outputSpeed} latestReply={matchingStatistics?.reply} subscriptionUsage={subscriptionUsage} openrouterUsage={openrouterUsage} deepseekBalance={deepseekBalance} compressionThreshold={compressionThreshold} project={project} profile={profile} contextLimit={providers?.find(item => item.provider === profile?.provider && item.baseUrl === profile?.baseUrl)?.models.find(item => item.id === profile?.model)?.maxContextTokens} messages={statusMessages} prompt={prompt} instruction={customPrompt} attachments={images} usage={contextUsage} rateLimits={matchingStatistics?.reply.rateLimits} onOpenProject={() => {
         if (project) void window.piRunner.openProjectDirectory(project).catch(() => setError('无法打开项目目录，请检查目录是否存在后重试'))
       }} />}
     </div>

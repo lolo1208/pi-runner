@@ -150,7 +150,11 @@ export function useRoundChanges(rounds: AgentSnapshot[], visible: string[], acti
 
   useLayoutEffect(() => {
     if (input.current.active !== active) generation.current++
-    if (disabled && !input.current.disabled) checkVersion.current++
+    // 新轮次加入时，旧轮次的检查可能早于本轮文件修改，不能继续沿用。
+    // 复用现有批量检查，每批仍只采集一次项目文件，不增加轮询。
+    const previousKeys = new Set(input.current.rounds.map(roundChangesKey))
+    const hasNewRound = rounds.some(round => !previousKeys.has(roundChangesKey(round)))
+    if (disabled && !input.current.disabled || hasNewRound) checkVersion.current++
     if (active && !input.current.active) {
       for (const [key, last] of checked.current) if (Date.now() - last.at >= 60000) checked.current.delete(key)
     }

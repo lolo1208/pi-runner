@@ -15,11 +15,12 @@ import { googleFetchInjectionWorks } from './google-fetch-support'
 import { googleThinking } from '../../shared/google'
 import { modelResponseError } from './model-request-error'
 import { deepseekModelInfo, deepseekThinking } from '../../shared/deepseek'
+import { AnthropicCacheBoundary, cacheFingerprint, emptyUsageFields, observeUsage } from './pi-cache'
 
-export async function createPiProvider(profile: ModelProfile, apiKey: string, attachments: PiAttachments, responses: boolean, onLimits: (limits: ModelRateLimit[]) => void, fetchRequest: typeof fetch = fetch, chatgpt?: ChatgptService, onModelRequestActive: (active: boolean) => void = () => {}, onGoogleRetry: (attempt: number) => void = () => {}) {
+export async function createPiProvider(profile: ModelProfile, apiKey: string, attachments: PiAttachments, responses: boolean, onLimits: (limits: ModelRateLimit[]) => void, fetchRequest: typeof fetch = fetch, chatgpt?: ChatgptService, onModelRequestActive: (active: boolean) => void = () => {}, onGoogleRetry: (attempt: number) => void = () => {}, onCacheInfo: (info: { fields?: ReturnType<typeof emptyUsageFields>; fingerprint?: ReturnType<typeof cacheFingerprint>; upstream?: string; boundary?: { signature: string; index: number } }) => void = () => {}, previousBoundary?: { signature: string; index: number }) {
   if (profile.provider === 'chatgpt') {
     if (!chatgpt) throw new ModelError('ChatGPT 订阅服务尚未初始化，请重启应用')
-    return chatgpt.createProvider(profile, attachments, onModelRequestActive)
+    return chatgpt.createProvider(profile, attachments, onModelRequestActive, onCacheInfo)
   }
   if (profile.provider === 'google' && !googleFetchInjectionWorks()) throw new ModelError('Google SDK 的网络注入未生效（@google/genai 补丁丢失）。请在项目目录重新运行 pnpm install 后重启应用')
   const runtime = await ModelRuntime.create({ credentials: new InMemoryCredentialStore(), modelsPath: null, refreshOnCreate: false })
@@ -36,6 +37,7 @@ export async function createPiProvider(profile: ModelProfile, apiKey: string, at
   }
   // 本地窗口与下发的 num_ctx 保持一致，避免应用按 32K 估算而 Ollama 只给了默认的 4K。
   let ollamaCall: OllamaCallInfo | undefined
+  const boundary = new AnthropicCacheBoundary(previousBoundary)
   const contextWindow = profile.provider === 'ollama' ? ollamaContextTokens(profile) : profile.contextTokens ?? (deepseek ? deepseekModelInfo(profile.model).maxContextTokens : undefined) ?? Math.max(32768, profile.maxTokens * 2)
   runtime.registerProvider(provider, {
     api, baseUrl: profile.baseUrl, apiKey: apiKey || 'pi-runner-local',
@@ -43,12 +45,13 @@ export async function createPiProvider(profile: ModelProfile, apiKey: string, at
       contextWindow, maxTokens: profile.maxTokens,
       ...(googleControls ? { thinkingLevelMap: Object.fromEntries(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].map(level => [level, googleControls.values.includes(level) ? level : null])) } : {}),
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      ...(api === 'openai-completions' ? { compat: { maxTokensField: deepseek ? 'max_tokens' as const : profile.tokenParameter, supportsDeveloperRole: profile.provider === 'openai', supportsStore: false, supportsReasoningEffort: deepseek || profile.provider === 'openai' || profile.provider === 'openrouter', ...(deepseek ? { thinkingFormat: 'deepseek' as const, requiresReasoningContentOnAssistantMessages: true } : {}), ...(profile.provider === 'openrouter' ? { thinkingFormat: 'openrouter' as const } : {}) } } : {}) }],
+      ...(api === 'openai-completions' ? { compat: { maxTokensField: deepseek ? 'max_tokens' as const : profile.tokenParameter, supportsDeveloperRole: profile.provider === 'openai', supportsStore: false, supportsReasoningEffort: deepseek || profile.provider === 'openai' || profile.provider === 'openrouter', ...(deepseek ? { thinkingFormat: 'deepseek' as const, requiresReasoningContentOnAssistantMessages: true } : {}), ...(profile.provider === 'openrouter' ? { thinkingFormat: 'openrouter' as const, ...(profile.model.startsWith('anthropic/') ? { cacheControlFormat: 'anthropic' as const } : {}) } : {}) } } : {}) }],
     streamSimple: (model: Model<Api>, context: TranscriptContext, options?: SimpleStreamOptions) => {
       const controller = new AbortController()
       let responseError: string | undefined
+      const fields = emptyUsageFields()
       return requestPiStream(() => implementation.streamSimple(model, context, {
-      ...options, apiKey: apiKey || 'pi-runner-local', maxTokens: Math.min(options?.maxTokens ?? profile.maxTokens, profile.maxTokens),
+      ...options, ...(options?.cacheRetention !== 'none' && profile.cacheRetention === 'long' && ((profile.provider === 'anthropic' && profile.protocol === 'anthropic' && new URL(profile.baseUrl).hostname === 'api.anthropic.com') || (profile.provider === 'openai' && new URL(profile.baseUrl).hostname === 'api.openai.com')) ? { cacheRetention: 'long' as const } : {}), apiKey: apiKey || 'pi-runner-local', maxTokens: Math.min(options?.maxTokens ?? profile.maxTokens, profile.maxTokens),
       signal: options?.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal,
       ...(profile.temperature !== null ? { temperature: profile.temperature } : {}),
       // OpenAI/Anthropic SDK 将 0 视为立即超时；实际空闲超时由 ModelService 控制。
@@ -73,9 +76,12 @@ export async function createPiProvider(profile: ModelProfile, apiKey: string, at
           if (config?.thinkingConfig && budget != null && budget > 0) config.thinkingConfig.thinkingBudget = Math.min(budget, Math.max(128, profile.maxTokens - 256))
           if (Buffer.byteLength(JSON.stringify(body)) > 19_000_000) throw new ModelError('Google 内联请求接近 20 MB 上限，请减少附件或压缩文件后重试')
         }
+        if (profile.protocol === 'anthropic' && options?.cacheRetention !== 'none') boundary.apply(body)
+        if (options?.cacheRetention !== 'none') onCacheInfo({ fingerprint: cacheFingerprint(body), ...(profile.protocol === 'anthropic' && boundary.snapshot() ? { boundary: boundary.snapshot() } : {}) })
         if (responses) body.store = false
         if (profile.temperature === null || (deepseek && deepseekThinking(profile) !== 'off')) delete body.temperature
         if (profile.provider === 'openrouter') {
+          if (profile.openrouterProvider) body.provider = { order: [profile.openrouterProvider], allow_fallbacks: true }
           if (!profile.supportedParameters?.includes('temperature')) delete body.temperature
           delete body.reasoning_effort
           if (profile.thinkingLevel != null) body.reasoning = profile.thinkingLevel === 'off' ? { enabled: false } : { effort: profile.thinkingLevel, exclude: false }
@@ -85,6 +91,9 @@ export async function createPiProvider(profile: ModelProfile, apiKey: string, at
       },
       onProviderStreamEvent: async (event, target) => {
         onModelRequestActive(true)
+        observeUsage(event, fields)
+        const upstream = profile.provider === 'openrouter' && event && typeof event === 'object' && typeof (event as Record<string, unknown>).provider === 'string' ? (event as Record<string, string>).provider : undefined
+        onCacheInfo({ fields: { ...fields }, ...(upstream && upstream.length <= 128 ? { upstream } : {}) })
         await options?.onProviderStreamEvent?.(event, target)
       },
       onResponse: async (response, target) => {

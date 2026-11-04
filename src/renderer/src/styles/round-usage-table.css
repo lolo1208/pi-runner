@@ -1,0 +1,9 @@
+.round-usage-title { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 14px; }
+.round-usage-title-meta { color: var(--muted); font-size: 0.85em; font-weight: 400; }
+.round-usage-scroll > [data-slot="table-container"] { overflow: visible; }
+.round-usage-table { min-width: 880px; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.round-usage-table th, .round-usage-table td { padding: 14px 12px; border-bottom: 1px solid var(--border); text-align: right; }
+.round-usage-table th { color: var(--muted); }
+.round-usage-table thead { position: sticky; top: 0; z-index: 1; background: var(--bg); }
+.round-usage-table th:first-child, .round-usage-table td:first-child, .round-usage-table th:nth-child(2), .round-usage-table td:nth-child(2) { text-align: left; }
+.round-usage-cache-note { display: block; white-space: normal; overflow-wrap: anywhere; color: var(--muted); font-size: 12px; }

@@ -103,6 +103,10 @@ class QueryParser {
           this.counterLoop()
         } else if (this.eat('if')) {
           this.conditional()
+        } else if (this.eat('exit')) {
+          // 仅允许传播原生命令的退出码，不接受表达式或其他命令。
+          this.need('$lastexitcode')
+          if (this.peek() && !this.peek('}') && !this.peek(';')) throw Error('exit boundary')
         } else if (this.eat('try')) {
           const before = new Map(this.variables)
           this.block(); while (this.eat(';')) { /* newlines before catch */ }
@@ -288,7 +292,7 @@ class QueryParser {
       return { literal: token.text, ...(url && ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password ? { urls: [token.text] } : {}) }
     }
     if (token.kind === 'variable') {
-      if (token.text === '$_') return {}
+      if (token.text === '$_' || token.text === '$lastexitcode' || token.text === '$?') return {}
       // 只读自动变量可用于成功条件判断，不提供任何数据来源或写入能力。
       if (token.text === '$lastexitcode' || token.text === '$?') return {}
       const value = this.variables.get(token.text)

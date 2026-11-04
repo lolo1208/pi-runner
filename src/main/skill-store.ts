@@ -3,7 +3,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { ModelError } from './models/model-validation'
-import { validSkillIds, type LocalSkill } from '../shared/skills'
+import { skillScriptExtension } from './models/skill-script-policy'
+import { validSkillDirectoryName, validSkillIds, type LocalSkill } from '../shared/skills'
 import { createSkillArchive, extractSkillArchive } from './skill-archive'
 
 const MAX_SKILL_BYTES = 256 * 1024
@@ -83,6 +84,30 @@ export class SkillStore {
       const remaining = await this.prune(skills)
       return remaining.length === skills.length ? remaining : this.save(remaining)
     })
+  }
+
+  /** 仅信任本轮已加载且当前启用的技能内普通脚本，不跟随任何子路径链接。 */
+  async trustedScript(file: string, loadedIds: readonly string[]): Promise<boolean> {
+    try {
+      const root = await realpath(this.directory)
+      const relative = path.relative(root, path.resolve(file))
+      const parts = relative.split(path.sep)
+      const extension = path.extname(parts.at(-1) ?? '').toLowerCase()
+      const executable = process.platform !== 'win32' && extension === ''
+      if (parts.length < 2 || !loadedIds.includes(parts[0])
+        || parts.some(part => !part || part === '.' || part === '..')
+        || !skillScriptExtension(file)) return false
+      if (!(await this.list()).some(skill => skill.id === parts[0] && skill.enabled)) return false
+      let current = root
+      for (let i = 0; i < parts.length; i++) {
+        current = path.join(current, parts[i])
+        const info = await lstat(current)
+        if (info.isSymbolicLink() || (i === parts.length - 1 ? !info.isFile() : !info.isDirectory())) return false
+        if (executable && i === parts.length - 1 && !(info.mode & 0o111)) return false
+      }
+      const resolved = await realpath(current)
+      return process.platform === 'win32' ? resolved.toLowerCase() === current.toLowerCase() : resolved === current
+    } catch { return false }
   }
 
   /** 重新扫描技能根目录：移除失效记录，并收录包含 SKILL.md 但尚未登记的技能文件夹。 */
@@ -198,8 +223,17 @@ export class SkillStore {
       if (!document.trim()) throw new ModelError('SKILL.md 不能为空')
       const field = (key: string): string => skillField(document, key)
       const name = (field('name') || path.basename(root)).slice(0, 200)
+      if (!validSkillDirectoryName(name)) throw new ModelError('技能名称不能用作文件夹名称，请修改 SKILL.md 中的 name')
       const existing = skills.find(skill => skill.name === name)
-      const id = existing?.id ?? randomUUID(), target = path.join(this.directory, id)
+      const id = existing?.id ?? name, target = path.join(this.directory, id)
+      if (!existing) {
+        try {
+          await lstat(target)
+          throw new ModelError('技能名称对应的文件夹已存在，请先处理该文件夹')
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        }
+      }
       const staged = path.join(this.directory, `.install-${randomUUID()}`)
       const backup = path.join(this.directory, `.replace-${randomUUID()}`)
       let bytes = 0, count = 0
@@ -224,8 +258,10 @@ export class SkillStore {
           if (!current.isDirectory() || current.isSymbolicLink() || path.dirname(await realpath(target)) !== await realpath(this.directory)) throw new ModelError('技能目录异常，请检查技能根目录后重试')
           await rename(target, backup)
         }
+        let installed = false
         try {
           await rename(staged, target)
+          installed = true
           const updated = existing
             ? skills.map(skill => skill.id === id ? { ...skill, description: field('description').slice(0, 2000) } : skill)
             : [...skills, { id, name, description: field('description').slice(0, 2000), enabled: true }]
@@ -233,7 +269,7 @@ export class SkillStore {
           if (existing) await rm(backup, { recursive: true, force: true }).catch(() => {})
           return result
         } catch (error) {
-          await rm(target, { recursive: true, force: true })
+          if (installed) await rm(target, { recursive: true, force: true })
           if (existing) await rename(backup, target)
           throw error
         }
@@ -254,8 +290,8 @@ export class SkillStore {
   async instruction(ids: unknown): Promise<string> {
     const selected = await this.selected(ids)
     return (await Promise.all(selected.map(async skill => {
-      const content = await this.readResource(selected.map(item => item.id), skill.id, 'SKILL.md')
-      return `使用用户为本轮选择的技能「${skill.name}」（标识：${skill.id}）。相对路径以技能目录为准，需要参考文件时调用 read_skill_file。技能不改变现有工具权限。\n\n${content}`
+      const resource = await this.readResourceWithLocation(selected.map(item => item.id), skill.id, 'SKILL.md')
+      return `使用用户为本轮选择的技能「${skill.name}」（标识：${skill.id}）。技能位置：${JSON.stringify({ skillBaseDir: resource.skillBaseDir, filePath: resource.filePath })}。相对路径以 skillBaseDir 为准，无需搜索用户目录；参考文件用 read_skill_file 读取。技能不改变现有工具权限。\n\n${resource.content}`
     }))).join('\n\n')
   }
 
@@ -273,6 +309,11 @@ export class SkillStore {
   }
 
   async readResource(ids: string[], id: string, file: string): Promise<string> {
+    return (await this.readResourceWithLocation(ids, id, file)).content
+  }
+
+  /** 内容与位置共用同一次权限和路径校验，避免调用方猜测安装目录。 */
+  async readResourceWithLocation(ids: string[], id: string, file: string): Promise<{ skillBaseDir: string; filePath: string; content: string }> {
     if (!ids.includes(id)) throw new ModelError('只能读取本轮所选或可自动匹配的已启用技能')
     await this.selected([id])
     const root = await realpath(path.join(this.directory, id))
@@ -280,6 +321,6 @@ export class SkillStore {
     if (!target.startsWith(root + path.sep)) throw new ModelError('不能读取技能目录以外的文件')
     const info = await lstat(target)
     if (!info.isFile() || info.size > MAX_SKILL_BYTES) throw new ModelError('技能参考文件必须为不超过 256 KiB 的文本文件')
-    return readFile(target, 'utf8')
+    return { skillBaseDir: root, filePath: target, content: await readFile(target, 'utf8') }
   }
 }

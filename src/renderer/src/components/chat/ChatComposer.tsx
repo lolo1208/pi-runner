@@ -65,7 +65,6 @@ function ChatComposerView({ active = true, queue = [], editingId, queuePaused, o
   const addImages = async (files: File[]): Promise<void> => {
     if (readingRef.current || !files.length) return
     setImageError('')
-    if (images.length + files.length > MAX_MESSAGE_ATTACHMENTS) { setImageError(`最多添加 ${MAX_MESSAGE_ATTACHMENTS} 个附件。`); return }
     if (files.some(file => file.size > MAX_ATTACHMENT_BYTES)) { setImageError('每个附件不能超过 32 MB。'); return }
     readingRef.current = true; setReading(true)
     try {
@@ -80,7 +79,12 @@ function ChatComposerView({ active = true, queue = [], editingId, queuePaused, o
         reader.onabort = () => reject(new Error('附件读取已取消，请重试。'))
         reader.readAsDataURL(file)
       })))
-      onImagesChange([...images, ...added])
+      const unique = [...images]
+      for (const file of added) {
+        if (!unique.some(existing => existing.name === file.name && existing.dataUrl === file.dataUrl)) unique.push(file)
+      }
+      if (unique.length > MAX_MESSAGE_ATTACHMENTS) { setImageError(`最多添加 ${MAX_MESSAGE_ATTACHMENTS} 个附件。`); return }
+      if (unique.length !== images.length) onImagesChange(unique)
     } catch (error) { setImageError(error instanceof Error ? error.message : '附件读取失败，请重试。') }
     finally { readingRef.current = false; setReading(false) }
   }

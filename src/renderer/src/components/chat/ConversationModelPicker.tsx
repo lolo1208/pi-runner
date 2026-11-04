@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { PagedList } from '../PagedList'
+import { compareModelProfiles } from '../../model-sort'
 import { findModelDescriptor, PROVIDER_PRESETS, selectedModelThinking, thinkingLabel, tokenCountLabel, type ModelProfileView, type ModelProviderConnection } from '../../../../shared/models'
 
 function ModelName({ text, className }: { text: string; className: string }): React.JSX.Element {
@@ -57,7 +58,7 @@ export function ConversationModelPicker({ profile, profiles, providers, disabled
   const enabledProfiles = profiles.filter(item => item.enabled !== false)
   const search = query.trim().toLocaleLowerCase()
   const filtered = enabledProfiles.filter(item => `${item.name} ${item.model} ${PROVIDER_PRESETS.find(preset => preset.id === item.provider)?.label ?? ''}`.toLocaleLowerCase().includes(search))
-  const groups = PROVIDER_PRESETS.map(preset => ({ preset, models: filtered.filter(model => model.provider === preset.id) })).filter(group => group.models.length > 0)
+  const groups = PROVIDER_PRESETS.map(preset => ({ preset, models: filtered.filter(model => model.provider === preset.id).sort(compareModelProfiles) })).filter(group => group.models.length > 0)
   const close = (): void => setOpen(false)
   const descriptor = profile ? findModelDescriptor(providers, profile) : undefined
   const thinkingOptions = (descriptor?.thinking?.values ?? []).map(value => ({ key: `${typeof value === 'boolean' ? 'boolean' : 'level'}:${value}`, label: thinkingLabel(value) ?? String(value), raw: value }))

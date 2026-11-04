@@ -11,6 +11,7 @@ export function ProjectFileTree({ project, reveal }: { project: string | null; r
   const [selected, setSelected] = useState('')
   const [error, setError] = useState('')
   const selectedRef = useRef<HTMLDivElement>(null)
+  const [revealScrollRequest, setRevealScrollRequest] = useState(0)
   const load = useCallback(async (directory: string) => {
     if (!project) return
     const result = await window.piRunner.listProjectFiles(project, directory)
@@ -29,12 +30,20 @@ export function ProjectFileTree({ project, reveal }: { project: string | null; r
       try {
         const directories = parts.slice(0, -1).map((_, index) => parts.slice(0, index + 1).join('/'))
         await Promise.all(['', ...directories].map(load))
-        if (active) { setExpanded(previous => new Set([...previous, ...directories])); setSelected(path); setError('') }
+        if (active) {
+          setExpanded(previous => new Set([...previous, ...directories]))
+          setSelected(path)
+          setError('')
+          setRevealScrollRequest(previous => previous + 1)
+        }
       } catch { if (active) setError('无法定位文件，目录可能已不存在。') }
     })()
     return () => { active = false }
   }, [project, reveal, load])
-  useEffect(() => { selectedRef.current?.scrollIntoView?.({ block: 'nearest' }) }, [selected, entries, expanded])
+  // 仅外部定位完成后居中；侧栏内选择、折叠和刷新均不触发滚动。
+  useEffect(() => {
+    if (revealScrollRequest > 0) selectedRef.current?.scrollIntoView?.({ block: 'center', inline: 'nearest' })
+  }, [revealScrollRequest])
   const renderEntries = (directory: string): React.ReactNode => entries[directory]?.map(entry => {
     const trigger = (child: React.ReactElement): React.ReactNode => <FileContextMenu project={project!} path={entry.path} inSidebar isDirectory={entry.isDirectory}>{child}</FileContextMenu>
     const props = { key: entry.path, path: entry.path, name: entry.name, trigger, ref: selected === entry.path ? selectedRef : undefined }

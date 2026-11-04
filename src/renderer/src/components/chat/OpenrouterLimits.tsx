@@ -5,7 +5,7 @@ import { LatestRound } from './LatestRound'
 
 const dollars = (value: number): string => `$${value.toLocaleString('en-US', { maximumFractionDigits: 4 })}`
 
-export function OpenrouterLimits({ model, usage, latestReply }: { model: string; usage?: OpenrouterUsage; latestReply?: ModelReply }): React.JSX.Element {
+export function OpenrouterLimits({ model, usage, latestReply, onDetails }: { model: string; usage?: OpenrouterUsage; latestReply?: ModelReply; onDetails(): void }): React.JSX.Element {
   const free = model.endsWith(':free') || model === 'openrouter/free'
   const daily = usage?.freeDaily
   const summary = usage?.error ? '额度：未知' : !usage ? '正在读取额度…' : free
@@ -26,7 +26,7 @@ export function OpenrouterLimits({ model, usage, latestReply }: { model: string;
       <div>今日消费：{typeof usage?.dailySpend === 'number' ? dollars(usage.dailySpend) : '未知'}</div>
       <div>金额由此密钥下的模型共享。密钥额度不代表账户余额，其他预算也可能限制调用。</div>
     </>}
-    <LatestRound reply={latestReply} />
+    <LatestRound reply={latestReply} onDetails={onDetails} />
     <div className={`subscription-footer${usage?.error ? ' subscription-warning' : ''}`}>{usage?.error ?? (usage?.fetchedAt ? `更新于 ${new Date(usage.fetchedAt).toLocaleTimeString('zh-CN')}` : '正在读取额度…')}</div>
   </Tooltip.Content></Tooltip.Portal></Tooltip.Root>
 }

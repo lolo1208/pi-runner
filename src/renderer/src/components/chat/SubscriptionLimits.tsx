@@ -28,7 +28,7 @@ export function remainingWindowLabel(item: { resetsAt?: number } | undefined, un
   return unit === '天' && minutes >= 1440 * 2 ? `${Math.ceil(minutes / 1440)} 天` : `${Math.ceil(minutes / 60)} 小时`
 }
 
-export function SubscriptionLimits({ usage, latestReply }: { usage?: ChatgptUsage; latestReply?: ModelReply }): React.JSX.Element {
+export function SubscriptionLimits({ usage, latestReply, onDetails }: { usage?: ChatgptUsage; latestReply?: ModelReply; onDetails(): void }): React.JSX.Element {
   const [open, setOpen] = useState(false)
   const [now, setNow] = useState(Date.now)
   useEffect(() => {
@@ -56,7 +56,7 @@ export function SubscriptionLimits({ usage, latestReply }: { usage?: ChatgptUsag
         ? new Date(usage.resetCredits.earliestExpiresAt).toLocaleString('zh-CN', { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })
         : usage?.resetCredits?.earliestExpiresAt === null ? '不过期' : usage?.resetCreditsError ? '读取失败，将自动重试' : '暂未提供'}</dd></div>
     </dl>
-    <LatestRound reply={latestReply} />
+    <LatestRound reply={latestReply} onDetails={onDetails} />
     <div className={`subscription-footer${usage?.error ? ' subscription-warning' : ''}`}>{usage?.error ?? (usage?.fetchedAt ? `更新于 ${new Date(usage.fetchedAt).toLocaleTimeString('zh-CN')}` : '正在读取订阅额度…')}</div>
   </Tooltip.Content></Tooltip.Portal></Tooltip.Root>
 }

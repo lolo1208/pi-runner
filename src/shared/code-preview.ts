@@ -33,15 +33,15 @@ export function normalizeCodeRanges(input: unknown): CodeLineRange[] {
   return result
 }
 
-// 兼容“第10至25行”“第10行至第25行”及多段定位。
+// 兼容中文行号及 path:10、path:10–25 等冒号定位。
 const LINE_RANGE_SOURCE = String.raw`\d+(?:\s*(?:行\s*)?[-–—~～至到]\s*(?:第\s*)?\d+)?`
-export const CODE_REFERENCE_SOURCE = String.raw`(?:\x60\[?|\[\x60?|)?((?:[A-Za-z]:[\\/]|/|\.{1,2}[\\/])?[\p{L}\p{N}_@.+/\\-]+\.[\p{L}\p{N}_-]+?)(?:\]\x60?|\x60\]?|)?\s*第\s*(${LINE_RANGE_SOURCE}(?:\s*(?:行\s*)?[、,，]\s*(?:第\s*)?${LINE_RANGE_SOURCE})*)\s*行`
+export const CODE_REFERENCE_SOURCE = String.raw`(?:\x60\[?|\[\x60?|)?((?:[A-Za-z]:[\\/]|/|\.{1,2}[\\/])?[\p{L}\p{N}_@.+/\\-]+\.[\p{L}\p{N}_-]+?)(?:\]\x60?|\x60\]?|)?(?:\s*第\s*(${LINE_RANGE_SOURCE}(?:\s*(?:行\s*)?[、,，]\s*(?:第\s*)?${LINE_RANGE_SOURCE})*)\s*行|[:：](\d+(?:\s*[-–—~～]\s*\d+)?))(?:\x60\]?|\]\x60?)?`
 
 export function parseCodeReference(source: string): { raw: string; reference: CodeReference } | undefined {
   const match = new RegExp(`^${CODE_REFERENCE_SOURCE}`, 'u').exec(source)
   if (!match) return
   try {
-    const ranges = normalizeCodeRanges(match[2].split(/[、,，]/).map(part => {
+    const ranges = normalizeCodeRanges((match[2] ?? match[3]).split(/[、,，]/).map(part => {
       const [start, end = start] = part.replace(/[第行\s]/g, '').split(/[-–—~～至到]/).map(Number)
       return { start, end }
     }))

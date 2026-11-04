@@ -26,6 +26,7 @@ import { saveCodePreviewSnapshot } from '../code-preview-snapshots'
 import { collectCodeReferences } from '../../shared/code-preview'
 import { agentSystemPrompt } from './pi-system-prompt'
 import { ConversationWorkspace } from './conversation-workspace'
+import { SUMMARY_INSTRUCTION } from './summary-prompt'
 
 const toolActions: Record<string, string> = {
   bash: '运行命令',
@@ -33,6 +34,8 @@ const toolActions: Record<string, string> = {
   read: '读取',
   read_many: '批量读取文件',
   download_many: '批量下载文件',
+  write_many: '批量写入文件',
+  edit_many: '批量编辑文件',
   write: '写入',
   download: '下载文件',
   edit: '编辑',
@@ -198,7 +201,7 @@ export class PiAgentService {
         const data = entry.data as { toolCallId: string } & import('../../shared/models').AiReviewDetail
         if (['allow', 'ask', 'deny'].includes(data.decision)) {
           const details = aiReviews.get(data.toolCallId) ?? []
-          details.push({ decision: data.decision, ...(data.reason ? { reason: data.reason } : {}), ...(data.target ? { target: data.target } : {}) })
+          details.push({ decision: data.decision, ...(data.reason ? { reason: data.reason } : {}), ...(data.target ? { target: data.target } : {}), ...(data.model ? { model: data.model } : {}), ...(data.provider ? { provider: data.provider } : {}) })
           aiReviews.set(data.toolCallId, details)
         }
       }
@@ -282,40 +285,45 @@ export class PiAgentService {
     const skillStore = new SkillStore(path.join(this.dependencies.dataDirectory, 'skills'))
     const displaySkills = new Map((isTest ? [] : await skillStore.list()).map(skill => [skill.id, skill]))
     const skillIds = isTest ? [] : messages.at(-1)?.skillIds ?? []
-    const discoveredSkills = isTest ? [] : await skillStore.discoverable()
+    // 技能目录的展示顺序不应影响模型请求前缀。
+    const discoveredSkills = (isTest ? [] : await skillStore.discoverable()).sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
     const selectedSkills = skillIds.length ? await skillStore.selected(skillIds) : []
     const usedSkills = new Map(selectedSkills.map(skill => [skill.id, skill]))
     const skillPurposes = new Map<string, string>()
     const recordPurpose = (skillId: string, purpose: unknown): void => {
       if (!usedSkills.has(skillId)) throw new ModelError('只能说明本轮已加载技能的用途')
-      if (typeof purpose !== 'string' || !/[\u4e00-\u9fff]/.test(purpose) || !purpose.trim() || purpose.length > 200 || /[\r\n]/.test(purpose)) throw new ModelError('请用不超过 200 字的单句中文说明技能在本次任务中的具体用途')
-      skillPurposes.set(skillId, purpose.trim().replace(/[。.!！]+$/, ''))
+      if (typeof purpose !== 'string' || !purpose.trim()) throw new ModelError('请提供技能用途说明')
+      skillPurposes.set(skillId, purpose.trim())
     }
     const availableSkills = new Map([...discoveredSkills, ...selectedSkills].map(skill => [skill.id, skill]))
     const availableSkillIds = [...new Set([...skillIds, ...discoveredSkills.map(skill => skill.id)])]
-    if (discoveredSkills.length) instruction = [instruction,
-      '可自动触发的本地技能如下。根据本轮任务和技能描述判断是否适用；使用前先调用 read_skill_file 读取 SKILL.md，按需读取参考文件。不相关的技能不要调用；技能不改变工具权限。',
-      JSON.stringify(discoveredSkills.map(({ id, name, description }) => ({ skillId: id, name, description })))
-    ].filter(Boolean).join('\n\n')
-    if (skillIds.length) instruction = [instruction, await skillStore.instruction(skillIds)].filter(Boolean).join('\n\n')
-    if (availableSkillIds.length) instruction = [instruction,
-      '本轮使用技能时，通过 read_skill_file 的 purpose 或 report_skill_usage 记录实际用途；最终回复前补齐未记录的技能。应用会自动附上技能说明，正文不要重复；未读取的技能不要报告。'
-    ].filter(Boolean).join('\n\n')
+    const skillInstruction = [
+      ...(discoveredSkills.length ? [
+        '以下技能按任务相关性自动选用：先用 read_skill_file 读取 SKILL.md，再按需读参考文件，不加载无关技能。技能不改变权限；项目自审对技能脚本的特殊放行仅限单独运行已加载且启用技能目录内（含任意子目录）的普通脚本：Windows 支持直接调用 .cmd、.bat、.ps1 或无后缀文件；macOS/Linux 支持直接调用常见脚本或无后缀可执行文件；支持 node、python/python3、ruby、perl、sh/bash/zsh/fish 加脚本绝对路径（不接受解释器选项）。可带普通字面量参数，禁止命令拼接、展开和重定向，仍受安全规则和计划模式限制。',
+        JSON.stringify(discoveredSkills.map(({ id, name, description }) => ({ skillId: id, name, description })))
+      ] : []),
+      ...(availableSkillIds.length ? ['最终回复前，为本轮每个已加载技能记录具体用途：可在 read_skill_file 中传 purpose，或调用 report_skill_usage；已记录无需重复。手动选择的技能也须先读取 SKILL.md 再记录用途；未读取或未使用的技能不要报告。用途简短具体，应用自动附在回复末尾，正文不重复。'] : []),
+
+    ].join('\n\n')
     const skillTools: ToolDefinition[] = availableSkillIds.length ? [{
-      name: 'read_skill_file', label: '读取技能文件', description: '读取手动选择或描述匹配的已启用技能。自动触发时必须先读取 SKILL.md，再遵循技能指令；参考文档或脚本使用相对技能目录的路径。',
-      parameters: { type: 'object', properties: { skillId: { type: 'string' }, file: { type: 'string' }, purpose: { type: 'string', description: '技能在本轮任务中的具体用途，简短中文动作，例如“整理代码改动并生成 Git 提交信息”。' } }, required: ['skillId', 'file'], additionalProperties: false } as ToolDefinition['parameters'],
+      name: 'read_skill_file', label: '读取技能文件', description: '读取已启用技能，返回正文、技能根目录 skillBaseDir 和文件绝对路径 filePath。先读 SKILL.md；file 使用相对技能根目录的路径。',
+      parameters: { type: 'object', properties: { skillId: { type: 'string' }, file: { type: 'string' }, purpose: { type: 'string', description: '简述技能在本轮任务中的具体用途。' } }, required: ['skillId', 'file'], additionalProperties: false } as ToolDefinition['parameters'],
       execute: async (_id, args) => {
         const { skillId, file, purpose } = args as { skillId: string; file: string; purpose?: string }
-        const text = await skillStore.readResource(availableSkillIds, skillId, file)
+        const resource = await skillStore.readResourceWithLocation(availableSkillIds, skillId, file)
         if (file.replaceAll('\\', '/').replace(/^\.\//, '') === 'SKILL.md') {
           const skill = availableSkills.get(skillId)
           if (skill) usedSkills.set(skillId, skill)
         }
         if (purpose !== undefined) recordPurpose(skillId, purpose)
-        return { content: [{ type: 'text', text }], details: {} }
+        const location = { skillId, skillBaseDir: resource.skillBaseDir, filePath: resource.filePath }
+        return { content: [
+          { type: 'text', text: `技能位置（由应用校验）：${JSON.stringify(location)}` },
+          { type: 'text', text: resource.content }
+        ], details: location }
       }
     }, {
-      name: 'report_skill_usage', label: '说明技能用途', description: '最终回复前，记录本轮已加载技能在实际任务中的具体用途。用简短中文动作说明，不复制技能描述。',
+      name: 'report_skill_usage', label: '说明技能用途', description: '记录本轮已加载技能的实际用途，简短具体，不复制技能描述。',
       parameters: { type: 'object', properties: { skillId: { type: 'string' }, purpose: { type: 'string' } }, required: ['skillId', 'purpose'], additionalProperties: false } as ToolDefinition['parameters'],
       execute: async (_id, args) => {
         const { skillId, purpose } = args as { skillId: string; purpose: string }
@@ -338,6 +346,10 @@ export class PiAgentService {
     const pendingCodeSnapshots: Promise<void>[] = []
     const attachments = new PiAttachments(manager)
     const responses = useFileResponses(profile, [...this.transcript(manager, displaySkills), ...messages])
+    // 仅记录协议名称，不保存请求内容；跨轮切换可解释一次冷缓存。
+    const protocol = profile.provider === 'chatgpt' ? 'chatgpt-responses' : profile.provider === 'google' ? 'google' : profile.protocol === 'anthropic' ? 'anthropic' : responses ? 'openai-responses' : 'openai-completions'
+    const previousProtocol = [...manager.getEntries()].reverse().find(entry => entry.type === 'custom' && entry.customType === 'pi-runner-cache-protocol')
+    if (!previousProtocol || previousProtocol.type !== 'custom' || (previousProtocol.data as { protocol?: string }).protocol !== protocol) manager.appendCustomEntry('pi-runner-cache-protocol', { protocol, changed: Boolean(previousProtocol) })
     let rateLimits: ModelRateLimit[] = [], before: PendingCheckpoint | undefined
     let beforePromise: Promise<void> | undefined
     // 流式输出速度统计：按秒级窗口采样，节流后随事件下发，供输入框角落的速度指示器使用。
@@ -430,11 +442,14 @@ export class PiAgentService {
       publishTranscript()
     }
     status(modelStatus)
+    const previousBoundaryEntry = [...manager.getEntries()].reverse().find(entry => entry.type === 'custom' && entry.customType === 'pi-runner-cache-boundary' && (entry.data as { profileId?: string }).profileId === profile.id)
+    const previousBoundary = previousBoundaryEntry?.type === 'custom' ? (previousBoundaryEntry.data as { boundary?: { signature: string; index: number } }).boundary : undefined
+    let cacheInfo: { fields?: { input: boolean; output: boolean; cacheRead: boolean; cacheWrite: boolean }; fingerprint?: { prompt: string; tools: string }; upstream?: string; boundary?: { signature: string; index: number } } = {}
     const provider = await createPiProvider(profile, apiKey, attachments, responses, limits => { rateLimits = limits }, this.dependencies.fetchRequest, this.dependencies.chatgpt, onModelRequestActive, attempt => {
       onModelRequestActive(true)
       modelStatus = `Google 服务繁忙，正在重试（${attempt}/3）…`
       refreshStatus()
-    })
+    }, info => { cacheInfo = info.fingerprint ? { ...info } : { ...cacheInfo, ...info } }, previousBoundary)
     signal.throwIfAborted()
     // 仅首次迁移导入旧聊天；之后以 pi 的完整会话（含工具结果）为准。
     if (!manager.getEntries().some(entry => entry.type === 'message')) for (const message of messages.slice(0, -1)) {
@@ -451,7 +466,7 @@ export class PiAgentService {
     const resourceLoader: ResourceLoader = {
       getExtensions: () => ({ extensions: [], errors: [], runtime: createExtensionRuntime() }), getSkills: () => ({ skills: [], diagnostics: [] }),
       getPrompts: () => ({ prompts: [], diagnostics: [] }), getThemes: () => ({ themes: [], diagnostics: [] }), getAgentsFiles: () => ({ agentsFiles: [] }),
-      getSystemPrompt: () => isTest ? '' : agentSystemPrompt({ instruction, mode, project, cwd, planning }),
+      getSystemPrompt: () => isTest ? '' : agentSystemPrompt({ instruction, skillInstruction, mode, project, cwd, planning }),
       getSystemPromptSource: () => undefined, getAppendSystemPrompt: () => [], getAppendSystemPromptSources: () => [], extendResources: () => {}, reload: async () => {}
     }
     const projectTools = isTest || !options ? [] : piProjectTools(snapshot?.getRoot() ?? cwd, () => snapshot ? beforePromise ??= (async () => {
@@ -460,27 +475,33 @@ export class PiAgentService {
       finally { refreshStatus() }
     })() : Promise.resolve(), {
       mode, project: snapshot?.getRoot(), workspace: !project ? cwd : undefined, protectedDirectories: [this.dependencies.dataDirectory, ...(this.dependencies.protectedDirectories ?? [])], downloadFetch: this.dependencies.downloadFetch,
+      trustedSkillScript: file => skillStore.trustedScript(file, [...usedSkills.keys()]),
       approve: async (id, tool, args, reason, toolSignal, mustConfirm) => {
         // 第二层：项目自审模式下先做规则/AI 自动审核，再决定是否弹出问询框。
         let aiReviewed: true | undefined
         let aiReviewReason: string | undefined
+        let aiReviewModel: string | undefined
+        let aiReviewProvider: import('../../shared/models').ProviderId | undefined
         if (mode === 'auto' && !mustConfirm && this.dependencies.review) {
           const reviewSignal = toolSignal ?? signal
-          const result = await this.dependencies.review({ tool, args: structuredClone(args), cwd, mode, project, reason, userPrompt: [...messages].reverse().find(message => message.role === 'user')?.content ?? '', signal: reviewSignal }).catch((): ToolReviewResult => ({ decision: 'ask', source: 'fallback' }))
+          const result = await this.dependencies.review({ tool, args: structuredClone(args), cwd, mode, project, reason, userPrompt: [...messages].reverse().find(message => message.role === 'user')?.content ?? '', signal: reviewSignal,
+            onAuxiliaryCall: call => auxiliaryCallsPending.push(call) }).catch((): ToolReviewResult => ({ decision: 'ask', source: 'fallback' }))
           reviewSignal.throwIfAborted()
           if (result.source === 'ai') {
-            manager.appendCustomEntry('pi-runner-ai-review', { toolCallId: id, decision: result.decision, ...(result.reason ? { reason: result.reason } : {}), ...(typeof args.path === 'string' ? { target: args.path } : {}) })
+            manager.appendCustomEntry('pi-runner-ai-review', { toolCallId: id, decision: result.decision, ...(result.reason ? { reason: result.reason } : {}), ...(result.model ? { model: result.model } : {}), ...(result.provider ? { provider: result.provider } : {}), ...(typeof args.path === 'string' ? { target: args.path } : {}) })
             publishTranscript()
           }
           if (result.decision === 'allow') return
           if (result.decision === 'deny') throw new ModelError('自动审核拒绝了该操作，请调整方案后重试')
-          if (result.decision === 'ask' && result.source === 'ai') { aiReviewed = true; aiReviewReason = result.reason }
+          if (result.decision === 'ask' && result.source === 'ai') { aiReviewed = true; aiReviewReason = result.reason; aiReviewModel = result.model; aiReviewProvider = result.provider }
         }
-        await this.approvals.ask(requestId, options.conversationId, { toolCallId: id, tool, args: structuredClone(args), cwd, reason, mustConfirm, aiReviewed, aiReviewReason }, toolSignal ?? signal, waitingFor(id, `等待你批准${toolActions[tool] ?? '操作'}…`))
+        await this.approvals.ask(requestId, options.conversationId, { toolCallId: id, tool, args: structuredClone(args), cwd, reason, mustConfirm, aiReviewed, aiReviewReason, aiReviewModel, aiReviewProvider }, toolSignal ?? signal, waitingFor(id, `等待你批准${toolActions[tool] ?? '操作'}…`))
       }
     })
     let session: AgentSession | undefined
-    const planningTools = (): string[] => [...PLAN_READ_TOOLS, ...skillTools.map(tool => tool.name), 'ask_user_question', ...(clarified ? ['submit_plan'] : [])]
+    const stableToolNames = (names: string[]): string[] => names.sort((a, b) => a < b ? -1 : a > b ? 1 : 0)
+    // submit_plan 自身校验是否已完成澄清；提前声明可避免澄清后工具前缀发生变化。
+    const planningTools = (): string[] => stableToolNames([...PLAN_READ_TOOLS, ...skillTools.map(tool => tool.name), 'ask_user_question', 'submit_plan'])
     const guardedTools = projectTools.map(tool => ({ ...tool, execute: async (...args: Parameters<typeof tool.execute>) => {
       await Promise.all(pendingCodeSnapshots)
       if (planning && !(PLAN_READ_TOOLS as readonly string[]).includes(tool.name)) {
@@ -508,11 +529,11 @@ export class PiAgentService {
         approvedPlan = { title, content }
         executionTransitionPending = true
         planning = false
-        session?.setActiveToolsByName([...projectTools, ...skillTools].map(tool => tool.name))
+        session?.setActiveToolsByName(stableToolNames([...projectTools, ...skillTools].map(tool => tool.name)))
         publish({ type: 'intent-mode', intentMode: 'execute' })
         status('计划已批准，正在执行…')
       }, () => planning, () => clarified) : []
-    const tools = [...guardedTools, ...skillTools, ...interactions]
+    const tools = [...guardedTools, ...skillTools, ...interactions].sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)
     const previousEntries = new Set(manager.getEntries().map(entry => entry.id))
     let executionSaved = false
     let completedReply: ModelReply | undefined
@@ -522,14 +543,26 @@ export class PiAgentService {
       try { await action() }
       catch { warn(warning) }
     }
-    const saveExecution = (): number => {
+    const saveExecution = (roundStatistics?: ChatExecution['roundStatistics']): number => {
       const elapsedMs = Math.round(performance.now() - started)
       const entryIds = manager.getEntries().filter(entry => !previousEntries.has(entry.id) && entry.type === 'message' && entry.message.role === 'assistant').map(entry => entry.id)
-      if (entryIds.length) manager.appendCustomEntry('pi-runner-execution', { entryIds, execution: { model: profile.model, provider: profile.provider, elapsedMs, roundId: requestId } })
+      if (entryIds.length) {
+        const existing = manager.getEntries().flatMap(entry => entry.type === 'custom' && entry.customType === 'pi-runner-execution'
+          ? [(entry.data as { execution?: ChatExecution }).execution] : []).find(execution => execution?.roundId === requestId)
+        const savedStatistics = roundStatistics ?? existing?.roundStatistics
+        const auxiliaryCalls = [...(existing?.auxiliaryCalls ?? []), ...auxiliaryCallsPending]
+        manager.appendCustomEntry('pi-runner-execution', { entryIds, execution: { model: profile.model, provider: profile.provider, profileId: profile.id, elapsedMs, roundId: requestId,
+          ...(savedStatistics ? { roundStatistics: savedStatistics } : {}), ...(auxiliaryCalls.length ? { auxiliaryCalls } : {}) } })
+      }
       executionSaved = true
       return elapsedMs
     }
     const roundUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }
+    const usageAvailability = { input: true, output: true, cacheRead: true, cacheWrite: true }
+    const auxiliaryCallsPending: import('../../shared/models').AuxiliaryCallDetail[] = []
+    const calls: import('../../shared/models').ModelCallDetail[] = []
+    let cacheCompacted = false
+    let cacheProtocolChanged = Boolean(previousProtocol && previousProtocol.type === 'custom' && (previousProtocol.data as { protocol?: string }).protocol !== protocol)
     let unsubscribe: (() => void) | undefined
     let completedResponse = false
     let callStarted = performance.now()
@@ -579,6 +612,30 @@ export class PiAgentService {
           try { manager.appendCustomEntry('pi-runner-call-duration', { messageTimestamp: event.message.timestamp, elapsedMs: Math.round(performance.now() - callStarted) }) }
           catch { warn('模型调用耗时记录保存失败') }
           const usage = event.message.usage
+          const inputTokens = usage.input + usage.cacheRead + usage.cacheWrite
+          const rawUsage = event.message.usage as typeof usage & Record<string, unknown>
+          // pi-ai 将缺失用量归零；只有正值可确认服务端确实返回了该项，零值保持未知。
+          const usageFields = {
+            input: cacheInfo.fields?.input || Number.isSafeInteger(rawUsage.input) && rawUsage.input > 0,
+            output: cacheInfo.fields?.output || Number.isSafeInteger(rawUsage.output) && rawUsage.output > 0,
+            cacheRead: cacheInfo.fields?.cacheRead || Number.isSafeInteger(rawUsage.cacheRead) && rawUsage.cacheRead > 0,
+            cacheWrite: cacheInfo.fields?.cacheWrite || Number.isSafeInteger(rawUsage.cacheWrite) && rawUsage.cacheWrite > 0
+          }
+          const prior = [...manager.getEntries()].reverse().find(entry => entry.type === 'custom' && entry.customType === 'pi-runner-cache-fingerprint')
+          const previous = prior?.type === 'custom' ? prior.data as { prompt?: string; tools?: string; upstream?: string } : undefined
+          const cacheNotes = [cacheCompacted ? '上下文已压缩' : '', cacheProtocolChanged ? '请求协议变化' : '', previous && cacheInfo.fingerprint && previous.prompt !== cacheInfo.fingerprint.prompt ? '系统提示词变化' : '', previous && cacheInfo.fingerprint && previous.tools !== cacheInfo.fingerprint.tools ? '工具定义变化' : '', previous?.upstream && cacheInfo.upstream && previous.upstream !== cacheInfo.upstream ? '上游服务变化' : ''].filter(Boolean)
+          if (cacheInfo.fingerprint) manager.appendCustomEntry('pi-runner-cache-fingerprint', { ...cacheInfo.fingerprint, ...(cacheInfo.upstream ? { upstream: cacheInfo.upstream } : {}) })
+          if (cacheInfo.boundary && event.message.stopReason !== 'error' && event.message.stopReason !== 'aborted') manager.appendCustomEntry('pi-runner-cache-boundary', { profileId: profile.id, boundary: cacheInfo.boundary })
+          cacheInfo = {}
+          cacheCompacted = false
+          cacheProtocolChanged = false
+          calls.push({ ...(cacheNotes.length ? { cacheNotes } : {}), elapsedMs: Math.round(performance.now() - callStarted), status: event.message.stopReason === 'error' ? 'error' : event.message.stopReason === 'aborted' ? 'aborted' : event.message.stopReason === 'length' ? 'truncated' : 'completed', usageFields,
+            ...((usageFields.input || usageFields.output || usageFields.cacheRead || usageFields.cacheWrite) ? { usage: { inputTokens, outputTokens: usage.output,
+              ...(usageFields.cacheRead ? { cacheReadTokens: usage.cacheRead } : {}), ...(usageFields.cacheWrite ? { cacheWriteTokens: usage.cacheWrite } : {}) } } : {}) })
+          usageAvailability.input &&= usageFields.input
+          usageAvailability.output &&= usageFields.output
+          usageAvailability.cacheRead &&= usageFields.cacheRead
+          usageAvailability.cacheWrite &&= usageFields.cacheWrite
           roundUsage.inputTokens += usage.input + usage.cacheRead + usage.cacheWrite
           roundUsage.outputTokens += usage.output
           roundUsage.cacheReadTokens += usage.cacheRead
@@ -630,7 +687,10 @@ export class PiAgentService {
           publishTranscript()
         }
         if (event.type === 'compaction_start') { modelStatus = '正在压缩上下文，完整记录仍保留…'; refreshStatus() }
-        if (event.type === 'compaction_end') { modelStatus = event.errorMessage ? '上下文压缩失败，请检查模型服务' : '正在连接模型…'; refreshStatus() }
+        if (event.type === 'compaction_end') {
+          if (!event.errorMessage) { cacheCompacted = true; manager.appendCustomEntry('pi-runner-cache-compaction', { completed: true }) }
+          modelStatus = event.errorMessage ? '上下文压缩失败，请检查模型服务' : '正在连接模型…'; refreshStatus()
+        }
         if (event.type === 'auto_retry_start') { modelStatus = `模型请求失败，正在等待第 ${event.attempt} 次重试…`; refreshStatus() }
         if (event.type === 'auto_retry_end') { modelStatus = event.success ? '正在整理回复…' : '模型重试失败，正在处理…'; refreshStatus() }
         if (event.type === 'agent_end') { modelStatus = '正在整理回复…'; refreshStatus() }
@@ -654,7 +714,7 @@ export class PiAgentService {
           // 可见历史，尤其是真实用量包含大量系统提示词或中文时。
           const visibleTokens = session.messages.reduce((total, message) => total + estimatePiTokens(message), 0)
           settingsManager.applyOverrides({ compaction: { keepRecentTokens: Math.max(1, Math.min(20000, Math.floor(window * .25), Math.floor(visibleTokens * .25))) } })
-          await session.compact('请使用中文，保留用户目标、约束、关键事实、已完成事项和待办事项。')
+          await session.compact(SUMMARY_INSTRUCTION)
           signal.throwIfAborted()
         }
       }
@@ -716,7 +776,7 @@ export class PiAgentService {
         throw new ModelError(emptyReplyMessage(final, ollamaCall))
       }
       if (usedSkills.size) {
-        const plain = (value: string): string => value.replace(/\s+/g, ' ').trim().slice(0, 200).replace(/[\\`*_{}\[\]<>#|]/g, '\\$&')
+        const plain = (value: string): string => value.replace(/\s+/g, ' ').trim().replace(/[\\`*_{}\[\]<>#|]/g, '\\$&')
         const task = plain(messages.at(-1)?.content ?? '')
         const notice = '\n\n' + [...usedSkills.values()].map(skill => `本次使用了 ${plain(skill.name)} 技能来${plain(skillPurposes.get(skill.id) ?? (task ? `处理本轮任务“${task.slice(0, 80)}”` : '处理本轮任务'))}。`).join('\n\n')
         const entry = manager.getEntries().filter(entry => !previousEntries.has(entry.id) && entry.type === 'message' && entry.message.role === 'assistant').at(-1)
@@ -725,9 +785,13 @@ export class PiAgentService {
         publish({ type: 'text', text: notice })
       }
       let elapsedMs = Math.round(performance.now() - started)
-      await finishSafely(() => { elapsedMs = saveExecution() }, '回复已完成，但执行统计保存失败')
+      const totalUsage = { inputTokens: final.usage.input + final.usage.cacheRead + final.usage.cacheWrite, outputTokens: final.usage.output,
+        ...(final.usage.cacheRead > 0 || calls.at(-1)?.usageFields?.cacheRead ? { cacheReadTokens: final.usage.cacheRead } : {}), ...(final.usage.cacheWrite > 0 || calls.at(-1)?.usageFields?.cacheWrite ? { cacheWriteTokens: final.usage.cacheWrite } : {}) }
+      const aggregateUsage = { ...roundUsage,
+        ...(usageAvailability.cacheRead ? {} : { cacheReadTokens: undefined }), ...(usageAvailability.cacheWrite ? {} : { cacheWriteTokens: undefined }) }
+      await finishSafely(() => { elapsedMs = saveExecution({ usage: totalUsage, usageFields: { ...usageAvailability }, roundUsage: aggregateUsage, calls, truncated: final.stopReason === 'length' }) }, '回复已完成，但执行统计保存失败')
       completedReply = { text: apiKey ? text.split(apiKey).join('[已隐藏密钥]') : text, model: profile.model, elapsedMs, truncated: final.stopReason === 'length',
-        usage: { inputTokens: final.usage.input + final.usage.cacheRead + final.usage.cacheWrite, outputTokens: final.usage.output }, roundUsage, rateLimits, messages: this.transcript(manager, displaySkills), warnings }
+        usage: totalUsage, usageFields: { ...usageAvailability }, roundUsage: aggregateUsage, calls, rateLimits, auxiliaryCalls: auxiliaryCallsPending, messages: this.transcript(manager, displaySkills), warnings }
       return completedReply
     } finally {
       if (outputTimer) clearTimeout(outputTimer)
@@ -741,7 +805,15 @@ export class PiAgentService {
       }
       for (const [id, work] of liveWork) if (!work.completed) liveWork.set(id, { ...work, state: 'interrupted' })
       waitingTools.clear()
-      if (!executionSaved) await finishSafely(saveExecution, '执行统计保存失败')
+      if (!executionSaved) await finishSafely(() => saveExecution({
+        usage: { inputTokens: roundUsage.inputTokens, outputTokens: roundUsage.outputTokens,
+          ...(usageAvailability.cacheRead ? { cacheReadTokens: roundUsage.cacheReadTokens } : {}),
+          ...(usageAvailability.cacheWrite ? { cacheWriteTokens: roundUsage.cacheWriteTokens } : {}) },
+        roundUsage: { ...roundUsage,
+          ...(usageAvailability.cacheRead ? {} : { cacheReadTokens: undefined }),
+          ...(usageAvailability.cacheWrite ? {} : { cacheWriteTokens: undefined }) },
+        calls, truncated: false
+      }), '执行统计保存失败')
       if (before && snapshot) {
         try {
           status('正在保存本轮改动…')

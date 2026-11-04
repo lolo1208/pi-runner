@@ -47,6 +47,13 @@ export interface Conversation {
   agentSnapshots?: import('./models').AgentSnapshot[]
 }
 
+/** 高频文字草稿单独保存，不携带历史、附件或权限字段。 */
+export interface ConversationDraftUpdate {
+  id: string
+  draft?: string
+  draftSkillIds?: string[]
+}
+
 export interface ConversationState {
   version: 1
   tasks: Conversation[]

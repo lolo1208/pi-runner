@@ -37,6 +37,13 @@ describe('command risk routing', () => {
     expect(safeDeveloperCommand('pnpm run build && pnpm test')).toBe(true)
   })
 
+  it('不自动放行应用技能目录之外的同名脚本', () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    try {
+      expect(commandRisk('node "$env:USERPROFILE/.agents/skills/impeccable/scripts/context.mjs" --target src/renderer/src/components/chat/RoundUsageDialog.tsx', process.cwd()).risk).toBe('approve')
+    } finally { vi.restoreAllMocks() }
+  })
+
   it('requires approval for unknown or inline-eval commands', () => {
     expect(commandRisk('node -e "require(\'fs\').writeFileSync(\'x\', \'y\')"').risk).toBe('approve')
     expect(commandRisk('python -c "print(1)"').risk).toBe('approve')

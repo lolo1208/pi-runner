@@ -41,6 +41,8 @@
 .ai-review-reasons { font-size: calc(12rem / 14); line-height: 1.5; color: var(--text); overflow-wrap: anywhere; }
 .ai-review-reason { display: flex; flex-wrap: wrap; column-gap: 3px; }
 .ai-review-reason > span:first-child { font-weight: 500; }
+.ai-review-reason-heading { display: inline-flex; align-items: center; gap: 5px; }
+.ai-review-reason-heading > svg, .ai-review-reason-heading > .chat-model-icon, .ai-review-reason-heading > .chat-model-monogram { flex-shrink: 0; }
 .chat-work-item > .ai-review-reasons { margin: 2px 24px 6px 30px; }
 .tool-approval-summary .ai-review-reasons { margin-top: 3px; }
 .command-approval-body > .ai-review-reasons, .tool-approval-file-body > .ai-review-reasons { margin: 8px 12px; }
@@ -369,15 +371,17 @@ button.chat-round-dot:focus-visible { outline: 1px solid var(--accent); outline-
   background: transparent;
   color: var(--muted);
   opacity: 0;
-  pointer-events: none;
+  pointer-events: auto;
+  transition: opacity 0s 300ms, visibility 0s 300ms;
+  visibility: hidden;
 }
 .chat-message.user:hover .message-actions,
-.chat-message.user:focus-within .message-actions { opacity: 1; pointer-events: auto; }
-.chat-message.user .message-actions > button { width: calc(24rem / 14); height: calc(24rem / 14); min-height: 0; padding: 0; color: var(--muted); }
+.chat-message.user:focus-within .message-actions { opacity: 1; pointer-events: auto; visibility: visible; transition-delay: 0s; }
+.chat-message.user .message-actions button { width: calc(24rem / 14); height: calc(24rem / 14); min-height: 0; padding: 0; border: 0; background: transparent; color: var(--muted); }
 .chat-message.user .message-copy:hover { background: var(--hover); color: var(--text); }
 .chat-message.user .message-delete:hover,
 .chat-message.user .message-delete:focus-visible { background: var(--error-bg); color: var(--error); }
-@media (hover: none) { .chat-message.user .message-actions { opacity: 1; pointer-events: auto; } }
+@media (hover: none) { .chat-message.user .message-actions { opacity: 1; pointer-events: auto; visibility: visible; } }
 
 /* 附件与气泡内边距对齐，间距统一由 flex gap 控制 */
 .chat-message.user .chat-images { margin: 0; padding: 0; }
@@ -541,6 +545,25 @@ button.chat-round-dot:focus-visible { outline: 1px solid var(--accent); outline-
 .subscription-fact-detail { display: block; margin-top: 2px; color: #d4d7da; font-weight: 400; }
 .subscription-reset-facts { margin-top: 16px; }
 .subscription-tooltip > .subscription-round { margin-top: 16px; padding-top: 12px; border-top: 1px solid #ffffff26; }
+.subscription-round-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.subscription-details-button.ui-button-ghost { min-height: 28px; padding: 4px 8px; margin-right: -8px; border: 0; color: inherit; font-size: inherit; }
+.subscription-details-button.ui-button-ghost:hover { background: #ffffff1f; color: #fff; }
+.modal-panel.round-usage-dialog { display: flex; flex-direction: column; width: min(1040px, calc(100vw - 40px)); padding: 28px; overflow: hidden; }
+.round-usage-note, .round-usage-empty { margin: 0 0 20px; color: var(--muted); line-height: 1.6; overflow-wrap: anywhere; }
+.round-usage-scroll { min-height: 0; padding-right: 12px; overflow: auto; }
+.round-usage-list { min-width: 880px; font-variant-numeric: tabular-nums; }
+.round-usage-call { display: flex; align-items: baseline; gap: 20px; padding: 14px 0; border-top: 1px solid var(--border); white-space: nowrap; }
+.round-usage-call-heading { display: flex; align-items: baseline; gap: 12px; flex: none; }
+.round-usage-call-heading span, .round-usage-metrics dt { color: var(--muted); }
+.round-usage-metrics { display: flex; flex: 1; justify-content: space-between; gap: 16px; margin: 0; }
+.round-usage-metrics div { display: flex; align-items: baseline; gap: 6px; }
+.round-usage-metrics dd { margin: 0; }
+.round-usage-auxiliary { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 20px; }
+.round-usage-auxiliary h3 { margin: 0 0 12px; font-size: 1rem; }
+.round-usage-auxiliary-row { display: flex; justify-content: space-between; gap: 16px; padding: 12px 0; border-top: 1px solid var(--border); }
+.round-usage-auxiliary-row > div { display: grid; gap: 4px; min-width: 0; }
+.round-usage-auxiliary-row > div span, .round-usage-auxiliary-row > span { color: var(--muted); overflow-wrap: anywhere; }
+@media (max-width: 600px) { .modal-panel.round-usage-dialog { width: calc(100vw - 24px); padding: 20px; } }
 
 @media (max-width: 640px) {
   .composer-status { gap: 8px; }
@@ -1035,10 +1058,11 @@ button.chat-round-dot:focus-visible { outline: 1px solid var(--accent); outline-
 .round-changes-summary .round-changes-title:disabled { color: var(--text); cursor: default; }
 .round-changes-summary .round-changes-title:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .round-changes-summary .tool-approval-diffstat { display: inline-flex; flex-shrink: 0; gap: 8px; font-family: var(--font-mono, monospace); font-size: calc(12rem / 14); line-height: 1; }
-.round-changes-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; max-width: 100%; }
-.round-changes-point { display: inline-flex; align-items: center; min-height: calc(32rem / 14); }
-.round-changes-current { display: inline-flex; align-items: center; gap: 5px; align-self: center; font-size: calc(12rem / 14); color: var(--muted); }
-.round-changes-current > svg { color: var(--diff-add); }
+.round-changes-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 0; max-width: 100%; }
+.round-changes-point { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 calc(72rem / 14); min-width: 0; min-height: calc(32rem / 14); }
+.round-changes-point > .inline-flex, .round-changes-point > .inline-flex > .ui-button { width: 100%; }
+.round-changes-current { display: inline-flex; align-items: center; justify-content: center; width: 100%; gap: 6px; align-self: center; font-size: calc(13rem / 14); font-weight: 400; color: var(--muted); }
+.round-changes-current > svg { width: 14px; height: 14px; flex-shrink: 0; color: var(--diff-add); }
 .round-changes-actions .ui-button { display: inline-flex; align-items: center; gap: 6px; min-height: calc(32rem / 14); padding: 0 10px; border: 0; border-radius: 8px; background: none; color: var(--muted); font-size: calc(13rem / 14); font-weight: 400; box-shadow: none; }
 .round-changes-actions .ui-button:hover { background: var(--hover); color: var(--text); }
 .round-changes-actions .ui-button > svg { flex-shrink: 0; }

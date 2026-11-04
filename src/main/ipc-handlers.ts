@@ -93,6 +93,10 @@ export function registerIpcHandlers(dependencies: IpcHandlerDependencies): void 
   }
 
   handle(IPC_CHANNELS.conversationsLoad, () => loadPermissions())
+  handle(IPC_CHANNELS.conversationsDraftsSave, drafts => {
+    loadPermissions()
+    conversations.saveDrafts(drafts)
+  })
   handle(IPC_CHANNELS.skillsList, () => modelResult(() => skills.list()))
   handle(IPC_CHANNELS.skillsEnable, (id, enabled) => modelResult(() => skills.setEnabled(id, enabled)))
   handle(IPC_CHANNELS.skillsDelete, id => modelResult(() => skills.remove(id)))
@@ -326,6 +330,7 @@ export function registerIpcHandlers(dependencies: IpcHandlerDependencies): void 
   handle(IPC_CHANNELS.ollamaConnect, baseUrl => modelResult(() => dependencies.getModelService().connectOllama(baseUrl)))
   handle(IPC_CHANNELS.googleConnect, apiKey => modelResult(() => dependencies.getModelService().connectGoogle(apiKey)))
   handle(IPC_CHANNELS.deepseekConnect, apiKey => modelResult(() => dependencies.getModelService().connectDeepseek(apiKey)))
+  handle(IPC_CHANNELS.deepseekBalance, () => modelResult(() => dependencies.getModelService().deepseekBalance()))
   handle(IPC_CHANNELS.openrouterConnect, apiKey => modelResult(() => dependencies.getModelService().connectOpenrouter(apiKey)))
   handle(IPC_CHANNELS.openrouterUsage, () => modelResult(() => dependencies.getModelService().openrouterUsage()))
   handle(IPC_CHANNELS.ollamaInfo, (baseUrl, model) => modelResult(() => dependencies.getModelService().getOllamaModelInfo(baseUrl, model)))
