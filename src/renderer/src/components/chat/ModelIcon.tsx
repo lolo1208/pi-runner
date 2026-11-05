@@ -1,4 +1,4 @@
-import { Cpu } from 'lucide-react'
+import { Cable, Cpu } from 'lucide-react'
 import type { ProviderId } from '../../../../shared/models'
 import openai from '../../assets/model-icons/openai.svg'
 import claude from '../../assets/model-icons/claude.svg'
@@ -33,10 +33,26 @@ import relace from '../../assets/model-icons/relace.svg'
 import sakana from '../../assets/model-icons/sakana.svg'
 import upstage from '../../assets/model-icons/upstage.svg'
 import tencent from '../../assets/model-icons/tencent.svg'
+import groq from '@lobehub/icons-static-svg/icons/groq.svg'
+import siliconcloud from '@lobehub/icons-static-svg/icons/siliconcloud.svg'
+import bfl from '@lobehub/icons-static-svg/icons/bfl.svg'
+import fishaudio from '@lobehub/icons-static-svg/icons/fishaudio.svg'
+import longcat from '@lobehub/icons-static-svg/icons/longcat.svg'
+import bilibiliIndex from '@lobehub/icons-static-svg/icons/bilibiliindex.svg'
+import alibaba from '@lobehub/icons-static-svg/icons/alibaba.svg'
+import antgroup from '@lobehub/icons-static-svg/icons/antgroup.svg'
 
 type ModelIconEntry = { label: string; icon?: string; monogram?: string }
 type ModelBrand = ModelIconEntry & { pattern: RegExp }
 const brands: ModelBrand[] = [
+  { pattern: /black-forest-labs|(?:^|\/)flux(?:[-./]|$)/i, label: 'Black Forest Labs', icon: bfl },
+  { pattern: /fishaudio/i, label: 'Fish Audio', icon: fishaudio },
+  { pattern: /meituan-longcat|longcat/i, label: '美团 LongCat', icon: longcat },
+  { pattern: /indexteam|index-tts/i, label: 'Index Team', icon: bilibiliIndex },
+  { pattern: /funaudiollm/i, label: 'FunAudioLLM', icon: alibaba },
+  { pattern: /inclusionai/i, label: 'InclusionAI', icon: antgroup },
+  { pattern: /siliconflow|siliconcloud/i, label: '硅基流动', icon: siliconcloud },
+  { pattern: /groq/i, label: 'Groq', icon: groq },
   { pattern: /bytedance|seed[-_/]/i, label: '字节跳动', icon: bytedance },
   { pattern: /nvidia|nemotron/i, label: 'NVIDIA', icon: nvidia },
   { pattern: /cohere|command-r/i, label: 'Cohere', icon: cohere },
@@ -65,15 +81,15 @@ const brands: ModelBrand[] = [
   { pattern: /xiaomi|mimo/i, label: '小米 MiMo', icon: xiaomimimo },
   { pattern: /claude|anthropic/i, label: 'Claude', icon: claude },
   { pattern: /deepseek/i, label: 'DeepSeek', icon: deepseek },
-  { pattern: /qwen|qwq/i, label: 'Qwen', icon: qwen },
+  { pattern: /qwen|qwq|tongyi-mai|wan-ai/i, label: 'Qwen', icon: qwen },
   { pattern: /llama|meta-llama/i, label: 'Meta', icon: meta },
   { pattern: /gemini|gemma/i, label: 'Google Gemini', icon: gemini },
   { pattern: /mistral|mixtral|codestral|ministral|devstral|magistral/i, label: 'Mistral', icon: mistral },
   { pattern: /grok/i, label: 'Grok', icon: grok },
-  { pattern: /glm|zhipu/i, label: '智谱', icon: zhipu },
+  { pattern: /glm|zhipu|zai-org/i, label: '智谱', icon: zhipu },
   { pattern: /minimax/i, label: 'MiniMax', icon: minimax },
   { pattern: /kimi|moonshot/i, label: 'Kimi', icon: moonshot },
-  { pattern: /gpt|chatgpt|codex|(?:^|[/])o[134](?:[-:/]|$)/i, label: 'OpenAI', icon: openai },
+  { pattern: /gpt|chatgpt|codex|(?:^|\/)whisper-large-v3(?:[-./]|$)|(?:^|[/])o[134](?:[-:/]|$)/i, label: 'OpenAI', icon: openai },
 ]
 const providers: Partial<Record<ProviderId, ModelIconEntry>> = {
   google: { label: 'Google AI Studio', icon: gemini },
@@ -83,6 +99,7 @@ const providers: Partial<Record<ProviderId, ModelIconEntry>> = {
 }
 
 export function ModelIcon({ model, provider, size = 15 }: { model?: string; provider?: ProviderId; size?: number }): React.JSX.Element {
+  if (provider === 'custom' && !model) return <Cable size={size} aria-label="兼容接口图标" />
   const brand = brands.find(brand => brand.pattern.test(model ?? '')) ?? (provider ? providers[provider] : undefined)
   if (brand?.monogram) return <span className="chat-model-monogram" role="img" aria-label={`${brand.label} 图标`} style={{ width: size, height: size }}>{brand.monogram}</span>
   if (!brand) {

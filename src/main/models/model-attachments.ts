@@ -3,6 +3,7 @@ import { attachmentKind, attachmentText } from '../../shared/attachments'
 import { ModelError } from './model-validation'
 
 export function useFileResponses(profile: ModelProfile, messages: ChatMessage[]): boolean {
+  if (profile.provider === 'custom') return profile.protocol === 'openai-compatible' && profile.compatibleApi === 'responses'
   return profile.provider === 'openai' && profile.protocol !== 'anthropic' && messages.some(message => message.images?.some(file => attachmentKind(file) === 'file' && !file.dataUrl.startsWith('data:application/pdf;')))
 }
 

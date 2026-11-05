@@ -785,6 +785,25 @@ button.chat-round-dot:focus-visible { outline: 1px solid var(--accent); outline-
   object-fit: scale-down;
 }
 
+.image-preview-content > .image-preview-nav,
+.attachment-preview-dialog > .image-preview-nav {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: none;
+  color: #fff;
+}
+.image-preview-nav-previous { left: calc(8px - (100vw - 100%) / 2); }
+.image-preview-nav-next { right: calc(8px - (100vw - 100%) / 2); }
+.image-preview-nav:not(:disabled):hover { background: #000d; color: #fff; }
+.image-preview-nav:disabled { opacity: .4; }
+
 .modal-close.image-preview-close {
   -webkit-app-region: no-drag;
   top: 16px;
@@ -817,8 +836,14 @@ button.chat-round-dot:focus-visible { outline: 1px solid var(--accent); outline-
   width: min(860px, calc(100vw - 40px));
   height: auto;
   max-height: calc(100dvh - var(--titlebar-height, 0px) - 40px);
-  overflow: hidden;
+  overflow: visible;
 }
+
+.attachment-preview-fallback { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; min-height: 180px; padding: 24px; text-align: center; overflow-wrap: anywhere; }
+.attachment-preview-fallback > svg { width: 48px; height: 48px; }
+.attachment-preview-fallback > small { color: var(--muted); }
+.image-preview-content > .attachment-preview-fallback { color: #fff; }
+.image-preview-content > .attachment-preview-fallback > small { color: #ddd; }
 
 .modal-panel.attachment-preview-text-dialog {
   height: min(78dvh, calc(100dvh - var(--titlebar-height, 0px) - 40px));

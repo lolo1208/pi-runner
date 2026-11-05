@@ -1,105 +1,53 @@
-# 开发与命名规范
+# 开发指南
 
-## 产品标识
+## 环境与命令
 
-| 用途 | 名称 |
-| --- | --- |
-| 产品全名 | Pi Runner · 行动派 |
-| 英文 / 中文 | Pi Runner / 行动派 |
-| 包名 / 推荐仓库目录 | `pi-runner` |
-| application ID | `dev.pirunner.desktop` |
-| 桥接类型 / 对象 | `PiRunnerApi` / `window.piRunner` |
-| 影子仓库与暂存区 | `~/.pi-runner/projects/<项目路径哈希>/` |
-
-## 命名约定
-
-以语言与生态惯例为依据，项目内保持一致；不为无关领域类和变量加产品名前缀。
-
-| 对象 | 规则 | 示例 |
-| --- | --- | --- |
-| 目录、普通 TS、文档 | kebab-case | `shadow-git-manager.ts`、`development-guide.md` |
-| React 组件文件与组件 | PascalCase | `App.tsx`、`ChangedFilesList` |
-| 类、接口、类型 | PascalCase，无 I/T 前缀 | `ShadowGitManager`、`PiRunnerApi` |
-| 变量、属性、函数 | camelCase，体现职责 | `snapshotManager`、`rendererUrl`、`createCheckpoint` |
-| 布尔状态 | 优先 is/has/can/should | `isBusy`、`canRestore` |
-| 固定模块常量 | UPPER_SNAKE_CASE | `IPC_CHANNELS`、`EXCLUDED_NAMES` |
-| Hook | use + PascalCase | `useSession` |
-| 测试文件 | 模块名 + `.test.ts(x)` | `shadow-git-manager.test.ts` |
-| IPC 通道 | 领域:动作，使用共享常量 | `snapshot:create` |
-| 数据库（接入时） | snake_case，表用复数 | `tool_calls`、`turn_id` |
-| 自定义环境变量 | PI_RUNNER_ + UPPER_SNAKE_CASE | `PI_RUNNER_LOG_LEVEL` |
-
-工具入口保留惯例，如 `index.ts`、`main.tsx`、`env.d.ts` 和 `electron.vite.config.ts`；外部 API 名称不重写。避免语义模糊的模块级 `data`、`manager`；局部循环索引可用 `i`。
-
-使用 UTF-8、LF、两空格缩进，见 `.editorconfig`。TypeScript strict；不要用 `any` 绕过边界校验。格式化/lint 作具尚未接入，后续应纳入检查命令。
-
-## 目录边界
-
-```text
-src/
-  main/index.ts                      # 生命周期与 IPC
-  main/snapshot/shadow-git-manager.ts
-  main/snapshot/project-ignores.ts     # 展示层 .gitignore 过滤
-  preload/index.ts                   # 固定桥接方法
-  shared/api.ts                      # DTO、通道常量、接口
-  renderer/index.html
-  renderer/src/main.tsx              # React 挂载
-  renderer/src/App.tsx               # 工作台组件
-  renderer/src/styles.css
-  renderer/src/env.d.ts
-  main/models/pi-tools-permission.test.ts
-docs/
-```
-
-后续按领域增加 `main/agent`、`main/storage`、`main/tools` 和 Renderer 组件/Hook 目录，避免无职责的 utils 集合。共享层不依赖 Electron 或 Renderer。原生模块接入时明确 Electron ABI 与打包验证。
-
-## pnpm 工作流
-
-固定 `pnpm@12.6.0`，Node.js 24+。只提交 `pnpm-lock.yaml`；依赖变更使用 `pnpm add` / `pnpm add -D` / `pnpm remove`，同时提交 manifest 和锁文件。CI 冻结锁文件安装。
-
-`pnpm-workspace.yaml` 使用 hoisted 布局以配合 Electron 打包，仅允许 Electron 和 esbuild 构建脚本。新增原生依赖逐项审查，不全局放行。参考 [pnpm 设置](https://pnpm.io/settings)及[锁文件导入](https://pnpm.io/cli/import)。
+使用 Node.js 24+、`pnpm@12.6.0` 和系统 Git。依赖变更同时提交 `package.json` 与 `pnpm-lock.yaml`；`pnpm-workspace.yaml` 限制依赖安装脚本，新增原生依赖需审查 Electron ABI 和打包。
 
 | 命令 | 用途 |
 | --- | --- |
-| `pnpm install --frozen-lockfile` | 安装已锁依赖 |
-| `pnpm dev` | 桌面热重载 |
-| `pnpm typecheck` / `pnpm test` | 类型检查 / 集成测试 |
-| `pnpm build` / `pnpm check` | 编译 / 聚合检查 |
-| `pnpm pack:dir` | 本机未安装应用目录 |
-| `pnpm dist:win` / `pnpm dist:mac` | 平台安装包 |
-| `pnpm dist:win:all` | 一次构建 Windows x64 安装包、便携版与 ZIP，共用目录及预压缩载荷 |
-| `pnpm dist:win:portable` / `pnpm dist:win:zip` | 单独导出便携版 / ZIP |
-| `pnpm electron:install` | 显式下载并校验 Electron 运行时；dev/preview 自动先执行 |
-| `pnpm rebuild esbuild` | 重建 esbuild 构建依赖 |
+| `pnpm install --frozen-lockfile` | 安装依赖 |
+| `pnpm dev` / `pnpm preview` | 开发 / 预览；自动安装 Electron 运行时 |
+| `pnpm typecheck` / `pnpm test` / `pnpm build` | 类型检查 / 测试 / 编译 |
+| `pnpm check` | 聚合检查 |
+| `pnpm pack:dir` | 导出目录版至 `build-work/dir/` |
+| `pnpm dist:win:all` | 导出 Windows x64 安装包、便携版及 ZIP |
+| `pnpm dist:win` / `pnpm dist:win:portable` / `pnpm dist:win:zip` | 单独导出 Windows 发行包 |
+| `pnpm dist:mac` | 导出 macOS DMG |
 
-`pack:dir` 避免与 pnpm 内置 `pack` 混淆。编译输出 `out/`、打包工作目录 `build-work/` 和最终发行目录 `release/` 不提交，也不进入项目快照。Windows 可用 `pnpm.cmd`。
+发行文件位于 `release/`，打包中间文件位于 `build-work/`，均不提交。Windows 可用 `pnpm.cmd`；也可运行 `scripts/dev-menu.bat`，macOS/Linux 可运行 `bash scripts/dev-menu.sh`。
 
-Windows 推荐在 dev-menu 输入 `a`，或执行 `pnpm dist:win:all`。菜单 `b/c/d` 分别单独导出安装包、便携版、ZIP。三件套仅执行一次构建、目录打包和包内依赖校验；7-Zip 多线程生成 ZIP 与共享 LZMA2 载荷后，两个 NSIS 外壳并行生成，不重复压缩载荷。固定版本 7-Zip 安装包与工具文件按 SHA-256 校验并缓存在 `build-work/tools/`，工具损坏时从已校验的包重新解出。Electron 只保留简体中文与英语，asar 排除映射、类型声明和开发文档，保留许可证；调整排除规则后必须通过包内依赖加载验证。
+首次 Windows 打包按需下载并校验固定版本的 NSIS 和 7-Zip，缓存于 `build-work/tools/`；缓存完整时可离线复用。发行脚本会检查包内主进程依赖。Windows 包未签名；跨平台安装与运行仍需在目标系统验收。
 
-工具权限见[权限模式与自动审核](tool-permissions.md)。三种模式共享文件路径校验和终端执行前审核，系统临时目录可用于临时文件，网络不逐项审批。终端及子进程使用当前用户权限，开发命令放行意味着信任其脚本行为。
+若 Electron 运行时下载失败，检查网络和代理，或配置 `ELECTRON_MIRROR` 后运行 `pnpm electron:install`。跳过安装脚本导致 esbuild 无法运行时，执行 `pnpm rebuild esbuild`。
 
-Windows 安装包与便携版首次打包时才自动下载固定版本的 NSIS，并校验 SHA-256；工具保存在 `build-work/tools/nsis-x64-3.13.7507.353/`，后续校验并复用，缺失或损坏时重新下载。首次准备工具还会下载并校验官方 7-Zip `26.04`，借助 electron-builder 的解压工具解出完整 7-Zip，再解出 NSIS；无需系统安装这些工具，也不执行下载的安装程序。仓库仅保留 `scripts/nsis-x64-manifest.json` 的版本与校验信息，`scripts/vendor/` 旧工具目录已忽略，无需提交。macOS 开发和打包不准备这些 Windows 工具。首次下载失败时，检查 GitHub Releases 的网络访问或 `HTTP_PROXY` / `HTTPS_PROXY`（也支持小写形式），然后重新运行打包命令；缓存就绪后可离线复用。
+## 应用图标
 
-### Electron uninstall 启动错误
+将静态 PNG 放在 `resources/app-icon.png`，运行 `pnpm icons:generate`，生成 Windows、macOS 和界面图标。生成过程保留原图比例并补透明留白；启动及打包不会自动重新生成图标。
 
-若主进程和 Preload 编译成功，但启动时报 `Electron uninstall`，检查 Electron 二进制是否已安装。当前 Electron 44 的包没有安装时下载运行时的 postinstall，`pnpm rebuild electron` 可能直接成功但并未下载；应使用 `pnpm electron:install`（调用包内 `install-electron`）。`dev` 和 `preview` 已串联此步骤，下载失败时停止启动，避免显示误导性的应用卸载错误。`build` 保持纯编译，不需要桌面运行时。
+## 代码约定
 
-下载失败时检查 GitHub Releases 的网络访问或代理。可按 [Electron 官方安装说明](https://www.electronjs.org/docs/latest/tutorial/installation)配置 `ELECTRON_MIRROR`；保留包内校验和，不关闭 TLS 或校验验证。
+- UTF-8、LF、两空格缩进；TypeScript 使用 strict，不用 `any` 绕过边界校验。
+- 普通文件和目录使用 kebab-case；React 组件、类型和类使用 PascalCase；函数和变量使用 camelCase。
+- 共享 DTO 与 IPC 定义放在 `src/shared`，主进程服务放在 `src/main`，固定桥接放在 `src/preload`，界面放在 `src/renderer`。共享层不依赖 Electron 或 Renderer。
+- 测试与代码同目录，命名为 `*.test.ts(x)`；临时数据放在 `.tmp/` 或 `tests/.artifacts/`。
+- 界面默认不允许选择文字；需要复制的内容容器应加入 `styles.css` 的选择白名单。
+- 升级 electron-builder、Google SDK 或 pi SDK 时，检查 `patches/` 中对应补丁及打包、网络适配是否仍有效。
 
-安装脚本复用 Electron 官方安装器，检测到已有 `HTTP_PROXY` / `HTTPS_PROXY`（含小写形式）时启用其代理支持，不写入或输出代理地址。下载超过 5 分钟会停止并提示重试；本机没有配置代理时保持默认直连。
+## 提示词维护
 
-## 界面选择约定
+提示词分布在系统规则、工具描述、计划交互和上下文摘要中；用户提示词及 Skill 不能覆盖权限、工具限制和审批。
 
-全局默认不可选中：`styles.css` 中 `html, body` 设置 `user-select: none`，标题栏、侧边栏、输入区工具条、底部状态栏、下拉菜单与提示浮层等界面语言都不参与文本选择。真正需要复制的正文在同一个 `:where(...)` 白名单里显式放开，新增可复制内容区时把容器类加进该列表（用 `:where()` 保持零优先级，便于局部覆盖），不要反过来给单个控件补 `user-select: none`。空输入框的占位提示由 `.composer textarea:placeholder-shown` 单独保持不可选中。
+| 入口 | 位置 |
+| --- | --- |
+| Agent 系统规则与模式 | `src/main/models/pi-system-prompt.ts` |
+| 计划交互与纠偏 | `plan-tools.ts`、`pi-agent-service.ts` |
+| 用户提示词分层 | `src/shared/prompts.ts` |
+| 文件、终端和批量工具 | `pi-tools.ts`、`text-mutation-tools.ts`、`batch-tools.ts`、`download-tool.ts`、`filesystem-tools.ts` |
+| 审核模型 | `tool-review-service.ts` |
+| 上下文压缩 | `summary-prompt.ts`、`context-compaction.ts`、`pi-agent-service.ts` |
+| 附件与技能注入 | `pi-attachments.ts`、`model-attachments.ts`、`google-attachments.ts` |
 
-## 本地测试与临时文件
+未写完整路径的文件位于 `src/main/models/`。SDK 也可能提供工具描述和压缩模板；升级时需核对实际调用路径。避免重复规则，但保留权限、覆盖风险和部分失败等必要语义；安全检查不能只依靠提示词。摘要应区分计划、批准、实际结果和未验证事项。
 
-当前自动测试文件随被测代码放在 `src/`，`pnpm test` 使用 Vitest 默认发现规则。手动探测数据、日志和测试脚本产物放在已忽略的 `.tmp/` 或 `tests/.artifacts/`，不要写到项目根目录。Electron 冒烟脚本的截图与测试数据也属于忽略的测试产物。
-
-文件与终端工具的权限逻辑位于 `security-paths.ts`、`pi-tools.ts`、`tool-permissions.ts` 和 `tool-review-service.ts`。审核模型通过设置、IPC 和模型配置存储传递，选项为空时使用默认模型，选择“关闭”（`REVIEW_MODEL_OFF`）时存储 `reviewDisabled` 并停止 AI 审核。
-
-## 交付与文档维护
-
-发行脚本在压缩前使用包内 Electron 加载 `app.asar` 中的主进程依赖；加载失败会停止导出，避免发布无法启动的程序。`patches/app-builder-lib@26.15.3.patch` 兼容 pnpm 新版 JSON 配置输出，确保打包工具正确识别 hoisted 布局并收集嵌套依赖的对应版本。补丁由 `pnpm-workspace.yaml` 注册，离线安装也会自动应用；升级 electron-builder 时须重新检查补丁和包内运行时依赖加载检查。
-
-说明行为变化、验证结果和未解决问题；编译通过不等于跨平台验收通过。需求更新规格，边界/数据格式更新架构，进度更新路线，验证追加验收记录。存储、应用 ID 或目录更名须说明兼容与迁移子响。
+更新行为时同步维护对应文档；不要把构建通过当作跨平台实机验收通过。

@@ -32,15 +32,16 @@ export default function CodeDiff({ path, before, after, hunks, mode, theme, onSt
   statsCallback.current = onStats
   useEffect(() => {
     let active = true
+    const controller = new AbortController()
     setResult(undefined)
     setError('')
     setPage(null)
-    void loadPreparedDiff({ path, before, after, hunks }, theme).then(value => {
+    void loadPreparedDiff({ path, before, after, hunks }, theme, controller.signal).then(value => {
       if (!active) return
       setResult(value)
       statsCallback.current?.(value.stats)
     }).catch(reason => { if (active) setError(reason instanceof Error ? reason.message : '文件对比加载失败') })
-    return () => { active = false }
+    return () => { active = false; controller.abort() }
   }, [path, before, after, hunks, theme, retry])
   const lineCount = result ? mode === 'split' ? result.bundle.splitLineLength : result.bundle.unifiedLineLength : 0
   const paginated = lineCount > 1000

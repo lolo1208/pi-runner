@@ -1,6 +1,7 @@
 import { clipboard, dialog, ipcMain, shell, type BrowserWindow } from 'electron'
 import path from 'node:path'
-import { writeFile } from 'node:fs/promises'
+import { mkdtemp, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { ConversationStore } from './conversation-store'
 import { defaultConversationPermission } from '../shared/conversations'
 import { fileURLToPath } from 'node:url'
@@ -11,7 +12,7 @@ import { ModelSettingsStore } from './models/model-settings-store'
 import { ModelService, modelResult } from './models/model-service'
 import type { ChatgptService } from './models/chatgpt-service'
 import { ModelError } from './models/model-validation'
-import { performFileAction } from './file-actions'
+import { copyFile, performFileAction } from './file-actions'
 import { listProjectFiles } from './project-files'
 import { SleepBlocker } from './sleep-blocker'
 import type { FileAction } from '../shared/api'
@@ -93,9 +94,9 @@ export function registerIpcHandlers(dependencies: IpcHandlerDependencies): void 
   }
 
   handle(IPC_CHANNELS.conversationsLoad, () => loadPermissions())
-  handle(IPC_CHANNELS.conversationsDraftsSave, drafts => {
+  handle(IPC_CHANNELS.conversationsDraftsSave, (drafts, selectedId) => {
     loadPermissions()
-    conversations.saveDrafts(drafts)
+    conversations.saveDrafts(drafts, selectedId)
   })
   handle(IPC_CHANNELS.skillsList, () => modelResult(() => skills.list()))
   handle(IPC_CHANNELS.skillsEnable, (id, enabled) => modelResult(() => skills.setEnabled(id, enabled)))
@@ -154,6 +155,16 @@ export function registerIpcHandlers(dependencies: IpcHandlerDependencies): void 
     })
   })
   handle(IPC_CHANNELS.closeNotifications, () => closeAllNotifications())
+  handle(IPC_CHANNELS.copyAttachment, async (name, dataUrl) => {
+    const match = typeof dataUrl === 'string' ? ATTACHMENT_DATA_URL.exec(dataUrl) : null
+    if (!match || !match[1].toLowerCase().startsWith('image/')) throw new ModelError('图片内容格式无效')
+    let filename = parseString(name).replace(/[\x00-\x1f<>:"/\\|?*]/g, '_').replace(/[. ]+$/, '') || '图片'
+    if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(filename)) filename = `_${filename}`
+    const directory = await mkdtemp(path.join(tmpdir(), 'pi-runner-clipboard-'))
+    const file = path.join(directory, filename)
+    await writeFile(file, Buffer.from(match[2], 'base64'))
+    await copyFile(file)
+  })
   handle(IPC_CHANNELS.saveAttachment, async (name, dataUrl) => {
     const window = dependencies.getMainWindow()
     if (!window) throw new ModelError('应用窗口尚未准备就绪')
@@ -308,6 +319,10 @@ export function registerIpcHandlers(dependencies: IpcHandlerDependencies): void 
     const manager = await snapshotForProject(project)
     return manager.getMatchingCheckpoints(hashes as string[])
   })
+  handle(IPC_CHANNELS.compatibleManage, input => modelResult(async () => {
+    if (dependencies.getModelService().isBusy()) throw new ModelError('请先停止模型请求再修改连接')
+    return dependencies.getModelService().manageCompatibleConnection(input)
+  }))
   handle(IPC_CHANNELS.modelSettings, () => modelResult(() => dependencies.getModelSettings().list()))
   handle(IPC_CHANNELS.chatgptStatus, () => modelResult(() => chatgpt().status()))
   handle(IPC_CHANNELS.chatgptStart, () => modelResult(async () => { if (dependencies.getModelService().isBusy()) throw new ModelError('请先停止模型请求再授权账号'); return chatgpt().start() }))
@@ -320,6 +335,11 @@ export function registerIpcHandlers(dependencies: IpcHandlerDependencies): void 
   handle(IPC_CHANNELS.chatgptInfo, model => modelResult(() => chatgpt().modelInfo(model)))
   handle(IPC_CHANNELS.chatgptUsage, () => modelResult(() => chatgpt().usage()))
   handle(IPC_CHANNELS.modelSave, input => modelResult(() => dependencies.getModelSettings().save(input)))
+  handle(IPC_CHANNELS.modelRemoveProvider, provider => modelResult(async () => {
+    if (dependencies.getModelService().isBusy()) throw new ModelError('请先停止模型请求再移除配置')
+    if (provider === 'chatgpt') await chatgpt().logout()
+    return dependencies.getModelSettings().removeProvider(provider)
+  }))
   handle(IPC_CHANNELS.modelActivate, id => modelResult(() => dependencies.getModelSettings().setActive(id)))
   handle(IPC_CHANNELS.modelReview, id => modelResult(() => dependencies.getModelService().setReviewModel(id)))
   handle(IPC_CHANNELS.modelTest, (id, requestId) => modelResult(() => dependencies.getModelService().request(id, requestId, null, true)))
@@ -329,6 +349,7 @@ export function registerIpcHandlers(dependencies: IpcHandlerDependencies): void 
   handle(IPC_CHANNELS.modelCancel, requestId => modelResult(() => dependencies.getModelService().cancel(requestId)))
   handle(IPC_CHANNELS.ollamaConnect, baseUrl => modelResult(() => dependencies.getModelService().connectOllama(baseUrl)))
   handle(IPC_CHANNELS.googleConnect, apiKey => modelResult(() => dependencies.getModelService().connectGoogle(apiKey)))
+  handle(IPC_CHANNELS.compatibleModels, input => modelResult(() => dependencies.getModelService().listCompatibleModels(input)))
   handle(IPC_CHANNELS.deepseekConnect, apiKey => modelResult(() => dependencies.getModelService().connectDeepseek(apiKey)))
   handle(IPC_CHANNELS.deepseekBalance, () => modelResult(() => dependencies.getModelService().deepseekBalance()))
   handle(IPC_CHANNELS.openrouterConnect, apiKey => modelResult(() => dependencies.getModelService().connectOpenrouter(apiKey)))

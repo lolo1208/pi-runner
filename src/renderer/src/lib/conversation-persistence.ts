@@ -1,8 +1,8 @@
 import type { Conversation, ConversationDraftUpdate, ConversationState } from '../../../shared/conversations'
 
 /** 只比较字段引用；纯文字输入不扫描消息正文，也不复制附件的 Base64。 */
-export function conversationDraftChanges(previous: ConversationState, next: ConversationState): ConversationDraftUpdate[] | null {
-  if (previous.selectedId !== next.selectedId || previous.tasks.length !== next.tasks.length) return null
+export function conversationDraftChanges(previous: ConversationState, next: ConversationState, includeSelection = false): ConversationDraftUpdate[] | null {
+  if (!includeSelection && previous.selectedId !== next.selectedId || previous.tasks.length !== next.tasks.length) return null
   const changes: ConversationDraftUpdate[] = []
   for (let index = 0; index < next.tasks.length; index++) {
     const before = previous.tasks[index], after = next.tasks[index]

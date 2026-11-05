@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { memoWithStableCallbacks } from './lib/memo-with-callbacks'
 import { useDraftSync } from './hooks/useDraftSync'
 import { StreamTextBuffer } from './lib/stream-text-buffer'
+import { subscribeAgentEvents } from './lib/agent-events'
 import { reconcileTranscript } from './lib/reconcile-transcript'
 import type { QueueEditState } from '../../shared/conversations'
 import type { ChatgptUsage, OpenrouterUsage, ChatImage, ChatMessage, ModelProfile, ModelProfileView, ModelProviderConnection, ModelReply, ModelSettings, OutputSpeed, ProviderId } from '../../shared/models'
@@ -24,6 +25,9 @@ import { LoaderCircle } from 'lucide-react'
 import { PagedList } from './components/PagedList'
 
 interface Props {
+  onRetainChange?(retain: boolean): void
+  initialNativeHistory?: boolean
+  onHistoryRestored?(native: boolean): void
   snapshots?: import('../../shared/models').AgentSnapshot[]
   onSnapshotsChange?(snapshots: import('../../shared/models').AgentSnapshot[]): void
   initialIntentMode?: IntentMode
@@ -58,7 +62,7 @@ interface Props {
   profile: ModelProfileView | undefined; onBusyChange(busy: boolean, historyOnly?: boolean): void; onOpenSettings(section?: 'models' | 'skills'): void
   onMessagesChange?(messages: ChatMessage[], restored?: boolean): void; settingsDisabled?: boolean; sendWithCtrlEnter?: boolean
 }
-function ModelChat({ notificationNavigationRequest = 0, snapshots, onSnapshotsChange, initialIntentMode = 'execute', onIntentChange, initialPermissionMode = 'default', onPermissionChange, active = true, projectReady = true, projectCurrent = true, conversationId, initialMessages = [], initialDraft = '', initialDraftImages = [], initialDraftSkillIds = [], initialQueue = [], initialQueuePaused = false, initialQueueEdit, onQueueChange, initialCompaction, onCompactionChange, compressionThreshold = DEFAULT_COMPRESSION_THRESHOLD, onDraftChange, profile: defaultProfile, profiles, project, providers, onModelSettingsChange, onBusyChange, onReplyComplete, onTaskEnd, onWaitingForInputChange, onOpenSettings, onMessagesChange, initialModelId, onModelChange, settingsDisabled, sendWithCtrlEnter = true, customPrompt = '' }: Props): React.JSX.Element {
+function ModelChat({ initialNativeHistory, onHistoryRestored, onRetainChange, notificationNavigationRequest = 0, snapshots, onSnapshotsChange, initialIntentMode = 'execute', onIntentChange, initialPermissionMode = 'default', onPermissionChange, active = true, projectReady = true, projectCurrent = true, conversationId, initialMessages = [], initialDraft = '', initialDraftImages = [], initialDraftSkillIds = [], initialQueue = [], initialQueuePaused = false, initialQueueEdit, onQueueChange, initialCompaction, onCompactionChange, compressionThreshold = DEFAULT_COMPRESSION_THRESHOLD, onDraftChange, profile: defaultProfile, profiles, project, providers, onModelSettingsChange, onBusyChange, onReplyComplete, onTaskEnd, onWaitingForInputChange, onOpenSettings, onMessagesChange, initialModelId, onModelChange, settingsDisabled, sendWithCtrlEnter = true, customPrompt = '' }: Props): React.JSX.Element {
   const [permissionMode, setPermissionMode] = useState(initialPermissionMode)
   const [intentMode, setIntentMode] = useState<IntentMode>(initialIntentMode)
   const intentCallback = useRef(onIntentChange)
@@ -75,6 +79,13 @@ function ModelChat({ notificationNavigationRequest = 0, snapshots, onSnapshotsCh
   const [autoApproval, setAutoApproval] = useState<boolean | null>(null)
   const autoDecision = useRef<boolean | null>(null)
   const [permissionChanging, setPermissionChanging] = useState(false)
+  const [attachmentReading, setAttachmentReading] = useState(false)
+  const retainCallback = useRef(onRetainChange)
+  retainCallback.current = onRetainChange
+  useLayoutEffect(() => {
+    retainCallback.current?.(permissionChanging || attachmentReading)
+    return () => retainCallback.current?.(false)
+  }, [permissionChanging, attachmentReading])
   const [fullConfirmation, setFullConfirmation] = useState<{ requestId: string; approval: ToolApproval } | null>(null)
   const waitingForInput = Boolean(interaction || approvals.length || fullConfirmation)
   const waitingReason: 'plan-question' | 'plan-review' | 'approval' | undefined = interaction
@@ -207,8 +218,10 @@ function ModelChat({ notificationNavigationRequest = 0, snapshots, onSnapshotsCh
   const [execution, setExecution] = useState<{ model: string; provider: ProviderId; startedAt: number; firstMessage: number }>()
   const activeRequest = useRef<string | null>(null)
   const transcriptRef = useRef(messages)
-  const nativeHistory = useRef(false)
-  const [historyReady, setHistoryReady] = useState(!conversationId || !window.piRunner.getAgentHistory)
+  const nativeHistory = useRef(initialNativeHistory ?? false)
+  const historyRestoredCallback = useRef(onHistoryRestored)
+  historyRestoredCallback.current = onHistoryRestored
+  const [historyReady, setHistoryReady] = useState(initialNativeHistory !== undefined || !conversationId || !window.piRunner.getAgentHistory)
   const messagesCallback = useRef(onMessagesChange)
   messagesCallback.current = onMessagesChange
   // 请求期间可以切换会话，完成时必须使用当前的查看状态。
@@ -217,7 +230,7 @@ function ModelChat({ notificationNavigationRequest = 0, snapshots, onSnapshotsCh
   const taskEndCallback = useRef(onTaskEnd)
   taskEndCallback.current = onTaskEnd
   useEffect(() => {
-    if (!conversationId || !window.piRunner.getAgentHistory) return
+    if (initialNativeHistory !== undefined || !conversationId || !window.piRunner.getAgentHistory) return
     let active = true
     void window.piRunner.getAgentHistory(conversationId).then(unwrapModelResult).then(history => {
       if (!active) return
@@ -227,11 +240,12 @@ function ModelChat({ notificationNavigationRequest = 0, snapshots, onSnapshotsCh
         const restored = reconcileTranscript(transcriptRef.current, history)
         transcriptRef.current = restored; setMessages(restored); messagesCallback.current?.(restored, true)
       }
+      historyRestoredCallback.current?.(nativeHistory.current)
       setHistoryReady(true)
     }).catch(() => { if (active) setError('代理会话恢复失败，请检查本地会话文件后重试') })
     return () => { active = false }
   }, [conversationId])
-  useEffect(() => window.piRunner.onAgentEvent?.(event => {
+  useEffect(() => subscribeAgentEvents(event => {
     if (event.conversationId !== conversationId) return
     if (event.type === 'approval' && event.approval?.tool === 'full-access') { setFullConfirmation({ requestId: event.requestId, approval: event.approval }); return }
     if (event.type === 'approval-end') setFullConfirmation(previous => previous?.approval.id === event.approvalId ? null : previous)
@@ -257,6 +271,7 @@ function ModelChat({ notificationNavigationRequest = 0, snapshots, onSnapshotsCh
     if (event.type === 'status') { setAgentStatus(event.text ?? ''); if (event.resetText) streamBuffer.clear() }
     if (event.type === 'transcript' && event.messages) {
       nativeHistory.current = true
+      historyRestoredCallback.current?.(true)
       const previousAssistant = transcriptRef.current.filter(message => message.role === 'assistant')
       const history = reconcileTranscript(transcriptRef.current, event.messages)
       const nextAssistant = history.filter(message => message.role === 'assistant')
@@ -274,7 +289,7 @@ function ModelChat({ notificationNavigationRequest = 0, snapshots, onSnapshotsCh
       // 实时思考快照属于当前调用，并非已落盘的新回复；其更新不能清空仍在生成的正文。
       if (!latestAssistant?.historyId?.startsWith('live-thinking:') && (nextAssistant.length !== previousAssistant.length || latestAssistant?.historyId !== previousAssistant.at(-1)?.historyId || latestAssistant?.content !== previousAssistant.at(-1)?.content)) streamBuffer.clear()
     }
-  }), [conversationId])
+  }, conversationId), [conversationId])
   const [statistics, setStatistics] = useState<{ profileId: string; reply: ModelReply } | null>(null)
   const lastAssistant = useMemo(() => [...messages].reverse().find(message => message.role === 'assistant'), [messages])
   const savedExecution = lastAssistant?.execution
@@ -390,8 +405,10 @@ function ModelChat({ notificationNavigationRequest = 0, snapshots, onSnapshotsCh
         ? window.piRunner.chatWithModel(profile.id, id, requestMessages, instruction || undefined, requestContext, { conversationId, project, ...(intentMode !== 'execute' ? { intentMode } : {}) })
         : window.piRunner.chatWithModel(profile.id, id, requestMessages, instruction || undefined, requestContext)))
       replyReceived = true
-      setStatistics({ profileId: profile.id, reply })
-      if (reply.messages) nativeHistory.current = true
+      // 统计面板不需要整份历史，避免额外保留 IPC 返回的消息和附件副本。
+      const { messages: _replyMessages, ...replyStatistics } = reply
+      setStatistics({ profileId: profile.id, reply: replyStatistics })
+      if (reply.messages) { nativeHistory.current = true; historyRestoredCallback.current?.(true) }
       const completed = reconcileTranscript(transcriptRef.current, (reply.messages ?? [...next, { role: 'assistant' as const, content: reply.text }]).map((message, index) =>
         message.role === 'assistant' && index >= messages.length && message.execution?.elapsedMs === undefined ? { ...message, execution: { model: reply.model, provider: profile.provider, elapsedMs: reply.elapsedMs } } : message))
       transcriptRef.current = completed
@@ -434,6 +451,7 @@ function ModelChat({ notificationNavigationRequest = 0, snapshots, onSnapshotsCh
       const history = conversationId ? unwrapModelResult(await window.piRunner.deleteAgentRound(conversationId, index, messages[index].historyId)) : null
       const retained = reconcileTranscript(transcriptRef.current, history ?? [...messages.slice(0, index), ...messages.slice(end)])
       nativeHistory.current = history !== null
+      historyRestoredCallback.current?.(nativeHistory.current)
       transcriptRef.current = retained
       setMessages(retained); onMessagesChange?.(retained)
       setCompaction(undefined); onCompactionChange?.(undefined)
@@ -477,7 +495,7 @@ function ModelChat({ notificationNavigationRequest = 0, snapshots, onSnapshotsCh
       <ToolApprovalDiffDialog open={active && approvalDetailsOpen} onOpenChange={setApprovalDetailsOpen} approvals={approvals} getPreview={getApprovalPreview} />
       {active && error && <p className="error" role="alert">{error}</p>}
       {active && notice && <p className="request-notice" role="status">{notice}</p>}
-      <ChatComposer stopping={stopping} active={active} queue={queue} editingId={editingId} queuePaused={queuePaused} onResumeQueue={() => setQueuePaused(false)} onCancelEdit={restoreDraft} onEditQueued={editQueued} onDeleteQueued={deleteQueued} onReorderQueued={reorderQueued} intentMode={intentMode} onIntentChange={changeIntent} permissionMode={permissionMode} onPermissionChange={conversationId ? changePermission : undefined} profile={profile} profiles={availableProfiles} providers={providers} onSelectModel={id => { setSelectedModelId(id); onModelChange?.(id) }} onThinkingChange={changeThinking} prompt={prompt} images={images} skillIds={skillIds} onSkillsChange={setSkillIds} onImagesChange={setImages} isBusy={Boolean(requestId)} hasMessages={messages.length > 0} settingsDisabled={settingsDisabled || permissionChanging || deletingRound || !projectReady} sendWithCtrlEnter={sendWithCtrlEnter} onPromptChange={setPrompt} onOpenSettings={onOpenSettings} onSend={submit} onCancel={() => { void stopRequest().catch(() => setError('取消请求失败，请重试')) }} />
+      <ChatComposer onReadingChange={setAttachmentReading} stopping={stopping} active={active} queue={queue} editingId={editingId} queuePaused={queuePaused} onResumeQueue={() => setQueuePaused(false)} onCancelEdit={restoreDraft} onEditQueued={editQueued} onDeleteQueued={deleteQueued} onReorderQueued={reorderQueued} intentMode={intentMode} onIntentChange={changeIntent} permissionMode={permissionMode} onPermissionChange={conversationId ? changePermission : undefined} profile={profile} profiles={availableProfiles} providers={providers} onSelectModel={id => { setSelectedModelId(id); onModelChange?.(id) }} onThinkingChange={changeThinking} prompt={prompt} images={images} skillIds={skillIds} onSkillsChange={setSkillIds} onImagesChange={setImages} isBusy={Boolean(requestId)} hasMessages={messages.length > 0} settingsDisabled={settingsDisabled || permissionChanging || deletingRound || !projectReady} sendWithCtrlEnter={sendWithCtrlEnter} onPromptChange={setPrompt} onOpenSettings={onOpenSettings} onSend={submit} onCancel={() => { void stopRequest().catch(() => setError('取消请求失败，请重试')) }} />
       {active && <ComposerStatus outputSpeed={outputSpeed} latestReply={matchingStatistics?.reply} subscriptionUsage={subscriptionUsage} openrouterUsage={openrouterUsage} deepseekBalance={deepseekBalance} compressionThreshold={compressionThreshold} project={project} profile={profile} contextLimit={providers?.find(item => item.provider === profile?.provider && item.baseUrl === profile?.baseUrl)?.models.find(item => item.id === profile?.model)?.maxContextTokens} messages={statusMessages} prompt={prompt} instruction={customPrompt} attachments={images} usage={contextUsage} rateLimits={matchingStatistics?.reply.rateLimits} onOpenProject={() => {
         if (project) void window.piRunner.openProjectDirectory(project).catch(() => setError('无法打开项目目录，请检查目录是否存在后重试'))
       }} />}

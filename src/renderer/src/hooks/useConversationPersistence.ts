@@ -13,9 +13,9 @@ export function useConversationPersistence(loaded: boolean, tasks: ConversationS
   const mounted = useRef(true)
   const acknowledged = useRef<ConversationState | null>(null)
   const [save] = useState(() => new BufferedSave<ConversationState>(async state => {
-    const drafts = acknowledged.current ? conversationDraftChanges(acknowledged.current, state) : null
+    const drafts = acknowledged.current ? conversationDraftChanges(acknowledged.current, state, true) : null
     if (drafts !== null && window.piRunner.saveConversationDrafts) {
-      if (drafts.length) await window.piRunner.saveConversationDrafts(drafts)
+      if (drafts.length || acknowledged.current?.selectedId !== state.selectedId) await window.piRunner.saveConversationDrafts(drafts, state.selectedId)
     } else {
       await window.piRunner.saveConversations(persistentConversationState(state))
     }

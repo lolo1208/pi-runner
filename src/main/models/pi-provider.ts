@@ -10,6 +10,7 @@ import { ollamaContextTokens, ollamaFetch, type OllamaCallInfo } from './pi-olla
 import { requestPiStream } from './pi-stream'
 import type { ChatgptService } from './chatgpt-service'
 import { ModelError } from './model-validation'
+import { applyCompatibleParameters } from './compatible-parameters'
 import { googleTransport } from './google-transport'
 import { googleFetchInjectionWorks } from './google-fetch-support'
 import { googleThinking } from '../../shared/google'
@@ -18,6 +19,7 @@ import { deepseekModelInfo, deepseekThinking } from '../../shared/deepseek'
 import { AnthropicCacheBoundary, cacheFingerprint, emptyUsageFields, observeUsage } from './pi-cache'
 
 export async function createPiProvider(profile: ModelProfile, apiKey: string, attachments: PiAttachments, responses: boolean, onLimits: (limits: ModelRateLimit[]) => void, fetchRequest: typeof fetch = fetch, chatgpt?: ChatgptService, onModelRequestActive: (active: boolean) => void = () => {}, onGoogleRetry: (attempt: number) => void = () => {}, onCacheInfo: (info: { fields?: ReturnType<typeof emptyUsageFields>; fingerprint?: ReturnType<typeof cacheFingerprint>; upstream?: string; boundary?: { signature: string; index: number } }) => void = () => {}, previousBoundary?: { signature: string; index: number }) {
+  if (profile.provider === 'custom') responses = profile.protocol === 'openai-compatible' && profile.compatibleApi === 'responses'
   if (profile.provider === 'chatgpt') {
     if (!chatgpt) throw new ModelError('ChatGPT 订阅服务尚未初始化，请重启应用')
     return chatgpt.createProvider(profile, attachments, onModelRequestActive, onCacheInfo)
@@ -87,6 +89,7 @@ export async function createPiProvider(profile: ModelProfile, apiKey: string, at
           if (profile.thinkingLevel != null) body.reasoning = profile.thinkingLevel === 'off' ? { enabled: false } : { effort: profile.thinkingLevel, exclude: false }
           else if (body.reasoning && typeof body.reasoning === 'object') body.reasoning = { ...body.reasoning, exclude: false }
         }
+        applyCompatibleParameters(body, profile)
         return body
       },
       onProviderStreamEvent: async (event, target) => {
@@ -98,7 +101,7 @@ export async function createPiProvider(profile: ModelProfile, apiKey: string, at
       },
       onResponse: async (response, target) => {
         await options?.onResponse?.(response, target)
-        if (profile.provider !== 'openai') return
+        if (profile.provider !== 'openai' && profile.provider !== 'custom') return
         const headers = new Headers(response.headers)
         const limits: ModelRateLimit[] = []
         for (const kind of ['requests', 'tokens'] as const) {

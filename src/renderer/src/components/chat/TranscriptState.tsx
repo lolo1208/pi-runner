@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useState, useSyncExternalStore, type Dispatch, type ReactNode, type SetStateAction } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore, type Dispatch, type ReactNode, type SetStateAction } from 'react'
 
 /** 只保存已交互消息的轻量状态，不保留离屏消息的组件或 DOM。 */
 export class TranscriptState {
@@ -39,6 +39,8 @@ const OverlayContext = createContext<ShowOverlay | null>(null)
 
 export function TranscriptProvider({ store, active, children }: { store: TranscriptState; active: boolean; children: ReactNode }): React.JSX.Element {
   const [overlay, setOverlay] = useState<ReactNode>(null)
+  // 隐藏不等于释放：清掉弹窗元素及其附件、差异正文和回调闭包。
+  useEffect(() => { if (!active) setOverlay(null) }, [active])
   const show = useCallback<ShowOverlay>(render => setOverlay(render(() => setOverlay(null))), [])
   const state = useMemo(() => ({ store, scope: '' }), [store])
   return <StateContext.Provider value={state}><OverlayContext.Provider value={show}>

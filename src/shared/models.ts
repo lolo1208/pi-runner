@@ -25,6 +25,13 @@ export interface ModelProfile {
   maxTokens: number
   /** 系统管理的输出额度标记，兼容旧配置；对应供应商不再接受手动额度。 */
   autoMaxTokens?: boolean
+  /** 自定义兼容接口的调用端点。 */
+  compatibleConnectionId?: string
+  /** 由用户手动填写模型 ID 添加。 */
+  manuallyAdded?: boolean
+  compatibleApi?: 'chat-completions' | 'responses'
+  /** 兼容服务扩展参数，不允许覆盖认证、模型、消息和流式控制。 */
+  compatibleParameters?: Record<string, unknown>
   tokenParameter: 'max_tokens' | 'max_completion_tokens'
   timeoutSeconds: number
   /** 模型独立的上下文上限；留空时使用服务默认值。 */
@@ -81,6 +88,8 @@ export function selectedModelThinking(profile: ModelProfile, controls: ModelDesc
   if (values.includes(true)) return true
   return values.find(value => value !== false && value !== 'off') ?? values[0] ?? null
 }
+export interface CompatibleConnection { id: string; name: string; baseUrl: string; compatibleApi: 'chat-completions' | 'responses'; models: ModelDescriptor[]; hasApiKey?: boolean }
+export interface CompatibleConnectionCommand { action: 'save' | 'refresh' | 'remove' | 'add-model' | 'remove-model'; id: string; name?: string; baseUrl?: string; compatibleApi?: 'chat-completions' | 'responses'; apiKey?: string; model?: string; manuallyAdded?: boolean }
 export interface ModelProviderConnection { provider: ProviderId; baseUrl: string; models: ModelDescriptor[]; hasApiKey?: boolean }
 export interface ModelProfileView extends ModelProfile { hasApiKey: boolean; available?: boolean }
 /** 按供应商与服务地址查找界面使用的模型描述符；Ollama 地址可能带或不带 /v1。 */
@@ -107,6 +116,7 @@ export interface ModelSettings {
   reviewDisabled?: boolean
   encryptionAvailable: boolean
   providers?: ModelProviderConnection[]
+  compatibleConnections?: CompatibleConnection[]
 }
 export interface SaveModelProfile {
   profile: ModelProfile
@@ -222,5 +232,5 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   { id: 'deepseek', label: 'DeepSeek', protocol: 'openai-compatible', baseUrl: 'https://api.deepseek.com/v1' },
   { id: 'ollama', label: 'Ollama', protocol: 'openai-compatible', baseUrl: 'http://localhost:11434/v1' },
   { id: 'vllm', label: 'vLLM', protocol: 'openai-compatible', baseUrl: 'http://localhost:8000/v1' },
-  { id: 'custom', label: '自定义服务', protocol: 'openai-compatible', baseUrl: '' }
+  { id: 'custom', label: 'OpenAI 兼容接口', protocol: 'openai-compatible', baseUrl: '' }
 ]

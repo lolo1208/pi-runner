@@ -29,7 +29,9 @@ export function useRoundChanges(rounds: AgentSnapshot[], visible: string[], acti
   const knownProjects = useRef(new Set<string>())
 
   const publish = useCallback((key: string, value: RoundChangesData): void => {
-    if (retainedKeys.current && !retainedKeys.current.has(key)) return
+    // 只保留当前挂载范围；切换会话或滚离后，迟到结果不得重新填充缓存。
+    if (!mounted.current || !input.current.active || !input.current.rounds.some(round => roundChangesKey(round) === key)
+      || retainedKeys.current && !retainedKeys.current.has(key)) return
     cache.current.set(key, value)
     // 缓存保留已访问结果，React 状态仅复制当前挂载范围。
     if (mounted.current && input.current.rounds.some(round => roundChangesKey(round) === key)) setData(previous => ({ ...previous, [key]: value }))
@@ -159,6 +161,8 @@ export function useRoundChanges(rounds: AgentSnapshot[], visible: string[], acti
       for (const [key, last] of checked.current) if (Date.now() - last.at >= 60000) checked.current.delete(key)
     }
     input.current = { rounds, visible, active, disabled, ready }
+    const mountedKeys = new Set(active ? rounds.map(roundChangesKey) : [])
+    for (const key of cache.current.keys()) if (!mountedKeys.has(key)) { cache.current.delete(key); checked.current.delete(key) }
     if (!retainedRounds) for (const round of rounds) knownProjects.current.add(round.project)
     setData(previous => {
       const next: Record<string, RoundChangesData> = {}

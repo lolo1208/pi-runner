@@ -21,15 +21,20 @@ export const OPENROUTER_MANUFACTURERS: Record<string, string> = {
 /** 只归一化展示用的厂商标识，调用时保留模型原始 ID。 */
 function manufacturerKey(id: string): string {
   const vendor = id.split('/')[0].replace(/^~+/, '').toLowerCase()
-  const aliases: Record<string, string> = { 'x-ai': 'xai', 'meta-llama': 'meta', 'ibm-granite': 'ibm' }
+  const aliases: Record<string, string> = {
+    'x-ai': 'xai', 'meta-llama': 'meta', 'ibm-granite': 'ibm',
+    'deepseek-ai': 'deepseek', minimaxai: 'minimax', 'stepfun-ai': 'stepfun',
+    'meituan-longcat': 'meituan', 'tongyi-mai': 'qwen', 'zai-org': 'z-ai',
+    'whisper-large-v3': 'openai', 'whisper-large-v3-turbo': 'openai',
+  }
   return Object.hasOwn(aliases, vendor) ? aliases[vendor] : vendor
 }
 export function openrouterManufacturer(id: string): string {
   const vendor = manufacturerKey(id)
   return Object.hasOwn(OPENROUTER_MANUFACTURERS, vendor) ? OPENROUTER_MANUFACTURERS[vendor] : vendor
 }
-export type ManufacturerCountryCode = 'US' | 'CN' | 'FR' | 'CA' | 'IL' | 'AE' | 'JP' | 'KR' | 'PL'
-// 以厂商总部或运营主体来源为依据；新增及易混淆厂商的核对资料见 docs/openrouter-manufacturer-countries.md。
+export type ManufacturerCountryCode = 'US' | 'CN' | 'FR' | 'CA' | 'IL' | 'AE' | 'JP' | 'KR' | 'PL' | 'DE' | 'SA'
+// 以厂商总部或运营主体来源为依据；新增及易混淆厂商的核对资料见 docs/model-data-sources.md。
 const manufacturerCountries: Record<string, ManufacturerCountryCode> = {
   openai: 'US', anthropic: 'US', google: 'US', xai: 'US', meta: 'US', nvidia: 'US',
   amazon: 'US', microsoft: 'US', perplexity: 'US', nousresearch: 'US', allenai: 'US', liquid: 'US',
@@ -39,11 +44,12 @@ const manufacturerCountries: Record<string, ManufacturerCountryCode> = {
   deepseek: 'CN', qwen: 'CN', 'z-ai': 'CN', moonshotai: 'CN', minimax: 'CN',
   'bytedance-seed': 'CN', bytedance: 'CN', stepfun: 'CN', baidu: 'CN', tencent: 'CN',
   thudm: 'CN', alibaba: 'CN', '01-ai': 'CN', internlm: 'CN', inclusionai: 'CN', meituan: 'CN',
-  xiaomi: 'CN', 'dots-studio': 'CN', 'nex-agi': 'CN',
+  xiaomi: 'CN', 'dots-studio': 'CN', 'nex-agi': 'CN', fishaudio: 'CN', funaudiollm: 'CN', indexteam: 'CN', 'wan-ai': 'CN', 'xingchen-agi': 'CN',
+  'black-forest-labs': 'DE', 'allam-2-7b': 'SA',
   mistralai: 'FR', cohere: 'CA', ai21: 'IL', tiiuae: 'AE', 'falcon-h1': 'AE',
   sakana: 'JP', upstage: 'KR', 'aion-labs': 'PL',
 }
-const countryNames: Record<ManufacturerCountryCode, string> = { US: '美国', CN: '中国', FR: '法国', CA: '加拿大', IL: '以色列', AE: '阿联酋', JP: '日本', KR: '韩国', PL: '波兰' }
+const countryNames: Record<ManufacturerCountryCode, string> = { US: '美国', CN: '中国', FR: '法国', CA: '加拿大', IL: '以色列', AE: '阿联酋', JP: '日本', KR: '韩国', PL: '波兰', DE: '德国', SA: '沙特阿拉伯' }
 /** 厂商所属国家，仅用于标识模型来源，不推断实际请求路由。 */
 export function openrouterManufacturerCountry(id: string): { code: ManufacturerCountryCode; name: string } | null {
   const vendor = manufacturerKey(id)

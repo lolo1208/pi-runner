@@ -42,13 +42,14 @@ interface ChatComposerProps extends MessageQueueProps {
   settingsDisabled?: boolean
   sendWithCtrlEnter: boolean
   onPromptChange: (prompt: string) => void
+  onReadingChange?(reading: boolean): void
   onImagesChange: (images: ChatImage[]) => void
   onOpenSettings: (section?: 'models' | 'skills') => void
   onSend: () => void
   onCancel: () => void
 }
 
-function ChatComposerView({ active = true, queue = [], editingId, queuePaused, onResumeQueue, onEditQueued, onDeleteQueued, onReorderQueued, onCancelEdit, intentMode = 'execute', onIntentChange, permissionMode = 'default', onPermissionChange, profile, profiles, providers, onSelectModel, onThinkingChange, prompt, images, skillIds = [], onSkillsChange = () => {}, isBusy, stopping = false, hasMessages, settingsDisabled, sendWithCtrlEnter, onPromptChange, onImagesChange, onOpenSettings, onSend, onCancel }: ChatComposerProps): React.JSX.Element {
+function ChatComposerView({ onReadingChange, active = true, queue = [], editingId, queuePaused, onResumeQueue, onEditQueued, onDeleteQueued, onReorderQueued, onCancelEdit, intentMode = 'execute', onIntentChange, permissionMode = 'default', onPermissionChange, profile, profiles, providers, onSelectModel, onThinkingChange, prompt, images, skillIds = [], onSkillsChange = () => {}, isBusy, stopping = false, hasMessages, settingsDisabled, sendWithCtrlEnter, onPromptChange, onImagesChange, onOpenSettings, onSend, onCancel }: ChatComposerProps): React.JSX.Element {
   const localSkills = useLocalSkills()
   const promptId = useId()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -66,7 +67,7 @@ function ChatComposerView({ active = true, queue = [], editingId, queuePaused, o
     if (readingRef.current || !files.length) return
     setImageError('')
     if (files.some(file => file.size > MAX_ATTACHMENT_BYTES)) { setImageError('每个附件不能超过 32 MB。'); return }
-    readingRef.current = true; setReading(true)
+    readingRef.current = true; setReading(true); onReadingChange?.(true)
     try {
       const added = await Promise.all(files.map(file => new Promise<ChatImage>((resolve, reject) => {
         const reader = new FileReader()
@@ -86,7 +87,7 @@ function ChatComposerView({ active = true, queue = [], editingId, queuePaused, o
       if (unique.length > MAX_MESSAGE_ATTACHMENTS) { setImageError(`最多添加 ${MAX_MESSAGE_ATTACHMENTS} 个附件。`); return }
       if (unique.length !== images.length) onImagesChange(unique)
     } catch (error) { setImageError(error instanceof Error ? error.message : '附件读取失败，请重试。') }
-    finally { readingRef.current = false; setReading(false) }
+    finally { readingRef.current = false; setReading(false); onReadingChange?.(false) }
   }
 
   return <form className="composer" onClick={event => {

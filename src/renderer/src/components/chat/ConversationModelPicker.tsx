@@ -55,7 +55,7 @@ export function ConversationModelPicker({ profile, profiles, providers, disabled
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({})
   const groupId = useId()
   const [thinkingSaving, setThinkingSaving] = useState(false)
-  const enabledProfiles = profiles.filter(item => item.enabled !== false)
+  const enabledProfiles = profiles.filter(item => item.enabled !== false && item.available !== false)
   const search = query.trim().toLocaleLowerCase()
   const filtered = enabledProfiles.filter(item => `${item.name} ${item.model} ${PROVIDER_PRESETS.find(preset => preset.id === item.provider)?.label ?? ''}`.toLocaleLowerCase().includes(search))
   const groups = PROVIDER_PRESETS.map(preset => ({ preset, models: filtered.filter(model => model.provider === preset.id).sort(compareModelProfiles) })).filter(group => group.models.length > 0)
@@ -129,7 +129,7 @@ export function ConversationModelPicker({ profile, profiles, providers, disabled
               </div>
             </section>
           })}
-          {!filtered.length && <p className="conversation-model-empty">{enabledProfiles.length ? '没有找到匹配的模型，请尝试其他名称。' : profiles.length ? '暂无已启用的模型，请先在模型设置中启用。' : '尚未配置模型，请先添加供应商。'}</p>}
+          {!filtered.length && <p className="conversation-model-empty">{enabledProfiles.length ? '没有找到匹配的模型，请尝试其他名称。' : profiles.length ? '暂无已启用且可用的模型，请检查模型设置。' : '尚未配置模型，请先添加供应商。'}</p>}
         </div>
         <footer className="conversation-model-reasoning" aria-busy={thinkingSaving}>
           {!profile ? <p className="conversation-model-reasoning-hint">请先选择一个模型。</p>

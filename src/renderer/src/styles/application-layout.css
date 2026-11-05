@@ -656,11 +656,8 @@ to {
 
 .project-running:hover .project-heading,
 .project-running:focus-within .project-heading {
-  padding-right: 122px;
+  padding-right: 96px;
 }
-
-.project-running:hover .project-running-status,
-.project-running:focus-within .project-running-status { right: 89px; }
 
 .project-heading-conversations .project-create-tooltip { right: 5px; }
 .project-heading-conversations:hover .project-heading,
@@ -696,11 +693,11 @@ to {
 
 .task-row.running:hover .task-item,
 .task-row.running:has(:focus-visible) .task-item {
-  padding-right: calc(66rem / 14);
+  padding-right: 10px;
 }
 
 @media (hover: none) {
-  .task-row.running .task-item { padding-right: calc(66rem / 14); }
+  .task-row.running .task-item { padding-right: 10px; }
 }
 
 .task-row.running .task-delete-button:disabled {
@@ -708,8 +705,7 @@ to {
 }
 
 @media (hover: none) {
-  .project-running .project-heading { padding-right: 122px; }
-  .project-running:not(.project-heading-conversations) .project-running-status { right: 89px; }
+  .project-running:not(.project-heading-conversations) .project-heading { padding-right: 96px; }
 }
 
 .task-spinner {

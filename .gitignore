@@ -46,3 +46,11 @@ Desktop.ini
 *.swp
 *.swo
 *~
+
+# 忽略 Impeccable 运行产生的临时文件、缓存和本地开发者个人配置
+**/.impeccable/config.local.json
+**/.impeccable/hook.cache.json
+**/.impeccable/hook.pending.json
+**/.impeccable/*.png
+**/.impeccable/review/
+**/.impeccable/live/

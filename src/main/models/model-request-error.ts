@@ -36,24 +36,23 @@ export function modelRequestError(value: unknown, secret = ''): string {
   if (/^(?:Error:\s*)?(?:HTTP\s*)?[45]\d{2}[\s:]*$/i.test(detail)) detail = ''
   const reason = `${code} ${detail}`.toLowerCase()
   let summary: string
-  if (/context_length_exceeded|context_window_exceeded|maximum context length|context.*too long/.test(reason)) summary = '模型上下文超出上限，请缩短消息或压缩历史后重试'
-  else if (/insufficient_quota|quota_exceeded|usage_limit_reached|subscription_sharing_usage_limit_exceeded|exceeded.*quota|usage limit.*reached|hit your.*usage limit/.test(reason)) summary = '模型服务报告可用额度不足，请检查额度或等待额度恢复'
-  else if (status === 401 || /invalid_api_key|token_expired|authentication_error|invalid authentication/.test(reason)) summary = '模型服务认证失败，请检查凭据或重新登录'
-  else if (status === 429 || /rate_limit_exceeded|too many requests/.test(reason)) summary = '模型服务请求受限，请稍后重试'
-  else if (status === 403) summary = '模型服务拒绝访问，请根据返回原因检查访问权限'
-  else if (/model_not_found|model.*does not exist/.test(reason)) summary = '模型服务无法找到指定模型，请检查模型名称及可用权限'
-  else if (status === 404) summary = '模型服务未找到请求的资源，请检查接口地址及模型名称'
-  // 503 多数是服务端容量波动，与请求无关；给出可操作提示，不混同为普通服务器错误。
-  else if (status === 503 || /high demand|currently experiencing|overloaded|capacity/.test(reason)) summary = '模型服务当前需求过高（临时状态），请稍后重试或临时切换其它模型'
-  else if (status >= 500) summary = '模型服务发生服务器错误，请稍后重试'
-  else if (/etimedout|connect_timeout|timed?\s*out|timeout/.test(reason)) summary = '模型请求超时，请检查网络或增加超时秒数'
-  else if (/econnreset|econnrefused|enotfound|eai_again|fetch failed|network|socket|connection error/.test(reason)) summary = '模型服务连接失败，请检查网络、代理和接口地址'
-  else if (status === 400 || status === 422 || /unsupported_parameter|invalid_request_error/.test(reason)) summary = '模型服务拒绝了请求参数，请根据返回原因调整模型设置'
-  else if (/缺少结束事件/.test(reason)) summary = '模型响应流提前结束，未收到结束事件，请重试'
-  else summary = '模型请求失败，请根据返回原因排查后重试'
+  if (/context_length_exceeded|context_window_exceeded|maximum context length|context.*too long/.test(reason)) summary = '上下文超出上限'
+  else if (/insufficient_quota|quota_exceeded|usage_limit_reached|subscription_sharing_usage_limit_exceeded|exceeded.*quota|usage limit.*reached|hit your.*usage limit/.test(reason)) summary = '可用额度不足'
+  else if (status === 401 || /invalid_api_key|token_expired|authentication_error|invalid authentication/.test(reason)) summary = '认证失败'
+  else if (status === 429 || /rate_limit_exceeded|too many requests/.test(reason)) summary = '请求受限'
+  else if (status === 403) summary = '访问被拒绝'
+  else if (/model_not_found|model.*does not exist/.test(reason)) summary = '模型不存在'
+  else if (status === 404) summary = '请求的资源不存在'
+  else if (status === 503 || /high demand|currently experiencing|overloaded|capacity/.test(reason)) summary = '模型服务繁忙'
+  else if (status >= 500) summary = '模型服务错误'
+  else if (/etimedout|connect_timeout|timed?\s*out|timeout/.test(reason)) summary = '请求超时'
+  else if (/econnreset|econnrefused|enotfound|eai_again|fetch failed|network|socket|connection error/.test(reason)) summary = '连接失败'
+  else if (status === 400 || status === 422 || /unsupported_parameter|invalid_request_error/.test(reason)) summary = '请求参数错误'
+  else if (/缺少结束事件/.test(reason)) summary = '响应流提前结束'
+  else summary = '请求失败'
   const metadata = [status ? `HTTP ${status}` : '', safeModelErrorDetail(code, secret)].filter(Boolean).join('；')
   const safeDetail = safeModelErrorDetail(detail, secret)
-  return `${summary}${metadata ? `（${metadata}）` : ''}。${safeDetail ? `\n具体原因：${safeDetail}` : '\n服务未提供具体错误原因。'}`
+  return `${summary}${metadata ? `（${metadata}）` : ''}${safeDetail ? `：${safeDetail}` : ''}`
 }
 
 /** 在 SDK 将不同 HTTP 错误改写成统一说明之前保留实际服务响应；不消费原响应。 */

@@ -49,6 +49,31 @@ export function parseProfile(value: unknown): ModelProfile {
   if (item.ollamaThinkingLevel != null && (typeof item.ollamaThinkingLevel !== 'string' || !item.ollamaThinkingLevel.trim() || item.ollamaThinkingLevel.length > 80)) throw new ModelError('Ollama 推理档位无效')
   if (item.cacheRetention !== undefined && item.cacheRetention !== 'short' && item.cacheRetention !== 'long') throw new ModelError('缓存保留时间无效')
   if (item.openrouterProvider !== undefined && (typeof item.openrouterProvider !== 'string' || item.openrouterProvider.length > 100 || (item.openrouterProvider !== '' && !/^[a-zA-Z0-9][a-zA-Z0-9._/-]*$/.test(item.openrouterProvider)))) throw new ModelError('OpenRouter 上游名称无效')
+  if (item.compatibleApi !== undefined && !['chat-completions', 'responses'].includes(String(item.compatibleApi))) throw new ModelError('无效的兼容接口类型')
+  let compatibleParameters: Record<string, unknown> | undefined
+  if (item.provider === 'custom' && item.compatibleParameters !== undefined) {
+    compatibleParameters = asRecord(item.compatibleParameters)
+    // IPC 输入不一定来自 JSON 文本，拒绝循环、非有限数值及非普通对象。
+    const visit = (value: unknown, depth: number): void => {
+      if (depth > 20) throw new ModelError('扩展参数嵌套不能超过 20 层')
+      if (value === null || typeof value === 'string' || typeof value === 'boolean') return
+      if (typeof value === 'number' && Number.isFinite(value)) return
+      if (Array.isArray(value)) { for (const child of value) visit(child, depth + 1); return }
+      if (value && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype) { for (const child of Object.values(value)) visit(child, depth + 1); return }
+      throw new ModelError('扩展参数必须是有效的 JSON 数据')
+    }
+    visit(compatibleParameters, 0)
+    if (Buffer.byteLength(JSON.stringify(compatibleParameters), 'utf8') > 16384) throw new ModelError('扩展参数不能超过 16 KiB')
+    const reserved = new Set(['model', 'messages', 'input', 'instructions', 'system', 'stream', 'stream_options', 'tools', 'tool_choice', 'api_key', 'apiKey', 'base_url', 'baseUrl', 'headers', '__proto__', 'constructor', 'prototype', 'store', 'previous_response_id', 'conversation', 'background'])
+    if (Object.keys(compatibleParameters).some(key => reserved.has(key))) throw new ModelError('扩展参数不能覆盖模型、消息、认证、工具或会话控制字段')
+    const tokenField = item.protocol === 'anthropic' ? 'max_tokens' : item.compatibleApi === 'responses' ? 'max_output_tokens' : item.tokenParameter
+    for (const field of ['max_tokens', 'max_completion_tokens', 'max_output_tokens']) {
+      const value = compatibleParameters[field]
+      if (value == null) continue
+      if (field !== tokenField) throw new ModelError(`当前接口的输出额度字段为 ${tokenField}，请勿同时设置 ${field}`)
+      numberInRange(value, 1, typeof item.maxTokens === 'number' ? item.maxTokens : 131072, field, true)
+    }
+  }
   const contextTokens = item.contextTokens === undefined || item.contextTokens === null ? null : numberInRange(item.contextTokens, 1, 2097152, '上下文上限', true)
   if (item.provider === 'chatgpt' && (item.baseUrl !== 'https://chatgpt.com/backend-api' || item.protocol !== 'openai-compatible' || item.temperature !== null)) throw new ModelError('ChatGPT 订阅使用固定服务地址，Temperature 由服务决定')
   if (item.provider === 'openrouter' && (normalizeBaseUrl(item.baseUrl) !== OPENROUTER_BASE_URL || item.protocol !== 'openai-compatible' || item.tokenParameter !== 'max_tokens')) throw new ModelError('OpenRouter 使用固定官方地址、OpenAI 兼容协议及 max_tokens 参数')
@@ -59,6 +84,8 @@ export function parseProfile(value: unknown): ModelProfile {
     id: profileId(item.id), name: requiredString(item.name, '配置名称', 80),
     provider: item.provider as ModelProfile['provider'], protocol: item.protocol,
     baseUrl: item.provider === 'ollama' ? normalizeOllamaUrl(item.baseUrl) : normalizeBaseUrl(item.baseUrl), model: requiredString(item.model, '模型 ID', 200),
+    ...(item.provider === 'custom' && item.compatibleConnectionId != null ? { compatibleConnectionId: profileId(item.compatibleConnectionId) } : {}),
+    ...(item.provider === 'custom' && item.manuallyAdded === true ? { manuallyAdded: true } : {}),
     contextTokens, enabled: item.enabled === undefined ? true : item.enabled,
     ...(item.cacheRetention === 'long' ? { cacheRetention: 'long' as const } : {}),
     ...(item.provider === 'openrouter' && typeof item.openrouterProvider === 'string' && item.openrouterProvider ? { openrouterProvider: item.openrouterProvider } : {}),
@@ -68,6 +95,8 @@ export function parseProfile(value: unknown): ModelProfile {
     temperature: item.temperature === null ? null : numberInRange(item.temperature, 0, item.protocol === 'anthropic' ? 1 : 2, 'Temperature'),
     maxTokens: numberInRange(item.maxTokens, 1, systemOutputTokens(item.provider as ModelProfile['provider']) ? 2097152 : item.provider === 'deepseek' ? DEEPSEEK_MAX_OUTPUT_TOKENS : 131072, '输出 Token 上限', true),
     ...(systemOutputTokens(item.provider as ModelProfile['provider']) ? { autoMaxTokens: true } : {}),
+    ...(item.provider === 'custom' ? { compatibleApi: item.compatibleApi === 'responses' ? 'responses' as const : 'chat-completions' as const } : {}),
+    ...(compatibleParameters ? { compatibleParameters } : {}),
     tokenParameter: item.tokenParameter,
     timeoutSeconds: numberInRange(item.timeoutSeconds, 5, 300, '超时秒数', true)
   }

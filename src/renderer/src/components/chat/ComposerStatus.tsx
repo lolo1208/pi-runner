@@ -68,7 +68,7 @@ export function ComposerStatus({ project, profile, contextLimit, messages, promp
         {profile?.provider === 'openrouter' && <OpenrouterLimits model={profile.model} usage={openrouterUsage} latestReply={latestReply} onDetails={openDetails} />}
         {profile?.provider === 'deepseek' && <DeepseekBalance balance={deepseekBalance} latestReply={latestReply} onDetails={openDetails} />}
         {profile?.provider === 'google' && <GoogleLimits latestReply={latestReply} contextLimit={contextLimit} onDetails={openDetails} />}
-        {profile?.provider === 'openai' && <Tooltip.Root>
+        {(profile?.provider === 'openai' || profile?.provider === 'custom') && <Tooltip.Root>
           <Tooltip.Trigger asChild><Button type="button" variant="ghost" className="composer-limits" aria-label="当前模型使用限制">
             {rateLimits?.length ? rateLimits.map(item => <span key={item.kind}>{item.kind === 'requests' ? '请求' : 'Token'} 剩余 {Math.round(item.remaining / item.limit * 100)}%</span>) : '使用限制：暂未提供'}
           </Button></Tooltip.Trigger>

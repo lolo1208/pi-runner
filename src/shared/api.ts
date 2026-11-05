@@ -26,6 +26,7 @@ export interface PiRunnerApi {
   performFileAction(project: string, path: string, action: FileAction): Promise<void>
   copyText(text: string): Promise<void>
   saveAttachment(name: string, dataUrl: string): Promise<string | null>
+  copyAttachment(name: string, dataUrl: string): Promise<void>
   respondPlanInteraction(requestId: string, conversationId: string, interactionId: string, response: import('./models').PlanResponse): Promise<ModelResult<void>>
   getToolApprovalPreview(requestId: string, conversationId: string, approvalId: string): Promise<ModelResult<import('./models').ToolApprovalPreview>>
   setPermissionMode(conversationId: string, mode: import('./models').PermissionMode): Promise<ModelResult<import('./models').PermissionMode>>
@@ -42,7 +43,7 @@ export interface PiRunnerApi {
   getChatgptUsage(): Promise<ModelResult<import('./models').ChatgptUsage>>
   loadConversations(): Promise<ConversationState>
   saveConversations(state: ConversationState): Promise<void>
-  saveConversationDrafts(drafts: import('./conversations').ConversationDraftUpdate[]): Promise<void>
+  saveConversationDrafts(drafts: import('./conversations').ConversationDraftUpdate[], selectedId?: string | null): Promise<void>
   /** 退出前收集草稿并等待待保存的会话全部落盘；失败时阻止正常退出。 */
   onFlushConversations(callback: () => Promise<void>): () => void
   selectProject(): Promise<string | null>
@@ -59,8 +60,10 @@ export interface PiRunnerApi {
   rollbackCheckpoint(base: string, current: string, project?: string): Promise<Checkpoint>
   restoreCheckpoint(target: string, project?: string): Promise<Checkpoint>
   getMatchingCheckpoints(hashes: string[], project?: string): Promise<string[]>
+  manageCompatibleConnection(input: import('./models').CompatibleConnectionCommand): Promise<ModelResult<ModelSettings>>
   getModelSettings(): Promise<ModelResult<ModelSettings>>
   saveModelProfile(input: SaveModelProfile): Promise<ModelResult<ModelSettings>>
+  removeModelProvider(provider: import('./models').ProviderId): Promise<ModelResult<ModelSettings>>
   setActiveModel(id: string): Promise<ModelResult<ModelSettings>>
   setReviewModel(id: string | null): Promise<ModelResult<ModelSettings>>
   testModel(id: string, requestId: string): Promise<ModelResult<ModelReply>>
@@ -71,6 +74,7 @@ export interface PiRunnerApi {
   cancelModelRequest(requestId: string): Promise<ModelResult<void>>
   connectOllama(baseUrl: string): Promise<ModelResult<ModelSettings>>
   connectGoogle(apiKey?: string): Promise<ModelResult<ModelSettings>>
+  listCompatibleModels(input: { baseUrl: string; apiKey?: string; profileId?: string }): Promise<ModelResult<import('./models').ModelDescriptor[]>>
   connectDeepseek(apiKey?: string): Promise<ModelResult<ModelSettings>>
   connectOpenrouter(apiKey?: string): Promise<ModelResult<ModelSettings>>
   getOpenrouterUsage(): Promise<ModelResult<import('./models').OpenrouterUsage>>
@@ -85,6 +89,8 @@ export interface PiRunnerApi {
 }
 export const IPC_CHANNELS = {
   googleConnect: 'models:google-connect',
+  compatibleManage: 'models:compatible-manage',
+  compatibleModels: 'models:compatible-models',
   deepseekConnect: 'models:deepseek-connect',
   deepseekBalance: 'models:deepseek-balance',
   codePreview: 'files:code-preview',
@@ -94,6 +100,7 @@ export const IPC_CHANNELS = {
   copyText: 'clipboard:copy-text',
   notification: 'app:notification', notificationActivate: 'app:notification-activate', closeNotifications: 'app:close-notifications',
   saveAttachment: 'files:save-attachment',
+  copyAttachment: 'files:copy-attachment',
   planInteraction: 'models:plan-interaction',
   toolApprovalPreview: 'models:tool-approval-preview',
   permissionMode: 'models:permission-mode', toolApproval: 'models:tool-approval',
@@ -105,7 +112,7 @@ export const IPC_CHANNELS = {
   checkpoints: 'snapshot:list',
   changes: 'snapshot:changes', diff: 'snapshot:diff', restore: 'snapshot:restore', matches: 'snapshot:matches',
   rollback: 'snapshot:rollback', agentEvent: 'models:agent-event', agentHistory: 'models:agent-history', agentDeleteRound: 'models:agent-delete-round',
-  modelSettings: 'models:list', modelSave: 'models:save',
+  modelSettings: 'models:list', modelSave: 'models:save', modelRemoveProvider: 'models:remove-provider',
   modelActivate: 'models:activate', modelTest: 'models:test', modelChat: 'models:chat', modelCancel: 'models:cancel',
   modelReview: 'models:review-model',
   ollamaConnect: 'models:ollama-connect', ollamaInfo: 'models:ollama-info',

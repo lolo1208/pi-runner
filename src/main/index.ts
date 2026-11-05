@@ -157,7 +157,7 @@ if (hasSingleInstanceLock) void app.whenReady().then(() => {
   modelSettings = new ModelSettingsStore(path.join(app.getPath('userData'), 'model-settings.json'), cipher)
   // 订阅网络沿用 Electron 的系统代理；不向授权接口或模型接口发送浏览器 Cookie。
   const subscriptionFetch: typeof fetch = (input, init) => net.fetch(input instanceof URL ? input.href : input, { ...init, credentials: 'omit' })
-  const modelFetch: typeof fetch = (input, init) => ['openrouter.ai', 'generativelanguage.googleapis.com', 'api.deepseek.com'].includes(new URL(input instanceof Request ? input.url : String(input)).hostname) ? subscriptionFetch(input, init) : fetch(input, init)
+  const modelFetch: typeof fetch = (input, init) => ['openrouter.ai', 'generativelanguage.googleapis.com', 'api.deepseek.com', 'api.groq.com'].includes(new URL(input instanceof Request ? input.url : String(input)).hostname) ? subscriptionFetch(input, init) : fetch(input, init)
   chatgptService = new ChatgptService(new ChatgptCredentials(path.join(app.getPath('userData'), 'chatgpt-auth.enc'), cipher), modelSettings, subscriptionFetch)
   const reviewService = new ToolReviewService(modelSettings, modelFetch, chatgptService)
   modelService = new ModelService(modelSettings, new PiAgentService({ dataDirectory: piRunnerDirectory, protectedDirectories: [app.getPath('userData')], chatgpt: chatgptService,
@@ -165,7 +165,7 @@ if (hasSingleInstanceLock) void app.whenReady().then(() => {
     // 下载仅发匿名 GET，不继承模型认证头、Cookie 或订阅请求配置。
     downloadFetch: anonymousDownloadFetch,
     review: request => reviewService.reviewWithSource(request),
-    getProject: () => snapshotManager?.getRoot(), emit: event => { mainWindow?.webContents.send(IPC_CHANNELS.agentEvent, event) } }), undefined, new OpenrouterClient(subscriptionFetch), new GoogleClient(subscriptionFetch), new DeepseekClient(subscriptionFetch))
+    getProject: () => snapshotManager?.getRoot(), emit: event => { mainWindow?.webContents.send(IPC_CHANNELS.agentEvent, event) } }), undefined, new OpenrouterClient(subscriptionFetch), new GoogleClient(subscriptionFetch), new DeepseekClient(subscriptionFetch), modelFetch)
   registerIpcHandlers({
     getMainWindow: () => mainWindow,
     getSnapshotManager: () => snapshotManager,

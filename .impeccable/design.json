@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-17T00:00:00Z",
+  "title": "Design System: Pi Runner · 行动派",
+  "extensions": {
+    "shadows": [
+      { "name": "modal", "value": "0 18px 55px #0003", "purpose": "普通模态框抬升。" },
+      { "name": "alert", "value": "0 18px 48px #0003", "purpose": "警示确认框。" },
+      { "name": "tool-panel", "value": "-10px 0 35px #0002", "purpose": "窄屏右侧工具浮层。" }
+    ],
+    "motion": [
+      { "name": "button-colors", "value": "background-color .15s, color .15s, border-color .15s", "purpose": "按钮状态变化。" },
+      { "name": "modal-enter", "value": ".15s ease-out", "purpose": "遮罩淡入。" },
+      { "name": "task-spin", "value": "1s linear infinite", "purpose": "任务运行状态；侧栏减少动态模式关闭。" }
+    ],
+    "breakpoints": [
+      { "name": "wide-settings", "value": "1600px" },
+      { "name": "compact-layout", "value": "1100px" },
+      { "name": "floating-tools", "value": "850px" },
+      { "name": "narrow", "value": "600px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "默认按钮", "kind": "button", "refersTo": "button-default",
+      "description": "中性操作；预览保留最终样式中的非文字控件焦点环抑制，不代表推荐无障碍实现。",
+      "html": "<button class=\"ds-default\">取消</button>",
+      "css": ".ds-default{font:500 .875rem var(--ui-font-family, sans-serif);min-height:2.25rem;padding:.5rem 1rem;border:1px solid var(--border,#dfe1da);border-radius:8px;background:var(--surface,#fdfdfa);color:var(--text,#252728);cursor:pointer;transition:background-color .15s,color .15s,border-color .15s}.ds-default:hover{background:var(--hover,#e8e9e3)}.ds-default:focus-visible{outline:none;box-shadow:none}.ds-default:disabled{background:var(--hover,#e8e9e3);color:var(--muted,#737772);cursor:not-allowed}"
+    },
+    {
+      "name": "主操作按钮", "kind": "button", "refersTo": "button-primary",
+      "description": "显式指定强调色的主操作，不是 Button 默认外观。",
+      "html": "<button class=\"ds-primary\">新建项目</button>",
+      "css": ".ds-primary{font:500 .875rem var(--ui-font-family,sans-serif);min-height:2.25rem;padding:.5rem 1rem;border:1px solid transparent;border-radius:8px;background:var(--accent,#3979dc);color:var(--accent-foreground,#fff);cursor:pointer;transition:background-color .15s,color .15s}.ds-primary:hover{background:var(--accent,#3979dc)}.ds-primary:focus-visible{outline:none;box-shadow:none}.ds-primary:disabled{border-color:var(--border,#dfe1da);background:var(--hover,#e8e9e3);color:var(--muted,#737772);cursor:not-allowed}"
+    },
+    {
+      "name": "危险按钮", "kind": "button", "refersTo": "button-destructive",
+      "description": "删除等危险操作。",
+      "html": "<button class=\"ds-destructive\">删除</button>",
+      "css": ".ds-destructive{font:500 .875rem var(--ui-font-family,sans-serif);min-height:2.25rem;padding:.5rem 1rem;border:1px solid var(--border,#dfe1da);border-radius:8px;background:var(--error,#a33628);color:var(--error-foreground,#fff);cursor:pointer;transition:background-color .15s,color .15s}.ds-destructive:hover{background:var(--error,#a33628)}.ds-destructive:focus-visible{outline:none;box-shadow:none}.ds-destructive:disabled{background:var(--hover,#e8e9e3);color:var(--muted,#737772);cursor:not-allowed}"
+    },
+    {
+      "name": "文本输入", "kind": "input", "refersTo": "input",
+      "description": "表单文字输入，焦点使用强调色边框和轻光环。",
+      "html": "<input class=\"ds-input\" aria-label=\"项目名称\" placeholder=\"项目名称\" />",
+      "css": ".ds-input{font:.875rem var(--ui-font-family,sans-serif);height:2.25rem;width:100%;min-width:0;padding:.25rem .75rem;border:1px solid var(--border,#dfe1da);border-radius:.375rem;background:var(--surface,#fdfdfa);color:var(--text,#252728);box-shadow:0 1px 2px #0000000d;transition:border-color .15s}.ds-input::placeholder{color:var(--muted,#737772)}.ds-input:focus-visible{outline:none;border-color:var(--accent,#3979dc);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent,#3979dc) 20%,transparent)}.ds-input:disabled{opacity:.5;cursor:not-allowed}"
+    },
+    {
+      "name": "当前会话", "kind": "nav", "refersTo": "nav-selected",
+      "description": "石墨底胶囊选中态。",
+      "html": "<nav aria-label=\"会话\"><button class=\"ds-nav\" aria-current=\"page\">项目会话</button></nav>",
+      "css": ".ds-nav{display:flex;align-items:center;width:100%;height:calc(36rem / 14);padding:0 10px 0 22px;border:0;border-radius:9999px;background:var(--selected,#3c4043);color:var(--selected-text,#fff);font:600 calc(13rem / 14) var(--ui-font-family,sans-serif);text-align:left;cursor:pointer}.ds-nav:hover,.ds-nav:active{background:var(--selected,#3c4043)}.ds-nav:focus-visible{outline:none;box-shadow:none}"
+    },
+    {
+      "name": "徽标", "kind": "chip", "refersTo": "badge",
+      "description": "通用细边框胶囊徽标，非交互状态展示。",
+      "html": "<span class=\"ds-badge\">执行模式</span>",
+      "css": ".ds-badge{display:inline-block;border:1px solid var(--border,#dfe1da);border-radius:20px;padding:3px 10px;color:var(--text,#252728);font:calc(11rem / 14) var(--ui-font-family,sans-serif)}"
+    },
+    {
+      "name": "设置卡", "kind": "card", "refersTo": "settings-card",
+      "description": "平面设置容器，依靠底色与边框分区。",
+      "html": "<section class=\"ds-card\"><h3>界面设置</h3><p>选择适合工作环境的主题与字体。</p></section>",
+      "css": ".ds-card{padding:20px;border:1px solid var(--border,#dfe1da);border-radius:13px;background:var(--surface,#fdfdfa);color:var(--text,#252728);font:calc(14rem / 14) var(--ui-font-family,sans-serif)}.ds-card h3{margin:0;font-size:inherit;font-weight:500}.ds-card p{margin:6px 0 0;color:var(--muted,#737772);font-size:calc(12rem / 14);line-height:1.8}"
+    }
+  ],
+  "narrative": {
+    "northStar": "安静的工作台",
+    "overview": "克制、清晰、紧凑。暖灰纸面承载任务与对话，细边框区分工作区域，少量强调色标记操作和执行状态。组件保持柔和圆角与轻量反馈，不与代码、差异和审批内容争夺注意力。\n\n平面为主，浮层抬升。明暗主题共享结构与语义，但分别采用行动蓝和冷青蓝；深色主题不是浅色界面的简单反色。",
+    "keyCharacteristics": ["中性分区与语义强调色。", "紧凑控件、胶囊导航与柔和容器。", "主体平面化，弹窗与浮动面板使用阴影。"],
+    "rules": [
+      { "name": "The Theme Pairing Rule", "body": "背景、文字、边框和状态前景按主题成组使用，不把浅色前景硬编码进深色控件。", "section": "colors" },
+      { "name": "The Flat Workspace Rule", "body": "持续展示的工作区域优先使用底色和边框；阴影用于浮层及已有的局部交互层次。", "section": "elevation" }
+    ],
+    "dos": ["**Do** 复用本地 shadcn/ui 封装及语义 CSS 变量。", "**Do** 成组验证浅色与深色的背景、前景和状态色。", "**Do** 用中性分区承载工作内容，用强调色突出操作与执行状态。", "**Do** 保留胶囊导航、分级圆角与内部滚动的桌面工作区结构。", "**Do** 让正文、代码、差异和诊断信息可选择复制。"],
+    "donts": ["**Don't** 把默认中性按钮误当作实心主按钮。", "**Don't** 给持续展示的所有卡片统一添加浮层阴影。", "**Don't** 把差异增删色与一般成功、失败色混用。", "**Don't** 把源码中的焦点或 reduced-motion 声明当作已完成全局无障碍验收。"]
+  }
+}

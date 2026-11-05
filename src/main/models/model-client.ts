@@ -4,6 +4,7 @@ import { ollamaContextTokens } from './pi-ollama'
 import { modelMessages, useFileResponses } from './model-attachments'
 
 import { completeGoogle } from './google-completion'
+import { applyCompatibleParameters } from './compatible-parameters'
 
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 const tokenCount = (value: unknown): number | undefined => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined
@@ -60,6 +61,7 @@ export class ModelClient {
       body.options = options
       if (profile.ollamaThinkingLevel != null || profile.thinking != null) body.think = profile.ollamaThinkingLevel ?? profile.thinking
     }
+    applyCompatibleParameters(body, profile)
     let response: Response
     try {
       signal.throwIfAborted()
@@ -120,8 +122,11 @@ export class ModelClient {
         if (!Array.isArray(result.choices) || !result.choices.length) throw new Error()
         const choice = asRecord(result.choices[0])
         const message = asRecord(choice.message)
-        if (typeof message.content !== 'string') throw new Error()
-        text = message.content
+        if (typeof message.content === 'string') text = message.content
+        else if (Array.isArray(message.content)) text = message.content
+          .filter(block => block && typeof block === 'object' && ['text', 'output_text'].includes(block.type) && typeof block.text === 'string')
+          .map(block => block.text).join('\n')
+        else throw new Error()
         truncated = choice.finish_reason === 'length'
       }
       if (!text.trim()) throw new ModelError(isOllama ? '模型未返回正文，请降低推理强度或关闭推理模式，或拆分任务后重试' : '模型未返回文本，请检查模型能力或提高输出 Token 上限')
@@ -140,7 +145,7 @@ export class ModelClient {
           : tokenCount(cacheDetails.cached_tokens) !== undefined || tokenCount(usageRecord.prompt_cache_hit_tokens) !== undefined || tokenCount(usageRecord.cached_tokens) !== undefined,
         cacheWrite: isOllama ? false : isAnthropic ? tokenCount(usageRecord.cache_creation_input_tokens) !== undefined
           : tokenCount(cacheDetails.cache_write_tokens) !== undefined || tokenCount(usageRecord.prompt_cache_write_tokens) !== undefined || tokenCount(usageRecord.cache_write_tokens) !== undefined }
-      const rateLimits = profile.provider === 'openai' ? readRateLimits(response.headers) : []
+      const rateLimits = profile.provider === 'openai' || profile.provider === 'custom' ? readRateLimits(response.headers) : []
       return { text, model: profile.model, elapsedMs: Math.round(performance.now() - startedAt), truncated,
         // Anthropic input_tokens 不含缓存；OpenAI 兼容协议的 prompt_tokens 已含缓存，不重复累加。
         ...(inputTokens !== undefined && outputTokens !== undefined ? { usage: { inputTokens: inputTokens + (isAnthropic ? (cacheRead ?? 0) + (cacheWrite ?? 0) : 0), outputTokens,

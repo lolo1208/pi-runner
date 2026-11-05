@@ -1,11 +1,15 @@
+import { siliconflowUsdExchange } from './siliconflow-global-data'
+
 /** 单价统一使用美元／百万 Token；等级只用于比较，不代表实际账单。 */
 export interface ModelPricing {
   input: number
   output: number
+  currency?: 'USD' | 'CNY'
+  convertedFromCny?: boolean
   cacheRead?: number
   cacheWrite?: number
   /** catalog、cloud：第三方目录；api-reference：订阅参考价；official：供应商官方公开单价；estimate：按已公布型号推算；local：本地运行。 */
-  kind: 'catalog' | 'api-reference' | 'local' | 'cloud' | 'official' | 'estimate'
+  kind: 'catalog' | 'api-reference' | 'local' | 'cloud' | 'official' | 'estimate' | 'siliconflow'
   source: string
   checkedAt: string
 }
@@ -15,19 +19,26 @@ export function parseModelPricing(value: unknown): ModelPricing | undefined {
   const item = value as Record<string, unknown>
   if (typeof item.input !== 'number' || !Number.isFinite(item.input) || item.input < 0
     || typeof item.output !== 'number' || !Number.isFinite(item.output) || item.output < 0
-    || !['catalog', 'api-reference', 'local', 'cloud', 'official', 'estimate'].includes(String(item.kind))
+    || !['catalog', 'api-reference', 'local', 'cloud', 'official', 'estimate', 'siliconflow'].includes(String(item.kind))
     || typeof item.source !== 'string' || item.source.length > 300
     || typeof item.checkedAt !== 'string' || !Number.isFinite(Date.parse(item.checkedAt))) return undefined
   if (item.kind === 'local' && (item.input !== 0 || item.output !== 0)) return undefined
   const optionalPrice = (value: unknown): number | undefined => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
+  if (item.kind === 'siliconflow' && item.currency === 'CNY') {
+    const rate = siliconflowUsdExchange.cnyPerUsd
+    return { input: item.input / rate, output: item.output / rate,
+      cacheRead: optionalPrice(item.cacheRead) == null ? undefined : (item.cacheRead as number) / rate,
+      cacheWrite: optionalPrice(item.cacheWrite) == null ? undefined : (item.cacheWrite as number) / rate,
+      kind: 'siliconflow', currency: 'USD', convertedFromCny: true, source: item.source, checkedAt: item.checkedAt }
+  }
   return { input: item.input, output: item.output,
     cacheRead: optionalPrice(item.cacheRead), cacheWrite: optionalPrice(item.cacheWrite),
-    kind: item.kind as ModelPricing['kind'], source: item.source, checkedAt: item.checkedAt }
+    kind: item.kind as ModelPricing['kind'], convertedFromCny: item.convertedFromCny === true, currency: item.currency === 'CNY' ? 'CNY' : 'USD', source: item.source, checkedAt: item.checkedAt }
 }
 
 export function modelPriceTier(value: unknown): number | null {
   const pricing = parseModelPricing(value)
-  if (!pricing) return null
+  if (!pricing || pricing.currency === 'CNY') return null
   const cost = pricing.input * 0.75 + pricing.output * 0.25
   if (cost === 0) return 0
   return cost < 0.5 ? 1 : cost < 2 ? 2 : cost < 5 ? 3 : cost < 15 ? 4 : 5
@@ -197,6 +208,19 @@ export function chatgptReferencePricing(model: string): ModelPricing | undefined
   const cache = Object.hasOwn(openaiCachePrices, model) ? openaiCachePrices[model] : undefined
   const recentlyChecked = ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.6-cyber', 'gpt-rosalind-research', 'gpt-rosalind-discovery', 'gpt-5.3-codex'].includes(model)
   return price ? { input: price[0], output: price[1], cacheRead: cache?.[0], cacheWrite: cache?.[1], kind: 'api-reference', source: price[2] ?? 'https://developers.openai.com/api/docs/pricing', checkedAt: recentlyChecked ? '2026-10-30' : '2026-10-15' } : undefined
+}
+
+/** 兼容接口只使用完整、明确的官方型号匹配，价格仅供参考。 */
+export function compatibleReferencePricing(model: string): ModelPricing | undefined {
+  const parts = model.toLowerCase().split('/')
+  if (parts.length > 2) return undefined
+  const name = parts[parts.length - 1]
+  const vendor = parts.length === 2 ? parts[0] : ''
+  let pricing: ModelPricing | undefined
+  if ((!vendor || vendor === 'openai') && /^(?:gpt-|o[134](?:-|$))/.test(name)) pricing = chatgptReferencePricing(name)
+  else if ((!vendor || vendor === 'google') && name.startsWith('gemini-')) pricing = googlePricing(name)
+  else if ((!vendor || vendor === 'deepseek' || vendor === 'deepseek-ai') && name.startsWith('deepseek-')) pricing = deepseekPricing(name)
+  return pricing ? { ...pricing, kind: 'api-reference' } : undefined
 }
 
 // 与上面的标准模式、短上下文口径一致；缺失项不推算为免费。

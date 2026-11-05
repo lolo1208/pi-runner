@@ -4,7 +4,7 @@ import { PiAgentService } from './pi-agent-service'
 import { OllamaClient } from './ollama-client'
 import { ModelClient } from './model-client'
 import { ModelSettingsStore } from './model-settings-store'
-import { ModelError, parseMessages, profileId } from './model-validation'
+import { asRecord, normalizeBaseUrl, ModelError, parseMessages, profileId } from './model-validation'
 import { compactContext } from './context-compaction'
 import type { ContextOptions } from '../../shared/context'
 import { PERMISSION_MODES, type PermissionMode } from '../../shared/models'
@@ -14,6 +14,7 @@ import { requiredString } from './model-validation'
 import path from 'node:path'
 import { GoogleClient } from './google-client'
 import { DeepseekClient } from './deepseek-client'
+import { listCompatibleModels } from './compatible-client'
 
 export async function modelResult<T>(action: () => Promise<T>): Promise<ModelResult<T>> {
   try { return { ok: true, value: await action() } }
@@ -23,7 +24,7 @@ export async function modelResult<T>(action: () => Promise<T>): Promise<ModelRes
 export class ModelService {
   private pending = new Map<string, { conversationId?: string; project?: string; controller: AbortController }>()
   private permissionPrompts = new Map<string, AbortController>()
-  constructor(private readonly store: ModelSettingsStore, private readonly client: PiAgentService | ModelClient, private readonly ollama = new OllamaClient(), private readonly openrouter = new OpenrouterClient(), private readonly google = new GoogleClient(), private readonly deepseek = new DeepseekClient()) {}
+  constructor(private readonly store: ModelSettingsStore, private readonly client: PiAgentService | ModelClient, private readonly ollama = new OllamaClient(), private readonly openrouter = new OpenrouterClient(), private readonly google = new GoogleClient(), private readonly deepseek = new DeepseekClient(), private readonly compatibleFetch: typeof fetch = fetch) {}
   async connectOpenrouter(value?: unknown): Promise<ModelSettings> {
     const key = value === undefined ? await this.store.openrouterKey() : requiredString(value, 'API Key', 8192)
     if (/[^\x21-\x7e]/.test(key)) throw new ModelError('API Key 不能包含空白或非 ASCII 字符')
@@ -36,6 +37,24 @@ export class ModelService {
     if (/[^\x21-\x7e]/.test(key)) throw new ModelError('API Key 不能包含空白或非 ASCII 字符')
     if (!(await this.store.list()).encryptionAvailable) throw new ModelError('系统安全存储不可用，无法保存或读取 API Key')
     return this.store.syncGoogle(await this.google.list(key), value === undefined ? undefined : key)
+  }
+  async manageCompatibleConnection(value: unknown): Promise<ModelSettings> {
+    const input = asRecord(value)
+    if (input.action === 'refresh') {
+      const { connection, apiKey } = await this.store.compatibleKey(input.id)
+      const models = await listCompatibleModels({ baseUrl: connection.baseUrl, apiKey }, this.compatibleFetch)
+      return this.store.manageCompatible(input, models)
+    }
+    return this.store.manageCompatible(input)
+  }
+  async listCompatibleModels(value: unknown) {
+    const input = asRecord(value)
+    if (input.profileId !== undefined && (input.apiKey === undefined || typeof input.apiKey === 'string' && !input.apiKey.trim())) {
+      const saved = await this.store.getForRequest(input.profileId, true)
+      if (saved.profile.provider !== 'custom' || saved.profile.baseUrl !== normalizeBaseUrl(input.baseUrl)) throw new ModelError('服务地址已更改，请输入该地址的密钥；不会向新地址发送已存密钥')
+      return listCompatibleModels({ ...input, apiKey: saved.apiKey }, this.compatibleFetch)
+    }
+    return listCompatibleModels(input, this.compatibleFetch)
   }
   async connectDeepseek(value?: unknown): Promise<ModelSettings> {
     const key = value === undefined ? await this.store.deepseekKey() : requiredString(value, 'API Key', 8192)

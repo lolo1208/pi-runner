@@ -9,7 +9,7 @@ import type { FileAction } from '../shared/api'
 const execute = promisify(execFile)
 
 /** 文件通过参数或环境变量传递，避免路径中的引号被当作脚本执行。 */
-async function copyFile(file: string): Promise<void> {
+export async function copyFile(file: string): Promise<void> {
   if (process.platform === 'win32') {
     await execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-STA', '-Command', "$ErrorActionPreference = 'Stop'; Add-Type -AssemblyName System.Windows.Forms; $files = New-Object System.Collections.Specialized.StringCollection; [void]$files.Add($env:PI_RUNNER_CLIPBOARD_FILE); [System.Windows.Forms.Clipboard]::SetFileDropList($files)"], {
       windowsHide: true, timeout: 10000, env: { ...process.env, PI_RUNNER_CLIPBOARD_FILE: file }

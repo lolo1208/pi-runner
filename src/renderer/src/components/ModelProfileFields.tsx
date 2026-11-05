@@ -1,4 +1,5 @@
 import { useId, useState } from 'react'
+import { CompatibleModelConnection } from './CompatibleModelConnection'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Button } from '@/components/ui/button'
 import { Input, type InputProps } from '@/components/ui/input'
@@ -23,6 +24,7 @@ interface ModelProfileFieldsProps {
   onApiKeyChange: (value: string) => void
   onRemoveKeyChange: (remove: boolean) => void
   children?: React.ReactNode
+  compactSetup?: boolean
 }
 const capabilityLabels: Record<string, string> = { completion: '文本生成', vision: '图片输入', tools: '工具调用', thinking: '推理', embedding: '向量嵌入', audio: '音频输入', video: '视频输入', pdf: 'PDF 输入' }
 const formatPrice = (value: number | undefined): string => value == null ? '未知' : `$${value.toLocaleString('en-US', { maximumFractionDigits: 7 })}`
@@ -59,7 +61,7 @@ function defaultParameters(profile: ModelProfile, modelInfo?: ModelDescriptor | 
   }
 }
 
-export function ModelProfileFields({ profile, savedProfile, settings, modelInfo, infoLoading, apiKey, removeKey, onFieldChange, onApiKeyChange, onRemoveKeyChange, children }: ModelProfileFieldsProps): React.JSX.Element {
+export function ModelProfileFields({ profile, savedProfile, settings, modelInfo, infoLoading, apiKey, removeKey, onFieldChange, onApiKeyChange, onRemoveKeyChange, children, compactSetup = false }: ModelProfileFieldsProps): React.JSX.Element {
   const local = profile.provider === 'ollama'
   const subscription = profile.provider === 'chatgpt'
   const google = profile.provider === 'google'
@@ -75,8 +77,10 @@ export function ModelProfileFields({ profile, savedProfile, settings, modelInfo,
   const configuredThinking = selectedModelThinking(profile, modelInfo?.thinking)
   const selectedThinking = thinkingOptions.find(option => option.raw === configuredThinking)?.value
   const showThinking = !infoLoading && thinkingValues.some(value => value !== false && value !== 'off')
-  return <div className="model-configuration-grid">
+  const ConnectionSection = compactSetup ? 'section' : 'details'
+  return <div className={`model-configuration-grid${compactSetup ? ' model-configuration-setup' : ''}`}>
     <div className="model-configuration-fields">
+      {!compactSetup && <div className="model-parameter-fields">
       <Label htmlFor={`${fieldId}-max-tokens`}>{subscription ? '回复预留 Token' : '输出 Token 上限'}</Label>
       <div className={automatic ? 'model-parameter-row model-output-row' : 'model-parameter-row'}>
         {automatic ? <output id={`${fieldId}-max-tokens`} className="model-output-value h-9 min-w-0 rounded-md px-3 py-1 text-sm" aria-describedby={`${fieldId}-max-tokens-help`}>{infoLoading ? '读取中' : outputTokens.toLocaleString('en-US')}</output>
@@ -88,11 +92,12 @@ export function ModelProfileFields({ profile, savedProfile, settings, modelInfo,
         <div className="model-context-input"><IntegerParameterInput id={`${fieldId}-context`} min="1" max={Math.floor(Math.min(modelInfo?.maxContextTokens ?? 2097152, 2097152) / 1000)} value={contextTokens == null ? null : contextTokens / 1000} placeholder={infoLoading ? '读取中' : '输入整数'} onValueChange={value => onFieldChange('contextTokens', value * 1000)} /><span aria-hidden="true">K</span></div>
         <p className="hint">{local ? '每次请求生效，包含输入与输出。' : '按模型独立保存。'}</p>
       </div>
+      {profile.provider === 'custom' && contextTokens != null && <p className="hint">实际上下文上限：{contextTokens.toLocaleString()} Token；手动修改上方数值时以整数 K 保存。</p>}
       {profile.contextTokens != null && modelInfo?.maxContextTokens != null && profile.contextTokens > modelInfo.maxContextTokens && <p className="error">设置超过模型支持的最大上下文。</p>}
       {!subscription && (profile.provider !== 'deepseek' || deepseekThinking(profile) === 'off') && (!router || modelInfo?.supportedParameters?.includes('temperature')) && <>
         <Label htmlFor={`${fieldId}-temperature`}>温度（Temperature）</Label>
         <div className="model-parameter-row">
-          <IntegerParameterInput id={`${fieldId}-temperature`} min="0" max={profile.protocol === 'anthropic' ? 1 : 2} value={profile.temperature ?? 1} placeholder="1" aria-describedby={`${fieldId}-temperature-help`} onValueChange={value => onFieldChange('temperature', value)} />
+          <Input id={`${fieldId}-temperature`} type="number" min="0" max={profile.protocol === 'anthropic' ? 1 : 2} step="0.1" value={profile.temperature ?? ''} placeholder="留空由服务决定" aria-describedby={`${fieldId}-temperature-help`} onChange={event => onFieldChange('temperature', event.target.value === '' ? null : Number(event.target.value))} />
           <p id={`${fieldId}-temperature-help`} className="hint">值越低，回复越稳定。</p>
         </div>
       </>}
@@ -138,17 +143,23 @@ export function ModelProfileFields({ profile, savedProfile, settings, modelInfo,
           if (!automatic && reset.maxTokens != null) onFieldChange('maxTokens', reset.maxTokens)
           if (reset.timeoutSeconds != null) onFieldChange('timeoutSeconds', reset.timeoutSeconds)
         }}>恢复默认参数</Button>
-      {!local && !subscription && !router && !google && profile.provider !== 'deepseek' && <details className="provider-advanced"><summary>连接与认证</summary>
+      </div>}
+      {!local && !subscription && !router && !google && profile.provider !== 'deepseek' && !profile.compatibleConnectionId && <ConnectionSection className="provider-advanced" {...(!compactSetup ? { open: profile.provider === 'custom' } : {})}>{compactSetup ? <h4>连接与认证</h4> : <summary>连接与认证</summary>}
         <Label>Base URL<Input type="url" value={profile.baseUrl} onChange={event => onFieldChange('baseUrl', event.target.value)} /></Label>
-        <Label>模型 ID<Input value={profile.model} maxLength={200} onChange={event => onFieldChange('model', event.target.value)} /></Label>
+        {profile.provider !== 'custom' && <Label>模型 ID<Input value={profile.model} maxLength={200} onChange={event => onFieldChange('model', event.target.value)} /></Label>}
         {!settings.encryptionAvailable && <p className="error" role="status">系统安全存储不可用，暂时不能保存或读取 API Key。</p>}
         <Label>API Key {savedProfile?.hasApiKey ? '· 已配置' : '· 未配置'}<Input type="password" value={apiKey} autoComplete="off" spellCheck={false} disabled={!settings.encryptionAvailable || removeKey} placeholder={savedProfile?.hasApiKey ? '留空保留现有密钥' : '输入服务密钥'} onChange={event => onApiKeyChange(event.target.value)} /></Label>
         {savedProfile?.hasApiKey && <Label className="checkbox-label"><Checkbox checked={removeKey} onCheckedChange={checked => onRemoveKeyChange(checked === true)} />保存时删除已存 API Key</Label>}
-        {profile.protocol === 'openai-compatible' && <Label>Token 参数<Select value={profile.tokenParameter} onValueChange={value => onFieldChange('tokenParameter', value as ModelProfile['tokenParameter'])}><SelectTrigger aria-label="Token 参数"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="max_completion_tokens">max_completion_tokens</SelectItem><SelectItem value="max_tokens">max_tokens</SelectItem></SelectContent></Select></Label>}
-      </details>}
+        {profile.provider === 'custom' && <CompatibleModelConnection key={profile.id} profile={profile} apiKey={apiKey} saved={Boolean(savedProfile) && !removeKey} onChange={onFieldChange} compact={compactSetup} />}
+        {!compactSetup && profile.protocol === 'openai-compatible' && <Label>Token 参数<Select value={profile.tokenParameter} onValueChange={value => onFieldChange('tokenParameter', value as ModelProfile['tokenParameter'])}><SelectTrigger aria-label="Token 参数"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="max_completion_tokens">max_completion_tokens</SelectItem><SelectItem value="max_tokens">max_tokens</SelectItem></SelectContent></Select></Label>}
+      </ConnectionSection>}
+      {profile.compatibleConnectionId && <>
+        <Label>Token 参数<Select value={profile.tokenParameter} onValueChange={value => onFieldChange('tokenParameter', value as ModelProfile['tokenParameter'])}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="max_completion_tokens">max_completion_tokens</SelectItem><SelectItem value="max_tokens">max_tokens</SelectItem></SelectContent></Select></Label>
+        <CompatibleModelConnection key={profile.id} profile={profile} apiKey="" parametersOnly onChange={onFieldChange} />
+      </>}
       {children}
     </div>
-    <aside className="model-specifications" aria-label="模型信息">
+    {!compactSetup && <aside className="model-specifications" aria-label="模型信息">
       <h4>能力</h4>
       {infoLoading && <p className="hint" role="status">正在读取模型信息…</p>}
       <dl><div><dt>输入类型</dt><dd>{modelInfo ? modelInfo.capabilities.includes('audio') ? '文字 · 图片 · 音频 · 视频 · PDF' : modelInfo.capabilities.includes('vision') ? '文字 · 图片' : modelInfo.capabilities.includes('completion') || modelInfo.capabilities.includes('embedding') ? '文字' : '未提供' : '未提供'}</dd></div>
@@ -174,6 +185,6 @@ export function ModelProfileFields({ profile, savedProfile, settings, modelInfo,
         </dl>
       </>}
       <h4>模型信息</h4><dl><div><dt>模型 ID</dt><dd>{profile.model}</dd></div><div><dt>供应商</dt><dd>{local ? 'Ollama' : profile.provider}</dd></div><div><dt>服务地址</dt><dd>{profile.baseUrl}</dd></div></dl>
-    </aside>
+    </aside>}
   </div>
 }

@@ -97,6 +97,7 @@ export class ConversationStore {
   private cachedJson = ''
   private draftRevision: string = randomUUID()
   private drafts = new Map<string, ConversationDraftUpdate>()
+  private selectedId: string | null | undefined
   constructor(private readonly file: string) {}
 
   private loadDrafts(state: ConversationState): ConversationState {
@@ -111,7 +112,9 @@ export class ConversationStore {
     if (overlay.revision !== this.draftRevision) return state
     if (overlay.version !== 1) throw new Error('会话草稿版本无效')
     this.drafts = new Map(parseDrafts(overlay.drafts, state).map(draft => [draft.id, draft]))
-    return applyDrafts(state, this.drafts)
+    this.selectedId = this.parseSelection(overlay.selectedId, state)
+    const next = applyDrafts(state, this.drafts)
+    return this.selectedId === undefined ? next : { ...next, selectedId: this.selectedId }
   }
 
   load(): ConversationState {
@@ -141,7 +144,7 @@ export class ConversationStore {
   save(value: unknown): void {
     if (!this.readable) throw new Error('本地会话尚未成功读取，已停止保存以保护原文件。')
     const state = parseState(value)
-    const revision = this.drafts.size ? randomUUID() : this.draftRevision
+    const revision = this.drafts.size || this.selectedId !== undefined ? randomUUID() : this.draftRevision
     const json = JSON.stringify({ ...state, draftRevision: revision })
     // 有草稿覆盖层时必须更换代号；否则相同完整快照可以跳过写盘。
     if (json === this.cachedJson) return
@@ -150,20 +153,31 @@ export class ConversationStore {
     this.cachedJson = json
     this.draftRevision = revision
     this.drafts.clear()
+    this.selectedId = undefined
     try { unlinkSync(`${this.file}.drafts.json`) }
     catch { /* 旧覆盖层已由代号失效，清理失败不能把成功保存误报为失败。 */ }
   }
 
-  /** 高频输入只写文字和技能；不校验、序列化或重写历史附件。 */
-  saveDrafts(value: unknown): void {
+  private parseSelection(value: unknown, state: ConversationState): string | null | undefined {
+    if (value === undefined || value === null) return value
+    if (typeof value !== 'string' || !state.tasks.some(task => task.id === value)) throw new Error('选中的会话无效')
+    return value
+  }
+
+  /** 输入和会话切换只写轻量覆盖层，不复制、序列化或重写历史附件。 */
+  saveDrafts(value: unknown, selection?: unknown): void {
     if (!this.readable || !this.cached) throw new Error('本地会话尚未成功读取，已停止保存以保护原文件。')
     const changes = parseDrafts(value, this.cached)
-    if (!changes.length) return
+    const selectedId = this.parseSelection(selection, this.cached)
+    if (!changes.length && (selectedId === undefined || selectedId === this.cached.selectedId)) return
     const drafts = new Map(this.drafts)
     for (const draft of changes) drafts.set(draft.id, draft)
     const next = applyDrafts(this.cached, new Map(changes.map(draft => [draft.id, draft])))
-    writeAtomic(`${this.file}.drafts.json`, JSON.stringify({ version: 1, revision: this.draftRevision, drafts: [...drafts.values()] }))
+    const retainedSelection = selectedId === undefined ? this.selectedId : selectedId
+    if (retainedSelection !== undefined) next.selectedId = retainedSelection
+    writeAtomic(`${this.file}.drafts.json`, JSON.stringify({ version: 1, revision: this.draftRevision, drafts: [...drafts.values()], selectedId: retainedSelection }))
     this.cached = next
     this.drafts = drafts
+    this.selectedId = retainedSelection
   }
 }

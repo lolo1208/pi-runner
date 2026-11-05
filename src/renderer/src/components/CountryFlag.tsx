@@ -17,6 +17,8 @@ export function CountryFlag({ code }: { code: ManufacturerCountryCode }): React.
       {[[10, 2, 23], [12, 4, 45], [12, 7, 70], [10, 9, 20]].map(([x, y, rotation]) => <polygon key={y} points={star} fill="#ffde00" transform={`translate(${x},${y}) rotate(${rotation})`} />)}
     </>}
     {code === 'FR' && <><rect width="10" height="20" fill="#000091" /><rect x="20" width="10" height="20" fill="#e1000f" /></>}
+    {code === 'DE' && <><rect width="30" height="20" fill="#ffce00" /><rect width="30" height="13.333" fill="#dd0000" /><rect width="30" height="6.667" fill="#000" /></>}
+    {code === 'SA' && <><rect width="30" height="20" fill="#006c35" /><text x="15" y="10" fill="white" fontSize="5" textAnchor="middle" direction="rtl">لا إله إلا الله</text><path d="M7 13.5h16m-16 0 2 1" fill="none" stroke="white" strokeWidth=".8" /></>}
     {code === 'CA' && <>
       <path fill="#d80621" d="M0 0h7.5v20H0zm22.5 0H30v20h-7.5z" />
       <path fill="#d80621" d="m15 3 1.2 2.7 1.4-.7-.6 4 2.5-1.7.5 1.8 2-.3-1.4 2.7.8 1-5.4 1.1.3 3.4h-1.6l.3-3.4-5.4-1.1.8-1L8 8.8l2 .3.5-1.8L13 9l-.6-4 1.4.7z" />

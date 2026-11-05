@@ -1,9 +1,12 @@
+import { compatibleConnectionName } from '../../shared/compatible-connection-name'
+import { siliconflowPricingSnapshot } from './siliconflow-pricing'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
+import type { CompatibleConnection, CompatibleConnectionCommand } from '../../shared/models'
 import { parseThinkingControls, REVIEW_MODEL_OFF, selectedModelThinking, type ModelDescriptor, type ModelProfile, type ModelProviderConnection, type ModelSettings } from '../../shared/models'
 import { deepseekPricing, googleEstimatedPricing, googlePricing, parseModelPricing } from '../../shared/model-pricing'
-import { asRecord, ModelError, normalizeOllamaUrl, parseProfile, parseSaveProfile, profileId, requiredString } from './model-validation'
+import { asRecord, ModelError, normalizeBaseUrl, normalizeOllamaUrl, parseProfile, parseSaveProfile, profileId, requiredString } from './model-validation'
 import { GOOGLE_BASE_URL, GOOGLE_CATALOG_LIMIT, googleDocumentedModel, googleThinking } from '../../shared/google'
 import { OPENROUTER_BASE_URL } from '../../shared/openrouter'
 import { automaticOutputTokens, systemOutputTokens } from '../../shared/output-tokens'
@@ -15,7 +18,7 @@ export interface CredentialCipher {
   decrypt(value: Buffer): string
 }
 interface StoredProfile { profile: ModelProfile; encryptedApiKey?: string }
-interface SettingsFile { version: 1; activeProfileId: string | null; reviewProfileId: string | null; reviewDisabled?: boolean; profiles: StoredProfile[]; providers?: ModelProviderConnection[]; encryptedOpenrouterApiKey?: string; encryptedGoogleApiKey?: string; encryptedDeepseekApiKey?: string }
+interface SettingsFile { compatibleConnections?: (CompatibleConnection & { encryptedApiKey?: string })[]; version: 1; activeProfileId: string | null; reviewProfileId: string | null; reviewDisabled?: boolean; profiles: StoredProfile[]; providers?: ModelProviderConnection[]; encryptedOpenrouterApiKey?: string; encryptedGoogleApiKey?: string; encryptedDeepseekApiKey?: string }
 
 export class ModelSettingsStore {
   private queue: Promise<unknown> = Promise.resolve()
@@ -85,6 +88,26 @@ export class ModelSettingsStore {
         }
       }
       const settings: SettingsFile = { version: 1, profiles, activeProfileId, reviewProfileId, reviewDisabled, providers, encryptedGoogleApiKey: raw.encryptedGoogleApiKey as string | undefined, encryptedDeepseekApiKey: raw.encryptedDeepseekApiKey as string | undefined, encryptedOpenrouterApiKey: raw.encryptedOpenrouterApiKey as string | undefined }
+      settings.compatibleConnections = []
+      if (raw.compatibleConnections !== undefined) {
+        if (!Array.isArray(raw.compatibleConnections) || raw.compatibleConnections.length > 100) throw new Error()
+        for (const value of raw.compatibleConnections) {
+          const c = asRecord(value)
+          if (c.encryptedApiKey !== undefined && (typeof c.encryptedApiKey !== 'string' || c.encryptedApiKey.length > 32768 || !/^[A-Za-z0-9+/]+={0,2}$/.test(c.encryptedApiKey))) throw new Error()
+          if (!Array.isArray(c.models) || c.models.length > 5000) throw new Error()
+          settings.compatibleConnections.push({ id: profileId(c.id), name: requiredString(c.name, '连接名称', 80), baseUrl: normalizeBaseUrl(c.baseUrl), compatibleApi: c.compatibleApi === 'responses' ? 'responses' : 'chat-completions', encryptedApiKey: c.encryptedApiKey as string | undefined, models: c.models.map(value => { const m = asRecord(value); return { id: requiredString(m.id, '模型 ID', 200), capabilities: [], maxContextTokens: null } }) })
+        }
+      }
+      // 旧模型按地址及密钥拆分连接，避免不同账号被错误合并。
+      for (const entry of settings.profiles) {
+        if (entry.profile.provider !== 'custom' || entry.profile.compatibleConnectionId) continue
+        let c = settings.compatibleConnections.find(c => c.baseUrl === entry.profile.baseUrl && c.encryptedApiKey === entry.encryptedApiKey && c.compatibleApi === (entry.profile.compatibleApi ?? 'chat-completions'))
+        if (!c) { c = { id: entry.profile.id, name: new URL(entry.profile.baseUrl).host, baseUrl: entry.profile.baseUrl, compatibleApi: entry.profile.compatibleApi ?? 'chat-completions', encryptedApiKey: entry.encryptedApiKey, models: [] }; settings.compatibleConnections.push(c) }
+        entry.profile.compatibleConnectionId = c.id
+        delete entry.encryptedApiKey
+      }
+      if (new Set(settings.compatibleConnections.map(c => c.id)).size !== settings.compatibleConnections.length) throw new Error()
+      for (const entry of settings.profiles) if (entry.profile.compatibleConnectionId && !settings.compatibleConnections.some(c => c.id === entry.profile.compatibleConnectionId && c.baseUrl === entry.profile.baseUrl)) throw new Error()
       this.migrateGoogleDefaults(settings)
       for (const entry of settings.profiles) if (entry.profile.provider === 'deepseek' && entry.profile.maxTokens === 2048 && deepseekModelInfo(entry.profile.model).maxOutputTokens) entry.profile.maxTokens = DEEPSEEK_DEFAULT_OUTPUT_TOKENS
       this.reconcileActive(settings)
@@ -118,12 +141,13 @@ export class ModelSettingsStore {
 
   private view(settings: SettingsFile): ModelSettings {
     return { activeProfileId: settings.activeProfileId, reviewProfileId: settings.reviewProfileId, reviewDisabled: Boolean(settings.reviewDisabled), encryptionAvailable: this.cipher.isAvailable(),
+      compatibleConnections: (settings.compatibleConnections ?? []).map(({ encryptedApiKey, ...c }) => ({ ...c, models: siliconflowPricingSnapshot(c.baseUrl, c.models), hasApiKey: Boolean(encryptedApiKey) })),
       providers: (settings.providers ?? []).map(connection => ({ ...connection,
         // 升级前保存的 Google 目录没有单价，读取时补齐，无需用户重新刷新。
         ...(connection.provider === 'google' ? { models: connection.models.map(model => ({ ...model, pricing: googlePricing(model.id) ?? googleEstimatedPricing(model.id) ?? model.pricing })) } : {}),
         ...(connection.provider === 'deepseek' ? { models: connection.models.map(model => ({ ...model, ...deepseekModelInfo(model.id), pricing: deepseekPricing(model.id) })) } : {}),
         ...(['openrouter', 'google', 'deepseek'].includes(connection.provider) ? { hasApiKey: Boolean(connection.provider === 'google' ? settings.encryptedGoogleApiKey : connection.provider === 'deepseek' ? settings.encryptedDeepseekApiKey : settings.encryptedOpenrouterApiKey) } : {}) })),
-      profiles: settings.profiles.map(item => ({ ...this.resolvedOutput(settings, item.profile), hasApiKey: Boolean(item.profile.provider === 'google' ? settings.encryptedGoogleApiKey : item.profile.provider === 'openrouter' ? settings.encryptedOpenrouterApiKey : item.profile.provider === 'deepseek' && item.profile.baseUrl === DEEPSEEK_BASE_URL ? settings.encryptedDeepseekApiKey ?? item.encryptedApiKey : item.encryptedApiKey), available: this.available(settings, item.profile) })) }
+      profiles: settings.profiles.map(item => ({ ...this.resolvedOutput(settings, item.profile), hasApiKey: Boolean(item.profile.compatibleConnectionId ? settings.compatibleConnections?.find(c => c.id === item.profile.compatibleConnectionId)?.encryptedApiKey : item.profile.provider === 'google' ? settings.encryptedGoogleApiKey : item.profile.provider === 'openrouter' ? settings.encryptedOpenrouterApiKey : item.profile.provider === 'deepseek' && item.profile.baseUrl === DEEPSEEK_BASE_URL ? settings.encryptedDeepseekApiKey ?? item.encryptedApiKey : item.encryptedApiKey), available: this.available(settings, item.profile) })) }
   }
   private resolvedOutput(settings: SettingsFile, profile: ModelProfile): ModelProfile {
     if (!systemOutputTokens(profile.provider)) return { ...profile }
@@ -159,7 +183,81 @@ export class ModelSettingsStore {
     })
   }
 
+  compatibleKey(id: unknown): Promise<{ connection: CompatibleConnection; apiKey: string }> {
+    return this.serialized(async () => {
+      const settings = await this.read()
+      const c = settings.compatibleConnections?.find(c => c.id === profileId(id))
+      if (!c) throw new ModelError('连接不存在')
+      let apiKey = ''
+      if (c.encryptedApiKey) {
+        if (!this.cipher.isAvailable()) throw new ModelError('系统安全存储不可用')
+        try { apiKey = this.cipher.decrypt(Buffer.from(c.encryptedApiKey, 'base64')) } catch { throw new ModelError('密钥解密失败，请重新配置连接') }
+      }
+      const { encryptedApiKey: _, ...connection } = c
+      return { connection, apiKey }
+    })
+  }
+
+  manageCompatible(input: unknown, models?: ModelDescriptor[]): Promise<ModelSettings> {
+    return this.serialized(async () => {
+      const command = asRecord(input) as unknown as CompatibleConnectionCommand
+      const id = profileId(command.id)
+      const settings = await this.read()
+      const connections = settings.compatibleConnections ??= []
+      let c = connections.find(c => c.id === id)
+      if (command.action === 'save') {
+        const baseUrl = normalizeBaseUrl(command.baseUrl)
+        const name = requiredString(typeof command.name === 'string' && command.name.trim() ? command.name : compatibleConnectionName(baseUrl), '连接名称', 80)
+        let encryptedApiKey = c?.encryptedApiKey
+        if (command.apiKey !== undefined && command.apiKey !== '') {
+          if (typeof command.apiKey !== 'string' || command.apiKey.length > 8192 || /[^\x21-\x7e]/.test(command.apiKey)) throw new ModelError('API Key 格式无效')
+          if (!this.cipher.isAvailable()) throw new ModelError('系统安全存储不可用')
+          encryptedApiKey = this.cipher.encrypt(command.apiKey).toString('base64')
+        }
+        if (!encryptedApiKey) throw new ModelError('请输入 API Key')
+        if (!c) { if (connections.length >= 100) throw new ModelError('最多保存 100 个连接'); c = { id, name, baseUrl, compatibleApi: 'chat-completions', models: [] }; connections.push(c) }
+        if (c.baseUrl !== baseUrl) c.models = []
+        Object.assign(c, { name, baseUrl, encryptedApiKey, compatibleApi: command.compatibleApi === undefined ? c.compatibleApi : command.compatibleApi === 'responses' ? 'responses' : 'chat-completions' })
+        for (const entry of settings.profiles) if (entry.profile.compatibleConnectionId === id) { entry.profile.baseUrl = baseUrl; entry.profile.compatibleApi = c.compatibleApi; delete entry.encryptedApiKey }
+      } else {
+        if (!c) throw new ModelError('连接不存在')
+        if (command.action === 'refresh') { if (!models) throw new ModelError('目录读取失败'); c.models = models }
+        else if (command.action === 'remove') { settings.compatibleConnections = connections.filter(c => c.id !== id); settings.profiles = settings.profiles.filter(e => e.profile.compatibleConnectionId !== id) }
+        else if (command.action === 'remove-model') settings.profiles = settings.profiles.filter(e => !(e.profile.compatibleConnectionId === id && e.profile.model === command.model))
+        else if (command.action === 'add-model') {
+          const model = requiredString(command.model, '模型 ID', 200)
+          const existing = settings.profiles.find(e => e.profile.compatibleConnectionId === id && e.profile.model === model)
+          if (existing) {
+            if (command.manuallyAdded === true) existing.profile.manuallyAdded = true
+          } else {
+            if (settings.profiles.length >= 200) throw new ModelError('最多保存 200 个模型')
+            settings.profiles.push({ profile: { id: randomUUID(), name: model.slice(0, 80), provider: 'custom', protocol: 'openai-compatible', compatibleConnectionId: id, ...(command.manuallyAdded === true ? { manuallyAdded: true } : {}), compatibleApi: c.compatibleApi, baseUrl: c.baseUrl, model, temperature: null, contextTokens: null, maxTokens: 2048, tokenParameter: 'max_tokens', timeoutSeconds: 60, enabled: true } })
+          }
+        } else throw new ModelError('无效的连接操作')
+      }
+      this.reconcileActive(settings)
+      await this.write(settings)
+      return this.view(settings)
+    })
+  }
+
   list(): Promise<ModelSettings> { return this.serialized(async () => this.view(await this.read())) }
+
+  removeProvider(provider: unknown): Promise<ModelSettings> {
+    return this.serialized(async () => {
+      if (typeof provider !== 'string' || !['ollama', 'chatgpt', 'openrouter', 'google', 'deepseek', 'custom', 'openai', 'anthropic', 'vllm'].includes(provider)) throw new ModelError('无效的模型供应商')
+      const settings = await this.read()
+      settings.profiles = settings.profiles.filter(item => item.profile.provider !== provider)
+      settings.providers = (settings.providers ?? []).filter(item => item.provider !== provider)
+      if (provider === 'custom') settings.compatibleConnections = []
+      if (provider === 'openrouter') delete settings.encryptedOpenrouterApiKey
+      if (provider === 'google') delete settings.encryptedGoogleApiKey
+      if (provider === 'deepseek') delete settings.encryptedDeepseekApiKey
+      this.reconcileActive(settings)
+      await this.write(settings)
+      return this.view(settings)
+    })
+  }
 
   openrouterKey(): Promise<string> {
     return this.serialized(async () => {
@@ -272,6 +370,10 @@ export class ModelSettingsStore {
       if (profile.provider === 'chatgpt' && credential.action === 'replace') throw new ModelError('ChatGPT 订阅请通过浏览器授权，无需 API Key')
       const settings = await this.read()
       const existing = settings.profiles.find(item => item.profile.id === profile.id)
+      if (profile.compatibleConnectionId) {
+        const c = settings.compatibleConnections?.find(c => c.id === profile.compatibleConnectionId)
+        if (!c || profile.provider !== 'custom' || c.baseUrl !== profile.baseUrl || c.compatibleApi !== profile.compatibleApi || credential.action !== 'keep') throw new ModelError('连接与密钥请在供应商连接中修改')
+      }
       if (!existing && settings.profiles.length >= 200) throw new ModelError('最多保存 200 个模型配置')
       const descriptor = settings.providers?.find(item => item.provider === profile.provider && item.baseUrl === profile.baseUrl)?.models.find(item => item.id === profile.model)
       if (profile.provider === 'google') {
@@ -354,6 +456,7 @@ export class ModelSettingsStore {
       if (!id) return null
       const entry = settings.profiles.find(item => item.profile.id === id)
       if (!entry || entry.profile.enabled === false || !this.available(settings, entry.profile)) return null
+      if (entry.profile.compatibleConnectionId) entry.encryptedApiKey = settings.compatibleConnections?.find(c => c.id === entry.profile.compatibleConnectionId)?.encryptedApiKey
       let apiKey = ''
       const encryptedKey = entry.profile.provider === 'google' ? settings.encryptedGoogleApiKey : entry.profile.provider === 'openrouter' ? settings.encryptedOpenrouterApiKey : entry.profile.provider === 'deepseek' && entry.profile.baseUrl === DEEPSEEK_BASE_URL ? settings.encryptedDeepseekApiKey ?? entry.encryptedApiKey : entry.encryptedApiKey
       if (encryptedKey) {
@@ -396,6 +499,7 @@ export class ModelSettingsStore {
       const entry = settings.profiles.find(item => item.profile.id === selectedId)
       if (!entry) throw new ModelError('请先保存模型配置')
       if ((!forTest && entry.profile.enabled === false) || !this.available(settings, entry.profile)) throw new ModelError('该模型已停用或不可用，请在模型设置中启用或刷新模型列表')
+      if (entry.profile.compatibleConnectionId) entry.encryptedApiKey = settings.compatibleConnections?.find(c => c.id === entry.profile.compatibleConnectionId)?.encryptedApiKey
       let apiKey = ''
       const encryptedKey = entry.profile.provider === 'google' ? settings.encryptedGoogleApiKey : entry.profile.provider === 'openrouter' ? settings.encryptedOpenrouterApiKey : entry.profile.provider === 'deepseek' && entry.profile.baseUrl === DEEPSEEK_BASE_URL ? settings.encryptedDeepseekApiKey ?? entry.encryptedApiKey : entry.encryptedApiKey
       if (encryptedKey) {

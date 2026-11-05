@@ -309,9 +309,10 @@ function VirtualTranscript({ rows, position, navigationTarget, lastLatestRequest
   // 按下小点期间冻结列表平移：点击本身不应引起任何滚动。
   const railFreezeRef = useRef(false)
   useEffect(() => {
-    const release = (): void => { setTimeout(() => { railFreezeRef.current = false }, 250) }
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const release = (): void => { clearTimeout(timer); timer = setTimeout(() => { railFreezeRef.current = false }, 250) }
     window.addEventListener('pointerup', release, { passive: true })
-    return () => window.removeEventListener('pointerup', release)
+    return () => { clearTimeout(timer); window.removeEventListener('pointerup', release) }
   }, [])
   const activeRoundKeyRef = useRef(activeRoundKey)
   activeRoundKeyRef.current = activeRoundKey

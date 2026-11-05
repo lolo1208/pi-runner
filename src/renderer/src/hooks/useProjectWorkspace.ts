@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useConversationPersistence } from './useConversationPersistence'
+import { subscribeAgentEvents } from '../lib/agent-events'
 import type { ChangedFile, Checkpoint, FileDiff } from '../../../shared/api'
 import type { Task } from '../app-types'
 import { UNLINKED_PROJECT_LABEL } from '../app-types'
@@ -98,7 +99,7 @@ export function useProjectWorkspace() {
     return () => { active = false }
   }, [])
 
-  useEffect(() => window.piRunner.onAgentEvent?.(event => {
+  useEffect(() => subscribeAgentEvents(event => {
     if (event.type !== 'snapshot' || !event.snapshot) return
     const round = event.snapshot
     setTasks(items => items.map(task => task.id === event.conversationId ? { ...task, agentSnapshots: [...task.agentSnapshots ?? [], round] } : task))

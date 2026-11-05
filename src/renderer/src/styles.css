@@ -19,6 +19,7 @@
 @import './styles/skills.css';
 @import './styles/project-picker.css';
 @import './styles/responsive.css';
+@import './styles/notifications.css';
 
 /* 界面元素默认不可选中：标题栏、侧边栏、输入区、状态栏、下拉菜单等只作为界面语言。 */
 html,
