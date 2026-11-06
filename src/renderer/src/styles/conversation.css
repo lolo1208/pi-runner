@@ -1124,6 +1124,12 @@ button.chat-round-dot:focus-visible { outline: 1px solid var(--accent); outline-
 .chat-call-count { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; padding: 0 5px; border-radius: 5px; background: var(--hover); color: var(--text); font-size: calc(11rem / 14); line-height: 18px; font-variant-numeric: tabular-nums; }
 .chat-work-list { display: flex; flex-direction: column; gap: 4px; margin-block: 4px 8px; }
 .chat-work-progress { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 4px 10px; color: var(--muted); font-size: calc(12rem / 14); line-height: 1.5; }
+.chat-execution-status { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 0; }
+.chat-execution-status > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-tool-received { margin-inline-start: auto; flex-shrink: 0; text-align: right; color: var(--muted); font-size: calc(11rem / 14); font-weight: 400; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.chat-work-progress .chat-tool-received { margin-inline-start: auto; flex-shrink: 0; }
+.chat-work-file-list { margin: 0 0 12px; padding-inline-start: 20px; max-height: 240px; overflow: auto; user-select: text; font-family: var(--font-mono, monospace); font-size: calc(12rem / 14); line-height: 1.7; }
+.chat-work-file-list li { overflow-wrap: anywhere; }
 .chat-work-progress > svg { flex-shrink: 0; }
 .chat-work-progress > span { min-width: 0; overflow-wrap: anywhere; }
 .chat-call-section + .chat-call-section { margin-top: 4px; }

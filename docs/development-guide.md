@@ -11,6 +11,7 @@
 | `pnpm typecheck` / `pnpm test` / `pnpm build` | 类型检查 / 测试 / 编译 |
 | `pnpm check` | 聚合检查 |
 | `pnpm pack:dir` | 导出目录版至 `build-work/dir/` |
+| `pnpm dist:win:release` | 导出 Windows x64 安装包及解压即用 ZIP（CI 使用） |
 | `pnpm dist:win:all` | 导出 Windows x64 安装包、便携版及 ZIP |
 | `pnpm dist:win` / `pnpm dist:win:portable` / `pnpm dist:win:zip` | 单独导出 Windows 发行包 |
 | `pnpm dist:mac` | 导出 macOS DMG |
@@ -20,6 +21,32 @@
 首次 Windows 打包按需下载并校验固定版本的 NSIS 和 7-Zip，缓存于 `build-work/tools/`；缓存完整时可离线复用。发行脚本会检查包内主进程依赖。Windows 包未签名；跨平台安装与运行仍需在目标系统验收。
 
 若 Electron 运行时下载失败，检查网络和代理，或配置 `ELECTRON_MIRROR` 后运行 `pnpm electron:install`。跳过安装脚本导致 esbuild 无法运行时，执行 `pnpm rebuild esbuild`。
+
+## GitHub 自动发布
+
+工作流位于 `.github/workflows/release.yml`，自动构建 Windows x64 安装包与便携 ZIP，并上传到 GitHub Release 的 Assets；不生成自解压便携 EXE。macOS DMG 任务已作为注释保留，暂不执行，启用方法及签名、公证注意事项见工作流注释。
+
+发布步骤：
+
+1. 提交并推送待发布的代码（包括发布工作流）。无需修改 `package.json` 的 `version`。
+2. 创建并推送目标版本标签：
+
+   ```sh
+   git tag v0.1.0
+   git push origin v0.1.0
+   ```
+
+3. 在 Actions 查看“构建并发布发行包”的运行状态；成功后在 Releases 页面下载 `pi-runner-setup.exe` 或 `pi-runner-portable.zip`。运行摘要也提供直接下载链接。
+
+也可以在 GitHub 的 **Actions → 构建并发布发行包 → Run workflow** 中输入已存在的标签。手动触发同样检出标签对应提交，不会使用默认分支的应用代码；该标签中必须包含所需打包脚本。构建时自动将标签去掉 `v` 后写入 CI 工作区的 `package.json`，作为应用及安装包版本，不会提交或回写仓库；仓库内的 `version` 仍用于本地构建。标签支持 `v0.2.0-beta.1` 等预发布版本；带预发布后缀的 Release 不会标记为最新稳定版。
+
+### Release 版本介绍来源
+
+首次创建 Release 时，工作流通过 `gh release create --generate-notes` 请求 GitHub 自动生成发布说明，通常包括自上一版本以来合并的 PR、贡献者及完整变更对比链接；不是根据代码内容生成的功能总结，也不直接使用 tag 注释。没有 PR 时，自动说明可能比较简略。可在 GitHub 的 Releases 页面点击 Edit，手动补充面向用户的版本介绍。重复运行已有版本只更新状态和附件，不覆盖已有标题与正文。
+
+发布使用 GitHub 内置 `GITHUB_TOKEN`，无需额外配置密钥；仓库需启用 Actions，且组织策略须允许发布任务使用 `contents: write`。重复运行会更新同名 Release 附件。同一标签的任务串行执行，构建失败不会进入发布任务。构建产物还会在 Actions 保留 7 天。
+
+Windows 包未签名，首次启动可能触发系统安全提示。便携 ZIP 解压到可写目录后运行 `Pi Runner.exe`；“便携”指无需安装，不表示应用数据全部保存在程序目录。云端构建通过不等同于目标系统实机验收。
 
 ## 应用图标
 

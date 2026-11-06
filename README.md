@@ -10,6 +10,17 @@ Pi Runner 是一款本地运行的桌面 AI 编程助手。它让你通过对话
 - **查看与恢复**：使用独立影子 Git 保存项目快照，按轮查看文件差异，并恢复文件改动，不修改项目自身的 Git 历史。
 - **Skill**：创建或导入本地 Skill，按任务使用。
 
+## 下载发行版
+
+在本仓库的 **Releases** 页面下载 Windows x64 版本：
+
+- `pi-runner-setup.exe`：安装包。
+- `pi-runner-portable.zip`：解压到可写目录后运行 `Pi Runner.exe`，无需安装。
+
+Windows 包暂未签名，系统可能提示未知发布者，请确认下载来源。macOS 打包配置已预留，暂不自动构建和发布。
+
+维护者推送 `v*` 版本标签即可自动发布，构建版本自动取自标签，无需修改 `package.json`，也可在 Actions 中手动指定已有标签，详见[自动发布说明](docs/development-guide.md#github-自动发布)。
+
 ## 开始使用
 
 需要 Node.js 24+、pnpm 12.6.0 和系统 Git：

@@ -11,14 +11,15 @@ function getExportOptions(mode, host = process.platform) {
   const options = {
     win: { host: 'win32', platform: Platform.WINDOWS, target: 'nsis' },
     'win-all': { host: 'win32', platform: Platform.WINDOWS, target: 'dir' },
+    'win-release': { host: 'win32', platform: Platform.WINDOWS, target: 'dir' },
     'win-portable': { host: 'win32', platform: Platform.WINDOWS, target: 'portable' },
     'win-zip': { host: 'win32', platform: Platform.WINDOWS, target: 'zip' },
     mac: { host: 'darwin', platform: Platform.MAC, target: 'dmg' },
     dir: { host, platform: Platform.current(), target: 'dir' },
   }
-  if (!Object.hasOwn(options, mode)) throw new Error('请选择有效的导出类型：win-all、win、win-portable、win-zip、mac、dir。')
+  if (!Object.hasOwn(options, mode)) throw new Error('请选择有效的导出类型：win-release、win-all、win、win-portable、win-zip、mac、dir。')
   const option = options[mode]
-  if (option.host !== host) throw new Error('请在对应系统上导出发行包：Windows 使用 win-all / win / win-portable / win-zip，macOS 使用 mac。')
+  if (option.host !== host) throw new Error('请在对应系统上导出发行包：Windows 使用 win-release / win-all / win / win-portable / win-zip，macOS 使用 mac。')
   return option
 }
 
@@ -45,7 +46,7 @@ async function exportRelease(mode) {
   const option = getExportOptions(mode)
   const stagingDir = path.join(projectDir, 'build-work', mode)
   const destination = path.join(projectDir, 'release')
-  const windowsRelease = ['win-all', 'win', 'win-portable', 'win-zip'].includes(mode)
+  const windowsRelease = ['win-release', 'win-all', 'win', 'win-portable', 'win-zip'].includes(mode)
   const nativeWindows = windowsRelease && mode !== 'win-zip'
   const config = { directories: { output: stagingDir }, afterPack: verifyPackagedRuntime }
   if (option.platform === Platform.WINDOWS) {
@@ -80,7 +81,7 @@ async function exportRelease(mode) {
         return results.map(result => result.value)
       })())
     }
-    if (mode === 'win-all' || mode === 'win-zip') {
+    if (mode === 'win-release' || mode === 'win-all' || mode === 'win-zip') {
       tasks.push(compressDirectory({ projectDir, stagingDir, zip: true }).then(file => [file]))
     }
     // 等待全部子进程结束后再报告失败，避免后台仍在写入产物。

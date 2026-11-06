@@ -28,6 +28,7 @@ import { collectCodeReferences } from '../../shared/code-preview'
 import { agentSystemPrompt } from './pi-system-prompt'
 import { ConversationWorkspace } from './conversation-workspace'
 import { SUMMARY_INSTRUCTION } from './summary-prompt'
+import { ToolArgumentProgress } from './tool-argument-progress'
 
 const toolActions: Record<string, string> = {
   bash: '运行命令',
@@ -450,10 +451,15 @@ export class PiAgentService {
     const outputText = (result: { content?: { type: string; text?: string }[] } | undefined): string =>
       (result?.content ?? []).filter(block => block.type === 'text').map(block => block.text ?? '').join('\n')
     let modelStatus = '正在连接模型…', lastStatus = ''
+    let receivedBytes: number | undefined
+    let lastReceivedBytes: number | undefined
+    const toolArgumentBytes = new ToolArgumentProgress()
     const status = (text: string, resetText = false): void => {
-      if (text === lastStatus && !resetText) return
+      const bytes = text === modelStatus ? receivedBytes : undefined
+      if (text === lastStatus && bytes === lastReceivedBytes && !resetText) return
       lastStatus = text
-      publish({ type: 'status', text, ...(resetText ? { resetText: true } : {}) })
+      lastReceivedBytes = bytes
+      publish({ type: 'status', text, receivedBytes: bytes, ...(resetText ? { resetText: true } : {}) })
     }
     const refreshStatus = (): void => {
       if (signal.aborted) { status('正在停止任务…'); return }
@@ -669,11 +675,17 @@ export class PiAgentService {
         }
         if (event.type === 'message_update') {
           const update = event.assistantMessageEvent
+          receivedBytes = undefined
           if (update.type === 'text_start' || update.type === 'text_delta') modelStatus = '正在生成回复…'
           if (update.type === 'thinking_start' || update.type === 'thinking_delta') modelStatus = '正在思考…'
           if (update.type === 'toolcall_start' || update.type === 'toolcall_delta' || update.type === 'toolcall_end') {
-            const call = update.partial.content[update.contentIndex]
-            modelStatus = call?.type === 'toolCall' && toolActions[call.name] ? `正在准备${toolActions[call.name]}...` : '正在准备工具调用…'
+            const call = update.type === 'toolcall_end' ? update.toolCall : update.partial.content[update.contentIndex]
+            receivedBytes = toolArgumentBytes.update(update.contentIndex, update.type, update.type === 'toolcall_delta' ? update.delta : undefined, call)
+            modelStatus = call?.type === 'toolCall'
+              ? ['write', 'write_many'].includes(call.name) ? '正在生成写入内容…'
+                : ['edit', 'edit_many'].includes(call.name) ? '正在生成编辑内容…'
+                  : `正在生成${toolActions[call.name] ?? call.name}的调用参数…`
+              : '正在生成工具调用参数…'
           }
           refreshStatus()
           if (update.type === 'text_delta') { publish({ type: 'text', text: update.delta }); trackOutputDelta(update.delta) }
@@ -683,13 +695,14 @@ export class PiAgentService {
             scheduleTranscript()
           }
         }
-        if (event.type === 'message_start' && event.message.role === 'assistant') { completedResponse = false; callStarted = performance.now(); modelStatus = '正在等待模型回复…'; status(modelStatus, true) }
+        if (event.type === 'message_start' && event.message.role === 'assistant') { receivedBytes = undefined; toolArgumentBytes.clear(); completedResponse = false; callStarted = performance.now(); modelStatus = '正在等待模型回复…'; status(modelStatus, true) }
         // SDK 先通知订阅者，再同步保存消息；等当前调用栈结束后读取，
         // 同时包含工具结果，避免执行列表落后一条甚至一整次模型调用。
         if (event.type === 'message_end' && ['user', 'assistant', 'toolResult'].includes(event.message.role)) {
           scheduleTranscript()
         }
         if (event.type === 'tool_execution_start') {
+          receivedBytes = undefined
           const skill = displaySkills.get(String(event.args?.skillId ?? ''))
           // 名称优先从技能列表映射；调用时保存快照，供技能删除后的历史记录使用。
           if (skill) manager.appendCustomEntry('pi-runner-skill-call', { toolCallId: event.toolCallId, name: skill.name })

@@ -213,6 +213,8 @@ export interface AgentEvent {
   approvalId?: string
   text?: string
   resetText?: boolean
+  /** 当前工具调用已接收的参数字节数，不含网络协议开销。 */
+  receivedBytes?: number
   messages?: ChatMessage[]
   transcriptPatch?: import('./transcript-updates').TranscriptPatch
   snapshot?: AgentSnapshot

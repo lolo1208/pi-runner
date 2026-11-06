@@ -93,7 +93,7 @@ function readOnlyStatements(input: string): string[] | undefined {
     if (character === '"' || character === "'") { quote = character; continue }
     // POSIX 转义和通配符展开可能把看似普通的实参变成 --pre/-o 等选项。
     if (process.platform !== 'win32' && /[\\*?]/.test(character)) return undefined
-    if (/[<>(){}#]/.test(character)) return undefined
+    if (/[<>(){}]/.test(character) || character === '#' && (index === 0 || /[\s;&|]/.test(command[index - 1]))) return undefined
     if (character === '&' && !command.slice(start, index).trim() && /\s/.test(command[index + 1] ?? '')) continue
     if (character === ';' || character === '\n' || character === '\r' || character === '|' || character === '&' && command[index + 1] === character) {
       const statement = command.slice(start, index).trim()
@@ -265,7 +265,9 @@ function developerNeedsReview(program: string, args: string[]): boolean {
   if (program === 'mvnw') program = 'mvn'
   if (program === 'gradlew') program = 'gradle'
   if (args.some(value => /^(?:publish|unpublish|login|logout|adduser|token|owner|team|deploy|release)$/i.test(value) || /(?:^|:)deploy(?:$|@)/i.test(value) || /^publish(?:To|All|Plugins)/.test(value))) return true
-  if (args.some(value => /^(?:clean|cleanall|distclean|mrproper|clobber|purge|prune|uninstall|remove|uninstall-self|self-uninstall)$/i.test(value) || /^--(?:force|break-system-packages|delete|prune|clear|wipe|reset)(?:=|$)/i.test(value))) return true
+  // 项目依赖移除属于包管理器的常规开发操作；全局范围及危险参数仍由后续规则审核。
+  const localDependencyRemoval = ['npm', 'pnpm', 'yarn'].includes(program) && ['remove', 'uninstall'].includes(args[0])
+  if (args.some((value, index) => !(localDependencyRemoval && index === 0) && /^(?:clean|cleanall|distclean|mrproper|clobber|purge|prune|uninstall|remove|uninstall-self|self-uninstall)$/i.test(value) || /^--(?:force|break-system-packages|delete|prune|clear|wipe|reset)(?:=|$)/i.test(value))) return true
   if (program === 'rustup') return true
   if (program === 'cargo' && ['install', 'uninstall'].includes(args[0])) return true
   if (program === 'uv' && ['tool', 'python', 'self'].includes(args[0])) return true

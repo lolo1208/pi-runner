@@ -216,6 +216,7 @@ function ModelChat({ initialNativeHistory, onHistoryRestored, onRetainChange, no
     return () => clearTimeout(timer)
   }, [requestId, outputSpeed])
   const [agentStatus, setAgentStatus] = useState('')
+  const [receivedBytes, setReceivedBytes] = useState<number | undefined>()
   const [execution, setExecution] = useState<{ model: string; provider: ProviderId; startedAt: number; firstMessage: number }>()
   const activeRequest = useRef<string | null>(null)
   const transcriptRef = useRef(messages)
@@ -269,7 +270,7 @@ function ModelChat({ initialNativeHistory, onHistoryRestored, onRetainChange, no
     }
     if (event.type === 'text') streamBuffer.append(event.text ?? '', event.resetText)
     if (event.type === 'speed' && event.speed) setOutputSpeed(event.speed)
-    if (event.type === 'status') { setAgentStatus(event.text ?? ''); if (event.resetText) streamBuffer.clear() }
+    if (event.type === 'status') { setAgentStatus(event.text ?? ''); setReceivedBytes(event.receivedBytes); if (event.resetText) streamBuffer.clear() }
     if (event.type === 'transcript' && event.messages) {
       nativeHistory.current = true
       historyRestoredCallback.current?.(true)
@@ -478,7 +479,7 @@ function ModelChat({ initialNativeHistory, onHistoryRestored, onRetainChange, no
       try { unwrapModelResult(await window.piRunner.respondToolApproval(fullConfirmation.requestId, conversationId, fullConfirmation.approval.id, allow)) }
       catch (e) { setError(e instanceof Error ? e.message : '权限确认失败，请重试') }
     }} />}
-    <ChatTranscript onDeleteRound={deleteRound} deletingRound={deletingRound || !historyReady} notificationNavigationRequest={historyReady ? notificationNavigationRequest : 0} project={project} active={active} scrollToLatestRequest={scrollToLatestRequest} snapshots={snapshots} messages={messages} pendingMessage={pending?.message ?? null} streamedText={streamedText} agentStatus={stopping ? '正在停止任务…' : agentStatus} isBusy={Boolean(requestId)} execution={execution} hasProfile={Boolean(profile)} settingsDisabled={settingsDisabled} onOpenSettings={onOpenSettings} />
+    <ChatTranscript onDeleteRound={deleteRound} deletingRound={deletingRound || !historyReady} notificationNavigationRequest={historyReady ? notificationNavigationRequest : 0} project={project} active={active} scrollToLatestRequest={scrollToLatestRequest} snapshots={snapshots} messages={messages} pendingMessage={pending?.message ?? null} streamedText={streamedText} receivedBytes={stopping ? undefined : receivedBytes} agentStatus={stopping ? '正在停止任务…' : agentStatus} isBusy={Boolean(requestId)} execution={execution} hasProfile={Boolean(profile)} settingsDisabled={settingsDisabled} onOpenSettings={onOpenSettings} />
     <div className="composer-wrap" hidden={!active}>
       {requestId && !interaction && planProgress && <div className="plan-waiting plan-progress" role="status"><LoaderCircle size={18} className="plan-progress-spinner" aria-hidden="true" /><span>{planProgress}</span></div>}
       {interaction && <div className="plan-waiting"><span>{interaction.kind === 'questions' ? '计划正在等待你的回答' : '计划已准备好，等待你的批准'}</span><Button variant="outline" onClick={() => setInteractionOpen(true)}>{interaction.kind === 'questions' ? '回答问题' : '审阅计划'}</Button></div>}

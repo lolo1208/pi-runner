@@ -1,0 +1,173 @@
+name: 构建并发布发行包
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '已有版本标签，例如 v0.1.0 或 v0.2.0-beta.1'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+      sha: ${{ steps.commit.outputs.sha }}
+    steps:
+      - name: 校验版本标签
+        id: version
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+            echo '标签必须形如 v0.1.0 或 v0.2.0-beta.1' >&2
+            exit 1
+          fi
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            echo 'prerelease=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'prerelease=false' >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ steps.version.outputs.tag }}
+          persist-credentials: false
+      - name: 固定构建提交
+        id: commit
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  windows:
+    needs: prepare
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - name: 安装锁定依赖
+        run: pnpm install --frozen-lockfile
+      # 仅修改 CI 工作区，不提交或回写仓库；安装依赖后再写入版本。
+      - name: 从标签设置发行版本
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          node -e 'const fs = require("node:fs"); const file = "package.json"; const pkg = JSON.parse(fs.readFileSync(file, "utf8")); pkg.version = process.env.RELEASE_TAG.slice(1); fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + "\n"); console.log(`发行版本：${pkg.version}`);'
+      - name: 准备 Electron 运行时
+        run: pnpm electron:install
+      - name: 生成应用图标
+        run: pnpm icons:generate
+      - name: 编译 Windows x64 安装包和便携 ZIP
+        run: pnpm dist:win:release
+      - name: 校验发行文件
+        shell: pwsh
+        run: |
+          foreach ($file in @('release/pi-runner-setup.exe', 'release/pi-runner-portable.zip')) {
+            if (!(Test-Path -LiteralPath $file -PathType Leaf) -or (Get-Item -LiteralPath $file).Length -eq 0) {
+              throw "发行文件缺失或为空：$file"
+            }
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: |
+            release/pi-runner-setup.exe
+            release/pi-runner-portable.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  # macOS 暂不编译。启用时取消本任务注释，并在 publish.needs 中加入 macos，
+  # 同时在 publish 的下载、校验和上传步骤加入 macos-release 的 DMG。
+  # 正式公开分发前应配置 Apple 签名与公证密钥；当前模板生成未签名 DMG。
+  # macos:
+  #   needs: prepare
+  #   runs-on: macos-14
+  #   timeout-minutes: 45
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #       with:
+  #         ref: ${{ needs.prepare.outputs.sha }}
+  #         persist-credentials: false
+  #     - uses: pnpm/action-setup@v4
+  #     - uses: actions/setup-node@v4
+  #       with:
+  #         node-version: '24'
+  #         cache: pnpm
+  #     - run: pnpm install --frozen-lockfile
+  #     - name: 从标签设置发行版本
+  #       env:
+  #         RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+  #       run: |
+  #         node -e 'const fs = require("node:fs"); const file = "package.json"; const pkg = JSON.parse(fs.readFileSync(file, "utf8")); pkg.version = process.env.RELEASE_TAG.slice(1); fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + "\n");'
+  #     - run: pnpm electron:install
+  #     - run: pnpm icons:generate
+  #     - run: pnpm dist:mac
+  #       env:
+  #         CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+  #     - uses: actions/upload-artifact@v4
+  #       with:
+  #         name: macos-release
+  #         path: release/*.dmg
+  #         if-no-files-found: error
+  #         retention-days: 7
+
+  publish:
+    needs: [prepare, windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-release
+          path: release
+      - name: 创建 Release 并更新下载附件
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+        run: |
+          test -s release/pi-runner-setup.exe
+          test -s release/pi-runner-portable.zip
+          flags=()
+          if [[ "$PRERELEASE" == true ]]; then
+            flags+=(--prerelease --latest=false)
+          fi
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            edit_flags=()
+            if [[ "$PRERELEASE" == true ]]; then edit_flags+=(--latest=false); fi
+            gh release edit "$RELEASE_TAG" --draft=false --prerelease="$PRERELEASE" "${edit_flags[@]}"
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --title "Pi Runner $RELEASE_TAG" --generate-notes "${flags[@]}"
+          fi
+          gh release upload "$RELEASE_TAG" release/pi-runner-setup.exe release/pi-runner-portable.zip --clobber
+          {
+            echo '## 发行下载'
+            echo "- [Windows x64 安装包](https://github.com/$GH_REPO/releases/download/$RELEASE_TAG/pi-runner-setup.exe)"
+            echo "- [Windows x64 解压即用 ZIP](https://github.com/$GH_REPO/releases/download/$RELEASE_TAG/pi-runner-portable.zip)"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -19,7 +19,7 @@ export function literalCommand(command: string): string[] | undefined {
         value += character
       } else {
         if (/[ \t]/.test(character)) break
-        if (/[;&|<>"'(){}\[\]#]/.test(character)) return undefined
+        if (/[;&|<>"'(){}\[\]]/.test(character) || character === '#' && !value) return undefined
         value += character
       }
     }

@@ -14,6 +14,7 @@
     "preview": "pnpm electron:install && electron-vite preview",
     "test": "vitest run",
     "dist:win": "pnpm build && node scripts/export-release.cjs win",
+    "dist:win:release": "pnpm build && node scripts/export-release.cjs win-release",
     "dist:win:all": "pnpm build && node scripts/export-release.cjs win-all",
     "dist:win:portable": "pnpm build && node scripts/export-release.cjs win-portable",
     "dist:win:zip": "pnpm build && node scripts/export-release.cjs win-zip",
