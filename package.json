@@ -92,9 +92,11 @@
     "asar": true,
     "asarUnpack": [
       "**/node_modules/koffi/**",
-      "**/node_modules/node-pty/**"
+      "**/node_modules/node-pty/**",
+      "out/main/chunks/inert-mcp-*.mjs"
     ],
     "extraResources": [
+      { "from": "resources/third-party", "to": "third-party" },
       {
         "from": "resources/icons",
         "to": "icons",

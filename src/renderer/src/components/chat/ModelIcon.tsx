@@ -92,6 +92,7 @@ const brands: ModelBrand[] = [
   { pattern: /gpt|chatgpt|codex|(?:^|\/)whisper-large-v3(?:[-./]|$)|(?:^|[/])o[134](?:[-:/]|$)/i, label: 'OpenAI', icon: openai },
 ]
 const providers: Partial<Record<ProviderId, ModelIconEntry>> = {
+  'claude-subscription': { label: 'Claude 订阅', icon: claude },
   google: { label: 'Google AI Studio', icon: gemini },
   openai: { label: 'OpenAI', icon: openai }, chatgpt: { label: 'OpenAI', icon: openai },
   anthropic: { label: 'Claude', icon: claude }, deepseek: { label: 'DeepSeek', icon: deepseek },

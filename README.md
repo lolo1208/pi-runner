@@ -40,6 +40,7 @@ pnpm build
 Windows 可使用 `pnpm.cmd`。打包和开发约定见[开发指南](docs/development-guide.md)。
 
 - [使用指南](docs/user-guide.md)：模型配置、计划模式与权限
+- [Claude 订阅](docs/claude-subscription.md)：官方 CLI 安装、绑定、计费保护与使用限制
 - [开发指南](docs/development-guide.md)：开发、打包与提示词维护
 - [技术架构](docs/architecture.md)：进程、数据、快照策略与 LLM 工具
 - [模型数据与维护来源](docs/model-data-sources.md)：价格、默认参数、厂商国家及维护依据

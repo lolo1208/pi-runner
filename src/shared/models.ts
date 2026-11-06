@@ -1,5 +1,18 @@
 export type ModelProtocol = 'openai-compatible' | 'anthropic' | 'google-generative-ai'
-export type ProviderId = 'google' | 'chatgpt' | 'openai' | 'openrouter' | 'anthropic' | 'deepseek' | 'ollama' | 'vllm' | 'custom'
+export type ProviderId = 'claude-subscription' | 'google' | 'chatgpt' | 'openai' | 'openrouter' | 'anthropic' | 'deepseek' | 'ollama' | 'vllm' | 'custom'
+export interface ClaudeSubscriptionStatus {
+  proxy?: string
+  available: boolean
+  loggedIn: boolean
+  subscription: boolean
+  bound: boolean
+  busy?: 'login' | 'install' | 'logout'
+  plan?: string
+  version?: string
+  rateLimit?: { status?: string; resetsAt?: number; type?: string }
+  url?: string
+  error?: string
+}
 export interface DeepseekBalance {
   fetchedAt: number
   available?: boolean
@@ -80,7 +93,7 @@ export function thinkingLabel(value: boolean | string | null | undefined): strin
 }
 export function selectedModelThinking(profile: ModelProfile, controls: ModelDescriptor['thinking']): boolean | string | null {
   const values = controls?.values ?? []
-  const selected = profile.provider === 'chatgpt' || profile.provider === 'openrouter' || profile.provider === 'google' || profile.provider === 'deepseek' ? profile.thinkingLevel ?? (profile.thinking === false ? 'off' : null) : profile.ollamaThinkingLevel ?? profile.thinking
+  const selected = profile.provider === 'claude-subscription' || profile.provider === 'chatgpt' || profile.provider === 'openrouter' || profile.provider === 'google' || profile.provider === 'deepseek' ? profile.thinkingLevel ?? (profile.thinking === false ? 'off' : null) : profile.ollamaThinkingLevel ?? profile.thinking
   if (selected != null && values.includes(selected)) return selected
   // 保留用户选择；未配置时优先模型声明的默认值，再回退到中档或开启。
   if (controls?.default != null && values.includes(controls.default)) return controls.default
@@ -201,6 +214,7 @@ export interface AgentEvent {
   text?: string
   resetText?: boolean
   messages?: ChatMessage[]
+  transcriptPatch?: import('./transcript-updates').TranscriptPatch
   snapshot?: AgentSnapshot
   speed?: OutputSpeed
 }
@@ -224,6 +238,7 @@ export interface OutputSpeed {
 export type ModelResult<T> = { ok: true; value: T } | { ok: false; error: string }
 export interface ProviderPreset { id: ProviderId; label: string; protocol: ModelProtocol; baseUrl: string }
 export const PROVIDER_PRESETS: ProviderPreset[] = [
+  { id: 'claude-subscription', label: 'Claude 订阅', protocol: 'anthropic', baseUrl: 'https://claude-code.local' },
   { id: 'google', label: 'Google AI Studio', protocol: 'google-generative-ai', baseUrl: 'https://generativelanguage.googleapis.com/v1beta' },
   { id: 'chatgpt', label: 'ChatGPT 订阅', protocol: 'openai-compatible', baseUrl: 'https://chatgpt.com/backend-api' },
   { id: 'openai', label: 'OpenAI', protocol: 'openai-compatible', baseUrl: 'https://api.openai.com/v1' },

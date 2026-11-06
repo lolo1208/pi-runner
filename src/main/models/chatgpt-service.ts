@@ -198,7 +198,7 @@ export class ChatgptService {
         pricing: chatgptReferencePricing(model.id),
         thinking: { values, default: model.defaultThinkingLevel ?? (values.includes('medium') ? 'medium' : values[0]) } }
     })
-    return this.settings.syncChatgpt(descriptors)
+    return this.settings.syncChatgpt(descriptors, 'chatgpt', this.catalogSource === 'account')
   }
   async modelInfo(value: unknown): Promise<ModelDescriptor> {
     const id = requiredString(value, '模型 ID', 200)

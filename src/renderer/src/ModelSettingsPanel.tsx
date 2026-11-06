@@ -12,6 +12,7 @@ import { PROVIDER_PRESETS, selectedModelThinking, thinkingLabel, type ModelDescr
 import { ModelProfileFields } from './components/ModelProfileFields'
 import { ModelProfileActions } from './components/ModelProfileActions'
 import { unwrapModelResult } from './model-result'
+import { ClaudeSubscriptionAuthorization } from './components/ClaudeSubscriptionAuthorization'
 import { ChatgptAuthorization } from './components/ChatgptAuthorization'
 import { OpenrouterCatalog } from './components/OpenrouterCatalog'
 import { ModelPriceTag } from './components/ModelPriceTag'
@@ -129,14 +130,19 @@ export default function ModelSettingsPanel({ settings, onChange, onBusyChange }:
     .sort((a, b) => Number(a.available === false) - Number(b.available === false)
       || Number(!sortSnapshot.current.enabled.get(modelKey(a))) - Number(!sortSnapshot.current.enabled.get(modelKey(b)))
       || b.name.localeCompare(a.name, 'zh-CN', { numeric: true, sensitivity: 'base' }))
-  const options = (['chatgpt', 'openrouter', 'google', 'deepseek', 'custom', 'ollama'] as const).filter(provider => `${providerName(provider)} ${provider === 'chatgpt' ? '订阅 OpenAI ChatGPT' : provider === 'ollama' ? '本地' : provider === 'google' ? 'Gemini 谷歌 API 云端' : provider === 'deepseek' ? '深度求索 官方 API' : 'API 云端 多厂家模型'}`.toLowerCase().includes(providerQuery.trim().toLowerCase()))
+  const options = (['claude-subscription', 'chatgpt', 'openrouter', 'google', 'deepseek', 'custom', 'ollama'] as const).filter(provider => `${providerName(provider)} ${provider === 'chatgpt' ? '订阅 OpenAI ChatGPT' : provider === 'ollama' ? '本地' : provider === 'google' ? 'Gemini 谷歌 API 云端' : provider === 'deepseek' ? '深度求索 官方 API' : 'API 云端 多厂家模型'}`.toLowerCase().includes(providerQuery.trim().toLowerCase()))
   const customSetup = dialog === 'configure' && !editing && profile.provider === 'custom'
+  const claudeSubscription = profile.provider === 'claude-subscription' && !editing
   const subscription = profile.provider === 'chatgpt' && !editing
   const connectingOllama = dialog === 'configure' && profile.provider === 'ollama' && !editing
   const connectingOpenrouter = dialog === 'configure' && profile.provider === 'openrouter' && !editing
   const connectingGoogle = dialog === 'configure' && profile.provider === 'google' && !editing
   const connectingDeepseek = dialog === 'configure' && profile.provider === 'deepseek' && !editing
   useEffect(() => {
+    if (profile.provider === 'claude-subscription' && dialog === 'configure' && editing) {
+      setModelInfo(settings.providers?.find(item => item.provider === 'claude-subscription')?.models.find(item => item.id === profile.model) ?? null)
+      setInfoError(''); setInfoLoading(false); return
+    }
     if (profile.provider === 'custom' && dialog === 'configure' && editing) {
       setModelInfo(settings.compatibleConnections?.find(item => item.id === profile.compatibleConnectionId)?.models.find(item => item.id === profile.model) ?? null)
       setInfoError(''); setInfoLoading(false); return
@@ -199,12 +205,12 @@ export default function ModelSettingsPanel({ settings, onChange, onBusyChange }:
     const normalizedProfile = { ...profile,
       name: profile.provider === 'custom' ? profile.model.trim().slice(0, 80) : profile.provider === 'deepseek' ? profile.model.trim() : profile.name,
       contextTokens: contextTokens == null ? null : profile.provider === 'custom' ? contextTokens : Math.floor(contextTokens / 1000) * 1000,
-      temperature: profile.provider === 'chatgpt' ? null : profile.temperature,
+      temperature: profile.provider === 'claude-subscription' || profile.provider === 'chatgpt' ? null : profile.temperature,
       maxTokens: systemOutputTokens(profile.provider) ? automaticOutputTokens({ ...profile, contextTokens: contextTokens == null ? null : Math.floor(contextTokens / 1000) * 1000 }, modelInfo) : Math.floor(profile.maxTokens ?? 2048),
       ...(systemOutputTokens(profile.provider) ? { autoMaxTokens: true } : {}),
       timeoutSeconds: Math.floor(profile.timeoutSeconds ?? (profile.provider === 'ollama' || profile.provider === 'google' ? 120 : 60)) }
     const selected = selectedModelThinking(profile, modelInfo?.thinking)
-    if (profile.provider === 'chatgpt' || profile.provider === 'openrouter' || profile.provider === 'google' || profile.provider === 'deepseek') {
+    if (profile.provider === 'claude-subscription' || profile.provider === 'chatgpt' || profile.provider === 'openrouter' || profile.provider === 'google' || profile.provider === 'deepseek') {
       normalizedProfile.thinkingLevel = typeof selected === 'string' ? selected as ModelProfile['thinkingLevel'] : null
       normalizedProfile.thinking = null
     } else if (profile.provider === 'ollama') {
@@ -290,6 +296,7 @@ export default function ModelSettingsPanel({ settings, onChange, onBusyChange }:
         {(currentProvider === 'custom' || customSetup) ? <CompatibleConnections settings={settings} onChange={next => { onChange(next); setSelected('custom') }} onConfigure={item => configure('custom', item)} creating={customSetup} onCloseCreate={() => setDialog(null)} onBack={() => setDialog('choose')} onBusyChange={busy => { setIsBusy(busy); onBusyChange?.(busy) }} /> : currentProvider ? <>
           <header className="provider-detail-heading"><ProviderIcon provider={currentProvider} /><div><h3>{providerName(currentProvider)}</h3></div><AlertDialog open={removeOpen} onOpenChange={open => { if (!isBusy) setRemoveOpen(open) }}><AlertDialogTrigger asChild><Button variant="ghost" className="provider-remove compatible-remove-connection" disabled={isBusy}>移除</Button></AlertDialogTrigger><AlertDialogContent><AlertDialogTitle>移除 {providerName(currentProvider)} 配置？</AlertDialogTitle><AlertDialogDescription>将删除该供应商的连接、已保存密钥和所有模型配置{currentProvider === 'chatgpt' ? '，并退出 ChatGPT 账号' : ''}。已有对话和本地模型文件不会删除。此操作无法撤销。</AlertDialogDescription><AlertDialogFooter><AlertDialogCancel asChild><Button variant="outline" disabled={isBusy}>取消</Button></AlertDialogCancel><Button variant="destructive" disabled={isBusy} onClick={() => { void run(async () => { const next = unwrapModelResult(await window.piRunner.removeModelProvider(currentProvider)); onChange(next); setSelected(null); setQuery(''); setRemoveOpen(false); toast.success('已移除供应商配置') }) }}>确认移除</Button></AlertDialogFooter></AlertDialogContent></AlertDialog></header>
           {currentProvider === 'ollama' && <div className="provider-connection-summary"><span>{currentOllamaUrl}</span><Button size="sm" variant="ghost" disabled={isBusy} onClick={() => configure('ollama')}>配置连接</Button></div>}
+          {currentProvider === 'claude-subscription' && !dialog && <ClaudeSubscriptionAuthorization onChange={onChange} />}
           {currentProvider === 'chatgpt' && !dialog && <ChatgptAuthorization onChange={onChange} />}
           {currentProvider === 'openrouter' && <div className="openrouter-connection"><Button variant="outline" disabled={isBusy} onClick={() => configure('openrouter')}>配置连接</Button><Button variant="outline" disabled={isBusy} onClick={() => connectOpenrouter(true)}><RefreshCw size={15} />更新模型</Button></div>}
           {currentProvider === 'google' && <div className="openrouter-connection"><Button variant="outline" disabled={isBusy} onClick={() => configure('google')}>配置连接</Button><Button variant="outline" disabled={isBusy} onClick={() => connectGoogle(true)}><RefreshCw size={15} />更新模型</Button></div>}
@@ -315,15 +322,15 @@ export default function ModelSettingsPanel({ settings, onChange, onBusyChange }:
     <Modal open={dialog !== null && !customSetup} onOpenChange={open => { if (!open && !isBusy) setDialog(null) }} closeLabel="关闭供应商配置" closeDisabled={isBusy}
       contentClassName={`provider-dialog${editing ? ' model-configuration-dialog' : ''}${customSetup ? ' compatible-setup-dialog' : ''}`}
       title={dialog === 'choose' ? '添加供应商' : editing ? <span className="model-name-with-icon model-priced-name"><span aria-hidden="true"><ModelIcon model={profile.model} provider={profile.provider} size={18} /></span><span className="model-price-name-text">{profile.model}</span><ModelPriceTag descriptor={modelInfo ?? descriptors.get(`${profile.provider}:${profile.model}`)} /></span> : `${providers.includes(profile.provider) ? '连接' : '添加'} · ${providerName(profile.provider)}`}
-      headingExtra={!editing && <div className="provider-steps" aria-label="添加进度"><span data-active={dialog === 'choose'}>1 选择供应商</span><ChevronRight size={13} /><span data-active={dialog === 'configure'}>2 配置连接</span></div>}
+      headingExtra={!editing && <div className="provider-steps" aria-label="添加进度"><span data-active={dialog === 'choose'}>选择供应商</span><ChevronRight size={13} /><span data-active={dialog === 'configure'}>配置连接</span></div>}
       onCloseAutoFocus={event => { event.preventDefault(); document.querySelector<HTMLButtonElement>('.provider-add')?.focus() }}>
       <div className="provider-dialog-body model-settings">
-          {!editing && <p className="provider-dialog-description">{dialog === 'choose' ? '选择要连接的账号、API 或本地服务。' : subscription ? '通过 ChatGPT 订阅账号使用 OpenAI 模型。' : connectingOllama ? '连接本机运行的 Ollama，自动获取已安装的模型。' : connectingGoogle ? '输入 Google AI Studio API Key，读取支持工具调用的 Gemini 模型。连接后请启用需要的模型。' : connectingDeepseek ? '输入 DeepSeek API Key，读取官方模型目录。连接后请启用需要的模型。' : connectingOpenrouter ? '输入 OpenRouter API Key，自动读取所有可调用模型。连接后展开厂商分组，配置并启用需要的模型。' : ''}</p>}
+          {!editing && !claudeSubscription && <p className="provider-dialog-description">{dialog === 'choose' ? '选择要连接的账号、API 或本地服务。' : subscription ? '通过 ChatGPT 订阅账号使用 OpenAI 模型。' : connectingOllama ? '连接本机运行的 Ollama，自动获取已安装的模型。' : connectingGoogle ? '输入 Google AI Studio API Key，读取支持工具调用的 Gemini 模型。连接后请启用需要的模型。' : connectingDeepseek ? '输入 DeepSeek API Key，读取官方模型目录。连接后请启用需要的模型。' : connectingOpenrouter ? '输入 OpenRouter API Key，自动读取所有可调用模型。连接后展开厂商分组，配置并启用需要的模型。' : ''}</p>}
           {dialog === 'choose' ? <>
             <div className="search-field"><Search size={15} /><Input aria-label="搜索供应商" placeholder="搜索供应商…" value={providerQuery} onChange={event => setProviderQuery(event.target.value)} /></div>
-            <div className="provider-options">{options.map(provider => <Button variant="ghost" key={provider} onClick={() => configure(provider)}><ProviderIcon provider={provider} /><span><strong>{providerName(provider)}</strong><small>{provider === 'chatgpt' ? '浏览器授权 · 支持复制链接' : provider === 'google' ? 'API Key 连接 · Gemini 原生协议' : provider === 'openrouter' ? 'API Key 连接 · 全部可调用模型' : provider === 'deepseek' ? 'API Key 连接 · DeepSeek 官方服务' : provider === 'custom' ? '自定义地址 · 模型目录或手动配置' : '本地运行，连接 Ollama 服务'}</small></span><ChevronRight size={17} /></Button>)}</div>
+            <div className="provider-options">{options.map(provider => <Button variant="ghost" key={provider} onClick={() => configure(provider)}><ProviderIcon provider={provider} /><span><strong>{providerName(provider)}</strong><small>{provider === 'claude-subscription' ? '官方 Claude Code · 订阅授权 · 实验性' : provider === 'chatgpt' ? '浏览器授权 · 支持复制链接' : provider === 'google' ? 'API Key 连接 · Gemini 原生协议' : provider === 'openrouter' ? 'API Key 连接 · 全部可调用模型' : provider === 'deepseek' ? 'API Key 连接 · DeepSeek 官方服务' : provider === 'custom' ? '自定义地址 · 模型目录或手动配置' : '本地运行，连接 Ollama 服务'}</small></span><ChevronRight size={17} /></Button>)}</div>
             {!options.length && <p className="provider-no-results">没有匹配的供应商。请尝试搜索名称、API 或兼容接口。</p>}
-          </> : subscription ? <div className="provider-subscription"><ChatgptAuthorization onChange={next => { onChange(next); setSelected('chatgpt') }} /></div> : connectingOpenrouter || connectingGoogle || connectingDeepseek ? <ApiProviderConnection name={connectingGoogle ? 'Google AI Studio' : connectingDeepseek ? 'DeepSeek' : 'OpenRouter'} apiKey={apiKey} hasApiKey={connectingGoogle ? googleConnection?.hasApiKey : connectingDeepseek ? deepseekConnection?.hasApiKey : openrouterConnection?.hasApiKey} encryptionAvailable={settings.encryptionAvailable} busy={isBusy} onKeyChange={setApiKey} onConnect={() => connectingGoogle ? connectGoogle() : connectingDeepseek ? connectDeepseek() : connectOpenrouter()} /> : connectingOllama ? <fieldset className="provider-connection-form" disabled={isBusy}>
+          </> : claudeSubscription ? <ClaudeSubscriptionAuthorization onChange={next => { onChange(next); setSelected('claude-subscription') }} /> : subscription ? <div className="provider-subscription"><ChatgptAuthorization onChange={next => { onChange(next); setSelected('chatgpt') }} /></div> : connectingOpenrouter || connectingGoogle || connectingDeepseek ? <ApiProviderConnection name={connectingGoogle ? 'Google AI Studio' : connectingDeepseek ? 'DeepSeek' : 'OpenRouter'} apiKey={apiKey} hasApiKey={connectingGoogle ? googleConnection?.hasApiKey : connectingDeepseek ? deepseekConnection?.hasApiKey : openrouterConnection?.hasApiKey} encryptionAvailable={settings.encryptionAvailable} busy={isBusy} onKeyChange={setApiKey} onConnect={() => connectingGoogle ? connectGoogle() : connectingDeepseek ? connectDeepseek() : connectOpenrouter()} /> : connectingOllama ? <fieldset className="provider-connection-form" disabled={isBusy}>
             <Label>本地服务地址<Input type="url" value={ollamaUrl} onChange={event => setOllamaUrl(event.target.value)} placeholder="http://localhost:11434" /></Label><p className="hint">请先启动 Ollama。本步骤只读取模型列表，不会下载或运行模型。</p><Button onClick={() => connectOllama(ollamaUrl, true)} disabled={!ollamaUrl.trim()}>连接并获取模型</Button>
           </fieldset> : <fieldset disabled={isBusy && !requestId}>
             <ModelProfileFields compactSetup={customSetup} profile={profile} savedProfile={saved} settings={settings} modelInfo={modelInfo} infoLoading={infoLoading} apiKey={apiKey} removeKey={removeKey} onFieldChange={update} onApiKeyChange={setApiKey} onRemoveKeyChange={remove => { setRemoveKey(remove); setApiKey('') }}>

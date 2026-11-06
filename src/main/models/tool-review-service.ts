@@ -1,3 +1,4 @@
+import { claudeSubscription } from './claude-subscription-service'
 import os from 'node:os'
 import path from 'node:path'
 import { ModelClient } from './model-client'
@@ -92,10 +93,10 @@ export class ToolReviewService {
       request.signal.throwIfAborted()
       const signal = AbortSignal.any([request.signal, AbortSignal.timeout(30000)])
       let text: string
-      if (selected.profile.provider === 'chatgpt') {
-        if (!this.chatgpt) return fallback
+      if (selected.profile.provider === 'chatgpt' || selected.profile.provider === 'claude-subscription') {
+        if (selected.profile.provider === 'chatgpt' && !this.chatgpt) return fallback
         const attachments = new PiAttachments(SessionManager.inMemory(request.cwd))
-        const provider = await this.chatgpt.createProvider(selected.profile, attachments)
+        const provider = await (selected.profile.provider === 'claude-subscription' ? claudeSubscription : this.chatgpt!).createProvider(selected.profile, attachments)
         signal.throwIfAborted()
         const startedAt = performance.now()
         const reply = await provider.runtime.completeSimple(provider.model, {

@@ -370,8 +370,9 @@
   background: var(--surface);
   width: min(420px, 100vw - 32px);
   color: var(--text);
-  border-radius: 12px;
-  padding: 22px;
+  border-radius: 16px;
+  padding: 24px;
+  overflow: hidden;
   position: fixed;
   top: 50%;
   left: 50%;
@@ -385,8 +386,9 @@
 }
 
 .alert-dialog-title {
+  margin: 0 0 8px;
   font-size: calc(16rem / 14);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .alert-dialog-description {
@@ -399,7 +401,10 @@
 .alert-dialog-footer {
   justify-content: flex-end;
   gap: 8px;
-  margin-top: 22px;
+  margin: 20px -24px -24px;
+  padding: 16px 24px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--muted) 4%, var(--surface));
   display: flex;
 }
 
@@ -688,16 +693,22 @@ to {
 }
 
 .task-row.running .task-item {
-  padding-right: 10px;
+  padding-right: calc(32rem / 14);
 }
 
 .task-row.running:hover .task-item,
 .task-row.running:has(:focus-visible) .task-item {
-  padding-right: 10px;
+  padding-right: calc(66rem / 14);
+}
+
+.task-row.running .task-running-status,
+.task-row.running .task-input-status {
+  position: absolute;
+  right: 10px;
 }
 
 @media (hover: none) {
-  .task-row.running .task-item { padding-right: 10px; }
+  .task-row.running .task-item { padding-right: calc(66rem / 14); }
 }
 
 .task-row.running .task-delete-button:disabled {

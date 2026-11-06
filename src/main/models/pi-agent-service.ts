@@ -23,6 +23,7 @@ import { PlanInteractionManager } from './plan-interactions'
 import { PLAN_INSTRUCTION, PLAN_READ_TOOLS, planTools } from './plan-tools'
 import { SkillStore } from '../skill-store'
 import { saveCodePreviewSnapshot } from '../code-preview-snapshots'
+import { TranscriptUpdates } from '../../shared/transcript-updates'
 import { collectCodeReferences } from '../../shared/code-preview'
 import { agentSystemPrompt } from './pi-system-prompt'
 import { ConversationWorkspace } from './conversation-workspace'
@@ -196,7 +197,9 @@ export class PiAgentService {
     const skillCallNames = new Map<string, string>()
     const aiReviews = new Map<string, import('../../shared/models').AiReviewDetail[]>()
     const results = new Map<string, { content: string; isError: boolean }>()
-    for (const entry of manager.getBranch()) {
+    const branch = manager.getBranch()
+    const entries = manager.getEntries()
+    for (const entry of branch) {
       if (entry.type === 'custom' && entry.customType === 'pi-runner-ai-review') {
         const data = entry.data as { toolCallId: string } & import('../../shared/models').AiReviewDetail
         if (['allow', 'ask', 'deny'].includes(data.decision)) {
@@ -224,7 +227,7 @@ export class PiAgentService {
     const codeSnapshots = new Map<string, string>()
     let lastMessageId: string | undefined
     // 使用原生历史中的快照记录定位轮次，旧会话无需猜测消息序号。
-    for (const entry of manager.getBranch()) {
+    for (const entry of branch) {
       if (entry.type === 'custom' && entry.customType === 'pi-runner-code-preview') {
         const data = entry.data as { entryId: string; snapshotId: string }
         codeSnapshots.set(data.entryId, data.snapshotId)
@@ -238,14 +241,14 @@ export class PiAgentService {
         snapshotHashes.set(lastMessageId, data.after.hash)
       }
     }
-    for (const entry of manager.getEntries()) if (entry.type === 'custom' && entry.customType === 'pi-runner-execution') {
+    for (const entry of entries) if (entry.type === 'custom' && entry.customType === 'pi-runner-execution') {
       const data = entry.data as { entryIds: string[]; execution: ChatExecution }
       for (const id of data.entryIds) executions.set(id, data.execution)
     }
-    for (const entry of manager.getEntries()) if (entry.type === 'custom' && entry.customType === 'pi-runner-files') {
+    for (const entry of entries) if (entry.type === 'custom' && entry.customType === 'pi-runner-files') {
       const data = entry.data as { id: string; message: ChatMessage }; attachments.set(data.id, data.message)
     }
-    return manager.getBranch().flatMap(entry => {
+    return branch.flatMap(entry => {
       // 问答与审阅由工具记录生成卡片，旧版辅助文字仍保留在会话文件中，避免重复展示。
       if (entry.type !== 'message' || (entry.message.role !== 'user' && entry.message.role !== 'assistant')) return []
       const message = entry.message
@@ -393,8 +396,21 @@ export class PiAgentService {
     const liveWork = new Map<string, Partial<ChatWorkItem>>()
     let outputTimer: ReturnType<typeof setTimeout> | undefined
     let liveAssistant: AssistantMessage | undefined
+    let projectedLeaf: string | null | undefined
+    let projectedMessages: ChatMessage[] = []
+    const transcriptUpdates = new TranscriptUpdates()
     const currentTranscript = (): ChatMessage[] => {
-      const messages = this.transcript(manager, displaySkills).map<ChatMessage>(message => !message.call || previousEntries.has(message.historyId ?? '') ? message : {
+      const leaf = manager.getLeafId()
+      if (leaf !== projectedLeaf) {
+        projectedMessages = this.transcript(manager, displaySkills)
+        projectedLeaf = leaf
+        // 工具结果已进入原生历史后，释放运行态中的输出副本。
+        for (const message of projectedMessages) for (const item of message.call?.work ?? []) {
+          if (item.kind === 'tool' && item.completed) liveWork.delete(item.id)
+        }
+      }
+      const messages = projectedMessages.map<ChatMessage>(message => !message.call || previousEntries.has(message.historyId ?? '')
+        || !message.call.work.some(item => item.kind === 'tool' && !item.completed) ? message : {
       ...message, call: { ...message.call, work: message.call.work.map(item => {
         if (item.kind !== 'tool' || item.completed) return item
         const live = liveWork.get(item.id)
@@ -412,7 +428,10 @@ export class PiAgentService {
           : []) }
       })
       // 工具开始事件已经给出了参数；即使原生历史尚未保存，也立即提供可展开的记录。
-      const recorded = new Set(messages.flatMap(message => message.call?.work.map(item => item.id) ?? []))
+      const recorded = new Set<string>()
+      if (activeTools.size) for (const message of messages) for (const item of message.call?.work ?? []) {
+        if (activeTools.has(item.id)) recorded.add(item.id)
+      }
       const pending = [...activeTools].filter(([id]) => !recorded.has(id)).map(([id, name]): ChatWorkItem => ({
         id, kind: 'tool', name, args: liveWork.get(id)?.args, content: '', completed: false,
         ...liveWork.get(id), ...(waitingTools.has(id) ? { state: 'waiting', stateText: waitingTools.get(id) } : {})
@@ -420,7 +439,14 @@ export class PiAgentService {
       if (pending.length) messages.push({ role: 'assistant', historyId: `live:${requestId}`, content: '', execution: { model: profile.model, provider: profile.provider }, call: { work: pending } })
       return messages
     }
-    const publishTranscript = (): void => publish({ type: 'transcript', messages: currentTranscript() })
+    const publishTranscript = (): void => {
+      const update = transcriptUpdates.next(currentTranscript())
+      if (update) publish({ type: 'transcript', ...update })
+    }
+    // 工具结束、消息入库和审批通知常在同一事件循环内发生，统一合并。
+    const scheduleTranscript = (): void => {
+      outputTimer ??= setTimeout(() => { outputTimer = undefined; publishTranscript() }, 150)
+    }
     const outputText = (result: { content?: { type: string; text?: string }[] } | undefined): string =>
       (result?.content ?? []).filter(block => block.type === 'text').map(block => block.text ?? '').join('\n')
     let modelStatus = '正在连接模型…', lastStatus = ''
@@ -439,7 +465,7 @@ export class PiAgentService {
       if (waiting) waitingTools.set(id, text)
       else waitingTools.delete(id)
       refreshStatus()
-      publishTranscript()
+      scheduleTranscript()
     }
     status(modelStatus)
     const previousBoundaryEntry = [...manager.getEntries()].reverse().find(entry => entry.type === 'custom' && entry.customType === 'pi-runner-cache-boundary' && (entry.data as { profileId?: string }).profileId === profile.id)
@@ -449,7 +475,7 @@ export class PiAgentService {
       onModelRequestActive(true)
       modelStatus = `Google 服务繁忙，正在重试（${attempt}/3）…`
       refreshStatus()
-    }, info => { cacheInfo = info.fingerprint ? { ...info } : { ...cacheInfo, ...info } }, previousBoundary)
+    }, info => { cacheInfo = info.fingerprint ? { ...info } : { ...cacheInfo, ...info } }, previousBoundary, cwd)
     signal.throwIfAborted()
     // 仅首次迁移导入旧聊天；之后以 pi 的完整会话（含工具结果）为准。
     if (!manager.getEntries().some(entry => entry.type === 'message')) for (const message of messages.slice(0, -1)) {
@@ -603,7 +629,7 @@ export class PiAgentService {
                   manager.appendCustomEntry('pi-runner-code-preview', { entryId: entry.id, snapshotId: 'unavailable' })
                   throw error
                 } finally {
-                  publishTranscript()
+                  scheduleTranscript()
                 }
               }, '审查时代码快照保存失败，请重新生成报告'))
             }
@@ -654,14 +680,14 @@ export class PiAgentService {
           if (update.type === 'thinking_delta') trackOutputDelta(update.delta)
           if ('partial' in update && update.partial.content.some(block => block.type === 'thinking')) {
             liveAssistant = update.partial
-            outputTimer ??= setTimeout(() => { outputTimer = undefined; publishTranscript() }, 150)
+            scheduleTranscript()
           }
         }
         if (event.type === 'message_start' && event.message.role === 'assistant') { completedResponse = false; callStarted = performance.now(); modelStatus = '正在等待模型回复…'; status(modelStatus, true) }
         // SDK 先通知订阅者，再同步保存消息；等当前调用栈结束后读取，
         // 同时包含工具结果，避免执行列表落后一条甚至一整次模型调用。
         if (event.type === 'message_end' && ['user', 'assistant', 'toolResult'].includes(event.message.role)) {
-          queueMicrotask(publishTranscript)
+          scheduleTranscript()
         }
         if (event.type === 'tool_execution_start') {
           const skill = displaySkills.get(String(event.args?.skillId ?? ''))
@@ -670,21 +696,20 @@ export class PiAgentService {
           activeTools.set(event.toolCallId, event.toolName)
           liveWork.set(event.toolCallId, { state: 'running', args: event.args, ...(skill ? { skillName: skill.name } : {}) })
           refreshStatus()
-          publishTranscript()
+          scheduleTranscript()
         }
         if (event.type === 'tool_execution_update') {
           liveWork.set(event.toolCallId, { ...liveWork.get(event.toolCallId), content: outputText(event.partialResult).slice(-12000) })
           // 工具更新是累计输出；合并密集通知，只发送最近内容。
-          outputTimer ??= setTimeout(() => { outputTimer = undefined; publishTranscript() }, 150)
+          scheduleTranscript()
         }
         if (event.type === 'tool_execution_end') {
-          if (outputTimer) { clearTimeout(outputTimer); outputTimer = undefined }
           activeTools.delete(event.toolCallId)
           waitingTools.delete(event.toolCallId)
           liveWork.set(event.toolCallId, { completed: true, isError: event.isError, content: outputText(event.result) })
           modelStatus = event.isError ? `${toolActions[event.toolName] ?? '任务'}失败，正在处理...` : '正在等待模型继续处理…'
           refreshStatus()
-          publishTranscript()
+          scheduleTranscript()
         }
         if (event.type === 'compaction_start') { modelStatus = '正在压缩上下文，完整记录仍保留…'; refreshStatus() }
         if (event.type === 'compaction_end') {
@@ -829,6 +854,8 @@ export class PiAgentService {
       await finishSafely(() => {
         const messages = currentTranscript()
         if (completedReply) completedReply.messages = messages
+        // 清除快照收尾期间新排入的通知，最终完整基线之后不能再发送旧增量。
+        if (outputTimer) { clearTimeout(outputTimer); outputTimer = undefined }
         publish({ type: 'transcript', messages })
       }, '最终会话记录刷新失败，请重新打开会话')
     }

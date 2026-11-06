@@ -31,6 +31,7 @@ export interface PiRunnerApi {
   getToolApprovalPreview(requestId: string, conversationId: string, approvalId: string): Promise<ModelResult<import('./models').ToolApprovalPreview>>
   setPermissionMode(conversationId: string, mode: import('./models').PermissionMode): Promise<ModelResult<import('./models').PermissionMode>>
   respondToolApproval(requestId: string, conversationId: string, approvalId: string, allow: boolean): Promise<ModelResult<void>>
+  claudeSubscription(action: 'status' | 'install' | 'help' | 'choose' | 'login' | 'submit' | 'proxy' | 'cancel' | 'logout' | 'bind' | 'unbind' | 'refresh', input?: string): Promise<ModelResult<{ status: import('./models').ClaudeSubscriptionStatus; settings?: ModelSettings }>>
   getChatgptAuth(): Promise<ModelResult<import('./models').ChatgptAuthStatus>>
   startChatgptAuth(): Promise<ModelResult<import('./models').ChatgptAuthStatus>>
   openChatgptAuth(): Promise<ModelResult<void>>
@@ -42,7 +43,7 @@ export interface PiRunnerApi {
   getChatgptModelInfo(model: string): Promise<ModelResult<ModelDescriptor>>
   getChatgptUsage(): Promise<ModelResult<import('./models').ChatgptUsage>>
   loadConversations(): Promise<ConversationState>
-  saveConversations(state: ConversationState): Promise<void>
+  saveConversationPatch(patch: import('./conversation-patches').ConversationPatch): Promise<void>
   saveConversationDrafts(drafts: import('./conversations').ConversationDraftUpdate[], selectedId?: string | null): Promise<void>
   /** 退出前收集草稿并等待待保存的会话全部落盘；失败时阻止正常退出。 */
   onFlushConversations(callback: () => Promise<void>): () => void
@@ -88,6 +89,7 @@ export interface PiRunnerApi {
   setSleepBlocker(active: boolean): Promise<void>
 }
 export const IPC_CHANNELS = {
+  claudeSubscription: 'models:claude-subscription',
   googleConnect: 'models:google-connect',
   compatibleManage: 'models:compatible-manage',
   compatibleModels: 'models:compatible-models',
@@ -106,7 +108,7 @@ export const IPC_CHANNELS = {
   permissionMode: 'models:permission-mode', toolApproval: 'models:tool-approval',
   chatgptStatus: 'models:chatgpt-status', chatgptStart: 'models:chatgpt-start', chatgptOpen: 'models:chatgpt-open', chatgptCopy: 'models:chatgpt-copy',
   chatgptSubmit: 'models:chatgpt-submit', chatgptCancel: 'models:chatgpt-cancel', chatgptLogout: 'models:chatgpt-logout', chatgptModels: 'models:chatgpt-models', chatgptInfo: 'models:chatgpt-info', chatgptUsage: 'models:chatgpt-usage',
-  conversationsLoad: 'conversations:load', conversationsSave: 'conversations:save', conversationsDraftsSave: 'conversations:drafts-save',
+  conversationsLoad: 'conversations:load', conversationsPatchSave: 'conversations:patch-save', conversationsDraftsSave: 'conversations:drafts-save',
   conversationsFlush: 'conversations:flush', conversationsFlushed: 'conversations:flushed',
   selectProject: 'project:select', checkpoint: 'snapshot:create',
   checkpoints: 'snapshot:list',

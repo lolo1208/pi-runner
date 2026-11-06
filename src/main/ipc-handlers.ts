@@ -1,8 +1,10 @@
+import { claudeSubscription } from './models/claude-subscription-service'
 import { clipboard, dialog, ipcMain, shell, type BrowserWindow } from 'electron'
 import path from 'node:path'
 import { mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { ConversationStore } from './conversation-store'
+import { parseConversationPatch, applyConversationPatch } from '../shared/conversation-patches'
 import { defaultConversationPermission } from '../shared/conversations'
 import { fileURLToPath } from 'node:url'
 import { IPC_CHANNELS } from '../shared/api'
@@ -93,6 +95,24 @@ export function registerIpcHandlers(dependencies: IpcHandlerDependencies): void 
     })
   }
 
+  handle(IPC_CHANNELS.claudeSubscription, (action, input) => modelResult(async () => {
+    let settings
+    if (['proxy', 'install', 'choose', 'login', 'logout', 'bind', 'unbind', 'refresh'].includes(String(action)) && dependencies.getModelService().isBusy()) throw new ModelError('请先停止模型请求再更改 Claude 订阅')
+    if (action === 'status') { /* 只读取安全状态。 */ }
+    else if (action === 'proxy') await claudeSubscription.setProxy(input)
+    else if (action === 'install') await claudeSubscription.install()
+    else if (action === 'help') await claudeSubscription.help()
+    else if (action === 'choose') await claudeSubscription.chooseExecutable()
+    else if (action === 'login') await claudeSubscription.login()
+    else if (action === 'submit') claudeSubscription.submitCode(input)
+    else if (action === 'cancel') await claudeSubscription.cancel()
+    else if (action === 'logout') { await claudeSubscription.logout(); settings = await dependencies.getModelSettings().list() }
+    else if (action === 'bind') settings = await claudeSubscription.bind()
+    else if (action === 'unbind') settings = await claudeSubscription.unbind()
+    else if (action === 'refresh') settings = await claudeSubscription.refreshModels()
+    else throw new ModelError('无效的 Claude 订阅操作')
+    return { status: await claudeSubscription.status(), settings }
+  }))
   handle(IPC_CHANNELS.conversationsLoad, () => loadPermissions())
   handle(IPC_CHANNELS.conversationsDraftsSave, (drafts, selectedId) => {
     loadPermissions()
@@ -194,38 +214,33 @@ export function registerIpcHandlers(dependencies: IpcHandlerDependencies): void 
     const result = service.setPermission(conversationId, mode)
     try {
       const state = conversations.load()
-      if (state.tasks.some(task => task.id === conversationId)) conversations.save({ ...state, tasks: state.tasks.map(task => task.id === conversationId ? { ...task, permissionMode: result } : task) })
+      if (state.tasks.some(task => task.id === conversationId)) conversations.savePatch({ updates: [{ id: conversationId, fields: { permissionMode: result }, unset: [] }], selectedId: state.selectedId })
     } catch { service.setPermission(conversationId, previousMode); throw new ModelError('权限未能保存，已恢复原权限。请检查磁盘空间和访问权限后重试。') }
     return result
   }))
   handle(IPC_CHANNELS.toolApproval, (requestId, conversationId, approvalId, allow) => modelResult(async () => dependencies.getModelService().respondApproval(requestId, conversationId, approvalId, allow)))
   handle(IPC_CHANNELS.toolApprovalPreview, (requestId, conversationId, approvalId) => modelResult(() => dependencies.getModelService().approvalPreview(requestId, conversationId, approvalId)))
-  handle(IPC_CHANNELS.conversationsSave, async state => {
+  handle(IPC_CHANNELS.conversationsPatchSave, async input => {
     const previous = loadPermissions()
-    // 已有会话权限只能通过独立入口改变；新会话只按已保存的同项目会话推导初始权限。
-    const value = state as import('../shared/conversations').ConversationState
-    if (!value || !Array.isArray(value.tasks)) throw new Error('会话文件格式无效')
+    const patch = parseConversationPatch(input)
     const service = dependencies.getModelService()
-    const existingIds = new Set(previous.tasks.map(task => task.id))
-    for (const task of previous.tasks) {
-      const next = value.tasks.find(item => item.id === task.id)
-      if (service.isBusy(task.id) && (!next || next.project !== task.project)) throw new ModelError('请先停止当前会话，再删除或修改其项目目录')
-    }
+    const byId = new Map(previous.tasks.map(task => [task.id, task]))
     const trustedTasks = previous.tasks.map(task => ({ ...task, permissionMode: service.permission(task.id) }))
-    const tasks = value.tasks.map(task => ({ ...task, permissionMode: existingIds.has(task.id) ? service.permission(task.id) : defaultConversationPermission(task.project, trustedTasks) }))
-    const initialized: string[] = []
-    try {
-      for (const task of tasks) if (!existingIds.has(task.id)) {
-        service.initializePermission(task.id, task.permissionMode as 'default' | 'auto')
-        initialized.push(task.id)
-      }
-      conversations.save({ ...value, tasks })
-    } catch (error) {
-      for (const id of initialized) service.initializePermission(id, 'default')
-      throw error
+    const updates = patch.updates.map(update => {
+      const before = byId.get(update.id)
+      const project = Object.prototype.hasOwnProperty.call(update.fields, 'project') ? update.fields.project : before?.project
+      return { ...update, fields: { ...update.fields, permissionMode: before ? service.permission(update.id)
+        : defaultConversationPermission(project ?? null, trustedTasks) }, unset: update.unset.filter(key => key !== 'permissionMode') }
+    })
+    const trusted = { ...patch, updates }
+    const next = applyConversationPatch(previous, trusted)
+    const remaining = new Map(next.tasks.map(task => [task.id, task]))
+    for (const task of previous.tasks) if (service.isBusy(task.id) && (!remaining.has(task.id) || remaining.get(task.id)!.project !== task.project)) {
+      throw new ModelError('请先停止当前会话，再删除或修改其项目目录')
     }
-    const remaining = new Set((state as import('../shared/conversations').ConversationState).tasks.map(task => task.id))
-    for (const task of previous.tasks) if (!remaining.has(task.id)) await dependencies.getModelService().removeHistory(task.id)
+    conversations.savePatch(trusted)
+    for (const task of next.tasks) if (!byId.has(task.id)) service.initializePermission(task.id, task.permissionMode as 'default' | 'auto')
+    for (const task of previous.tasks) if (!remaining.has(task.id)) await service.removeHistory(task.id)
   })
   handle(IPC_CHANNELS.selectProject, async () => {
     const window = dependencies.getMainWindow()
@@ -337,6 +352,7 @@ export function registerIpcHandlers(dependencies: IpcHandlerDependencies): void 
   handle(IPC_CHANNELS.modelSave, input => modelResult(() => dependencies.getModelSettings().save(input)))
   handle(IPC_CHANNELS.modelRemoveProvider, provider => modelResult(async () => {
     if (dependencies.getModelService().isBusy()) throw new ModelError('请先停止模型请求再移除配置')
+    if (provider === 'claude-subscription') return claudeSubscription.unbind()
     if (provider === 'chatgpt') await chatgpt().logout()
     return dependencies.getModelSettings().removeProvider(provider)
   }))

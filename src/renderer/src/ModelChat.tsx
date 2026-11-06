@@ -4,6 +4,7 @@ import { useDraftSync } from './hooks/useDraftSync'
 import { StreamTextBuffer } from './lib/stream-text-buffer'
 import { subscribeAgentEvents } from './lib/agent-events'
 import { reconcileTranscript } from './lib/reconcile-transcript'
+import { applyTranscriptPatch } from '../../shared/transcript-updates'
 import type { QueueEditState } from '../../shared/conversations'
 import type { ChatgptUsage, OpenrouterUsage, ChatImage, ChatMessage, ModelProfile, ModelProfileView, ModelProviderConnection, ModelReply, ModelSettings, OutputSpeed, ProviderId } from '../../shared/models'
 import { unwrapModelResult } from './model-result'
@@ -181,10 +182,10 @@ function ModelChat({ initialNativeHistory, onHistoryRestored, onRetainChange, no
   }, [conversationId, onPermissionChange])
   /** 快捷面板内的推理修改：按设置页的字段归一规则只重写推理相关字段，其余参数原样保存。 */
   const changeThinking = useCallback(async (target: ModelProfileView, value: boolean | string | null): Promise<void> => {
-    if (target.provider !== 'chatgpt' && target.provider !== 'ollama' && target.provider !== 'openrouter' && target.provider !== 'google') return
+    if (target.provider !== 'claude-subscription' && target.provider !== 'chatgpt' && target.provider !== 'ollama' && target.provider !== 'openrouter' && target.provider !== 'google') return
     const { hasApiKey: _hasApiKey, available: _available, ...base } = target
     const next: ModelProfile = { ...base,
-      thinkingLevel: (target.provider === 'chatgpt' || target.provider === 'openrouter' || target.provider === 'google') && typeof value === 'string' ? value as ModelProfile['thinkingLevel'] : null,
+      thinkingLevel: (target.provider === 'claude-subscription' || target.provider === 'chatgpt' || target.provider === 'openrouter' || target.provider === 'google') && typeof value === 'string' ? value as ModelProfile['thinkingLevel'] : null,
       ollamaThinkingLevel: target.provider === 'ollama' && typeof value === 'string' ? value : null,
       thinking: typeof value === 'boolean' ? value : null }
     try {
@@ -273,7 +274,7 @@ function ModelChat({ initialNativeHistory, onHistoryRestored, onRetainChange, no
       nativeHistory.current = true
       historyRestoredCallback.current?.(true)
       const previousAssistant = transcriptRef.current.filter(message => message.role === 'assistant')
-      const history = reconcileTranscript(transcriptRef.current, event.messages)
+      const history = reconcileTranscript(transcriptRef.current, applyTranscriptPatch(transcriptRef.current, event.messages, event.transcriptPatch))
       const nextAssistant = history.filter(message => message.role === 'assistant')
       const changed = history !== transcriptRef.current
       transcriptRef.current = history

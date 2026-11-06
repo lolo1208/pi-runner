@@ -612,8 +612,8 @@ function VirtualTranscript({ rows, position, navigationTarget, lastLatestRequest
     atBottomStateChange={scheduleMeasure}
     followOutput={() => followLatest.current ? 'auto' : false}
     onScroll={handleScroll} rangeChanged={range => { onRange(range); scheduleMeasure() }} totalListHeightChanged={handleHeightChange}
-    itemContent={(_, row) => <TranscriptScope id={row.key}>
-      <div className={`chat-virtual-row ${row.messages[0]?.role ?? 'assistant'}`} data-transcript-key={row.key}>
+    itemContent={(index, row) => <TranscriptScope id={row.key}>
+      <div className={`chat-virtual-row ${row.messages[0]?.role ?? 'assistant'}${row.messages[0]?.role === 'user' && rows[index + 1]?.messages[0]?.role === 'user' ? ' consecutive-user' : ''}`} data-transcript-key={row.key}>
         {row.kind === 'stream' ? <article className="chat-message assistant" aria-label="正在生成的回复" aria-live="polite"><RoundActivity project={project} messages={streamedText ? [{ role: 'assistant', content: streamedText }] : []} execution={execution} startedAt={execution?.startedAt} status={activeStatus} busy /></article>
           : <TranscriptMessage row={row} project={project} isBusy={isBusy} execution={row.key === activeAssistantKey ? execution : undefined} streamedText={row.key === activeAssistantKey ? streamedText : ''} activeStatus={activeStatus} changes={changes} settingsDisabled={settingsDisabled} onDeleteRound={onDeleteRound} deletingRound={deletingRound} />}
         {row.kind === 'pending' && !isBusy && <div className="thinking" role="status"><span className="busy-dot" />正在等待模型回复…</div>}

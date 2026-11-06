@@ -10,6 +10,8 @@ import { PiAgentService } from './models/pi-agent-service'
 import { registerIpcHandlers } from './ipc-handlers'
 import { closeAllNotifications } from './notifications'
 import { ChatgptCredentials } from './models/chatgpt-credentials'
+import { claudeSubscription } from './models/claude-subscription-service'
+import { configureClaudeRelayFetch } from './models/claude-code/turn-relay'
 import { ChatgptService } from './models/chatgpt-service'
 import { GoogleClient } from './models/google-client'
 import { DeepseekClient } from './models/deepseek-client'
@@ -72,6 +74,7 @@ function prepareToQuit(): void {
   tray = null
   modelService?.cancelAll()
   void chatgptService?.cancel()
+  void claudeSubscription.shutdown()
 }
 // 托盘在应用启动时就创建并常驻，与窗口显示/隐藏无关。
 function createTray(): Tray {
@@ -124,7 +127,7 @@ function createWindow(): void {
     if (isQuitting) return
     if (isDevelopment) {
       event.preventDefault()
-      void saveBeforeClosing(() => { prepareToQuit(); mainWindow?.close() })
+      void saveBeforeClosing(async () => { modelService.cancelAll(); await claudeSubscription.shutdown(); prepareToQuit(); mainWindow?.close() })
       return
     }
     hideToTray()
@@ -158,6 +161,8 @@ if (hasSingleInstanceLock) void app.whenReady().then(() => {
   // 订阅网络沿用 Electron 的系统代理；不向授权接口或模型接口发送浏览器 Cookie。
   const subscriptionFetch: typeof fetch = (input, init) => net.fetch(input instanceof URL ? input.href : input, { ...init, credentials: 'omit' })
   const modelFetch: typeof fetch = (input, init) => ['openrouter.ai', 'generativelanguage.googleapis.com', 'api.deepseek.com', 'api.groq.com'].includes(new URL(input instanceof Request ? input.url : String(input)).hostname) ? subscriptionFetch(input, init) : fetch(input, init)
+  claudeSubscription.initialize(modelSettings)
+  configureClaudeRelayFetch(subscriptionFetch)
   chatgptService = new ChatgptService(new ChatgptCredentials(path.join(app.getPath('userData'), 'chatgpt-auth.enc'), cipher), modelSettings, subscriptionFetch)
   const reviewService = new ToolReviewService(modelSettings, modelFetch, chatgptService)
   modelService = new ModelService(modelSettings, new PiAgentService({ dataDirectory: piRunnerDirectory, protectedDirectories: [app.getPath('userData')], chatgpt: chatgptService,
@@ -182,13 +187,13 @@ if (hasSingleInstanceLock) void app.whenReady().then(() => {
   app.on('activate', showMainWindow)
 })
 app.on('window-all-closed', () => { if (isDevelopment || process.platform !== 'darwin') app.quit() })
-async function saveBeforeClosing(close: () => void): Promise<void> {
+async function saveBeforeClosing(close: () => void | Promise<void>): Promise<void> {
   if (flushingBeforeQuit) return
   flushingBeforeQuit = true
   try {
     const contents = mainWindow?.webContents
     if (contents && !contents.isDestroyed()) await flushRendererConversations(contents)
-    close()
+    await close()
   } catch (error) {
     showMainWindow()
     dialog.showErrorBox('会话尚未保存，已取消退出', error instanceof Error ? error.message : '保存失败，请重试退出。')
@@ -198,5 +203,5 @@ async function saveBeforeClosing(close: () => void): Promise<void> {
 app.on('before-quit', event => {
   if (isQuitting) return
   event.preventDefault()
-  void saveBeforeClosing(() => { prepareToQuit(); app.quit() })
+  void saveBeforeClosing(async () => { modelService.cancelAll(); await claudeSubscription.shutdown(); prepareToQuit(); app.quit() })
 })

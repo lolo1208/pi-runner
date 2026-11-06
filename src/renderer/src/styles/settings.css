@@ -340,8 +340,8 @@
 .provider-dialog { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(620px, calc(100vw - 32px)); max-height: calc(100dvh - 72px); display: flex; flex-direction: column; background: var(--surface); color: var(--text); border-radius: 13px; z-index: 50; overflow: hidden; padding: 0; }
 .provider-dialog-heading { display: flex; align-items: center; gap: 12px; padding: 18px 22px; border-bottom: 1px solid var(--border); }
 .provider-dialog-heading h2 { font-size: calc(16rem / 14); margin: 0; font-weight: 600; }
-.provider-steps { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: calc(11rem / 14); color: var(--muted); }
-.provider-steps [data-active="true"] { color: var(--text); font-weight: 600; }
+.provider-steps { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: calc(12rem / 14); font-weight: 400; color: var(--muted); }
+.provider-steps [data-active="true"] { color: var(--text); font-weight: 400; }
 .provider-dialog-body { padding: 22px; overflow-y: auto; min-height: 270px; }
 .provider-dialog-description { margin: 0 0 18px; color: var(--muted); font-size: calc(13rem / 14); line-height: 1.8; }
 .provider-dialog-feedback { min-height: calc(26rem / 14); }
@@ -481,6 +481,8 @@
 }
 .chatgpt-auth-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; margin: 12px 0; }
 .chatgpt-authorization { min-width: 0; }
+.claude-install-section { margin-bottom: 20px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+.claude-install-section .chatgpt-auth-actions { margin-bottom: 0; }
 .provider-detail > .chatgpt-authorization { margin-top: 16px; padding-top: 4px; border-top: 1px solid var(--border); }
 .chatgpt-authorization .error, .chatgpt-authorization .success { overflow-wrap: anywhere; }
 

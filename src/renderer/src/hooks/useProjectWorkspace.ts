@@ -67,11 +67,13 @@ export function useProjectWorkspace() {
   const [searchOpen, setSearchOpen] = useState(false)
 
   const [loaded, setLoaded] = useState(false)
+  const persistenceBaseline = useRef<import('../../../shared/conversations').ConversationState | null>(null)
 
   useEffect(() => {
     let active = true
     void window.piRunner.loadConversations().then(state => {
       if (!active) return
+      persistenceBaseline.current = state
       setTasks(state.tasks)
       const restored: Record<string, ProjectSnapshotState> = {}
       const checkpointsByProject = new Map<string, Map<string, Checkpoint>>()
@@ -113,7 +115,8 @@ export function useProjectWorkspace() {
     }).catch(() => setError('代理快照已保存，文件差异读取失败，请重新选择项目后重试'))
   }), [])
 
-  useConversationPersistence(loaded, tasks, selectedId, setError)
+  useConversationPersistence(loaded, tasks, selectedId, setError, busyTasks, persistenceBaseline.current)
+  useEffect(() => { if (loaded) persistenceBaseline.current = null }, [loaded])
 
   const currentTask = tasks.find(item => item.id === selectedId) ?? tasks[0]
   const snapshotKey = currentTask ? currentTask.project ?? 'unlinked' : project ?? 'unlinked'

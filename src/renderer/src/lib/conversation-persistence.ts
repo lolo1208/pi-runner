@@ -19,6 +19,19 @@ export function conversationDraftChanges(previous: ConversationState, next: Conv
   return changes
 }
 
+/** 原生代理历史逐条落盘；运行中仅延后展示镜像，草稿、队列和配置仍照常保存。 */
+export function deferRunningTranscripts(previous: ConversationState | null, next: ConversationState, busyIds: readonly string[]): ConversationState {
+  if (!previous || !busyIds.length) return next
+  const before = new Map(previous.tasks.map(task => [task.id, task]))
+  const busy = new Set(busyIds)
+  return { ...next, tasks: next.tasks.map(task => {
+    const saved = before.get(task.id)
+    if (!saved || !busy.has(task.id)) return task
+    return { ...task, messages: saved.messages, preview: saved.preview, updatedAt: saved.updatedAt,
+      title: task.titleEdited ? task.title : saved.title }
+  }) }
+}
+
 /** 流式占位记录尚未进入原生历史，只用于展示；完成后的正式记录会由下一份快照保存。 */
 export function persistentConversationState(state: ConversationState): ConversationState {
   return {

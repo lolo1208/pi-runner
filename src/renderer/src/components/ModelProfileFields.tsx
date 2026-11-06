@@ -43,7 +43,7 @@ function IntegerParameterInput({ value, onValueChange, ...props }: Omit<InputPro
  */
 function defaultParameters(profile: ModelProfile, modelInfo?: ModelDescriptor | null): Partial<ModelProfile> {
   const local = profile.provider === 'ollama'
-  const managed = profile.provider === 'openrouter' || profile.provider === 'chatgpt' || profile.provider === 'ollama'
+  const managed = profile.provider === 'claude-subscription' || profile.provider === 'openrouter' || profile.provider === 'chatgpt' || profile.provider === 'ollama'
   const official = profile.provider === 'google'
   const selected = modelInfo?.thinking?.default
   // 目录声明的输出上限优先；Google 默认取 32K，与新建模型一致。
@@ -52,7 +52,7 @@ function defaultParameters(profile: ModelProfile, modelInfo?: ModelDescriptor | 
   return {
     contextTokens: null,
     // 与保存逻辑对称：Google、OpenRouter、ChatGPT 不发送温度；其余恢复为 1。
-    temperature: official || profile.provider === 'openrouter' || profile.provider === 'chatgpt' || profile.provider === 'deepseek' ? null : 1,
+    temperature: official || profile.provider === 'claude-subscription' || profile.provider === 'openrouter' || profile.provider === 'chatgpt' || profile.provider === 'deepseek' ? null : 1,
     maxTokens,
     timeoutSeconds: official || local || profile.provider === 'openrouter' || profile.provider === 'deepseek' ? 120 : 60,
     thinking: typeof selected === 'boolean' ? selected : null,
@@ -63,7 +63,7 @@ function defaultParameters(profile: ModelProfile, modelInfo?: ModelDescriptor | 
 
 export function ModelProfileFields({ profile, savedProfile, settings, modelInfo, infoLoading, apiKey, removeKey, onFieldChange, onApiKeyChange, onRemoveKeyChange, children, compactSetup = false }: ModelProfileFieldsProps): React.JSX.Element {
   const local = profile.provider === 'ollama'
-  const subscription = profile.provider === 'chatgpt'
+  const subscription = profile.provider === 'claude-subscription' || profile.provider === 'chatgpt'
   const google = profile.provider === 'google'
   const router = profile.provider === 'openrouter'
   const basePricing = subscription ? chatgptReferencePricing(profile.model) ?? parseModelPricing(modelInfo?.pricing) : parseModelPricing(modelInfo?.pricing)

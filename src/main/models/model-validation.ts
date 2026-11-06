@@ -75,6 +75,7 @@ export function parseProfile(value: unknown): ModelProfile {
     }
   }
   const contextTokens = item.contextTokens === undefined || item.contextTokens === null ? null : numberInRange(item.contextTokens, 1, 2097152, '上下文上限', true)
+  if (item.provider === 'claude-subscription' && (item.baseUrl !== 'https://claude-code.local' || item.protocol !== 'anthropic' || item.temperature !== null || item.tokenParameter !== 'max_tokens')) throw new ModelError('Claude 订阅由官方 CLI 管理，不能设置 API 地址、密钥或温度')
   if (item.provider === 'chatgpt' && (item.baseUrl !== 'https://chatgpt.com/backend-api' || item.protocol !== 'openai-compatible' || item.temperature !== null)) throw new ModelError('ChatGPT 订阅使用固定服务地址，Temperature 由服务决定')
   if (item.provider === 'openrouter' && (normalizeBaseUrl(item.baseUrl) !== OPENROUTER_BASE_URL || item.protocol !== 'openai-compatible' || item.tokenParameter !== 'max_tokens')) throw new ModelError('OpenRouter 使用固定官方地址、OpenAI 兼容协议及 max_tokens 参数')
   if ((item.provider === 'google') !== (item.protocol === 'google-generative-ai')) throw new ModelError('Google AI Studio 必须使用 Google 原生协议')

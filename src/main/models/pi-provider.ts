@@ -1,3 +1,4 @@
+import { claudeSubscription } from './claude-subscription-service'
 import { InMemoryCredentialStore, type Api, type Model, type SimpleStreamOptions, type TranscriptContext } from '@earendil-works/pi-ai'
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy'
 import { openAIResponsesApi } from '@earendil-works/pi-ai/api/openai-responses.lazy'
@@ -18,7 +19,8 @@ import { modelResponseError } from './model-request-error'
 import { deepseekModelInfo, deepseekThinking } from '../../shared/deepseek'
 import { AnthropicCacheBoundary, cacheFingerprint, emptyUsageFields, observeUsage } from './pi-cache'
 
-export async function createPiProvider(profile: ModelProfile, apiKey: string, attachments: PiAttachments, responses: boolean, onLimits: (limits: ModelRateLimit[]) => void, fetchRequest: typeof fetch = fetch, chatgpt?: ChatgptService, onModelRequestActive: (active: boolean) => void = () => {}, onGoogleRetry: (attempt: number) => void = () => {}, onCacheInfo: (info: { fields?: ReturnType<typeof emptyUsageFields>; fingerprint?: ReturnType<typeof cacheFingerprint>; upstream?: string; boundary?: { signature: string; index: number } }) => void = () => {}, previousBoundary?: { signature: string; index: number }) {
+export async function createPiProvider(profile: ModelProfile, apiKey: string, attachments: PiAttachments, responses: boolean, onLimits: (limits: ModelRateLimit[]) => void, fetchRequest: typeof fetch = fetch, chatgpt?: ChatgptService, onModelRequestActive: (active: boolean) => void = () => {}, onGoogleRetry: (attempt: number) => void = () => {}, onCacheInfo: (info: { fields?: ReturnType<typeof emptyUsageFields>; fingerprint?: ReturnType<typeof cacheFingerprint>; upstream?: string; boundary?: { signature: string; index: number } }) => void = () => {}, previousBoundary?: { signature: string; index: number }, cwd?: string) {
+  if (profile.provider === 'claude-subscription') return claudeSubscription.createProvider(profile, attachments, onModelRequestActive, cwd)
   if (profile.provider === 'custom') responses = profile.protocol === 'openai-compatible' && profile.compatibleApi === 'responses'
   if (profile.provider === 'chatgpt') {
     if (!chatgpt) throw new ModelError('ChatGPT 订阅服务尚未初始化，请重启应用')

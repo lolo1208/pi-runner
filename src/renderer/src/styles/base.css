@@ -175,10 +175,11 @@ button:not([data-slot]):focus-visible, input:not([data-slot]):focus-visible, sel
   background: none;
   border-color: #0000;
   padding: 0;
-  text-decoration: underline;
+  text-decoration: none;
 }
 
 :where(.ui-button-link):hover {
+  text-decoration: underline;
   color: var(--text);
 }
 

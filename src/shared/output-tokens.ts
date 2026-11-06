@@ -1,7 +1,7 @@
 import type { ModelDescriptor, ModelProfile, ProviderId } from './models'
 
 export function systemOutputTokens(provider: ProviderId): boolean {
-  return provider === 'openrouter' || provider === 'chatgpt' || provider === 'ollama'
+  return provider === 'claude-subscription' || provider === 'openrouter' || provider === 'chatgpt' || provider === 'ollama'
 }
 
 /** 输出额度由供应商能力和当前上下文决定，不使用旧配置中的手动额度。 */

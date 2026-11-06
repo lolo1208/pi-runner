@@ -12,7 +12,10 @@ const targetPath = { type: 'string', minLength: 1, description: '确切的相对
 const result = (text: string, details: unknown = {}) => ({ content: [{ type: 'text' as const, text }], details })
 type PathGuard = (target: string) => Promise<void>
 interface Progress { started: boolean; completed: number; stage: string }
-interface CopiedEntry { source: string; info: Stats }
+type SourceIdentity = Pick<Stats, 'dev' | 'ino' | 'size' | 'mtimeMs' | 'ctimeMs' | 'mode'> & { directory: boolean }
+interface CopiedEntry { source: string; info: SourceIdentity }
+const sourceIdentity = (info: Stats): SourceIdentity => ({ dev: info.dev, ino: info.ino, size: info.size,
+  mtimeMs: info.mtimeMs, ctimeMs: info.ctimeMs, mode: info.mode, directory: info.isDirectory() })
 
 /** 逐层检查实际路径；允许创建目标尚不存在，但不接受链接和特殊文件。 */
 export async function validateOrdinaryPath(target: string, mustExist = false): Promise<void> {
@@ -77,9 +80,9 @@ async function removeDirectory(target: string, recursive: boolean, check: PathGu
 }
 
 /** 每个目标均使用独占创建，不使用可能覆盖竞争目标的 rename。 */
-async function copyOrdinary(source: string, destination: string, check: PathGuard, progress: Progress, manifest: CopiedEntry[], signal?: AbortSignal, depth = 0): Promise<void> {
+async function copyOrdinary(source: string, destination: string, check: PathGuard, progress: Progress, manifest: CopiedEntry[] | undefined, signal?: AbortSignal, depth = 0): Promise<void> {
   signal?.throwIfAborted()
-  if (manifest.length >= 100000 || depth > 128) throw new ModelError('操作期间目录树超过数量或深度上限，已停止复制')
+  if (progress.completed >= 100000 || depth > 128) throw new ModelError('操作期间目录树超过数量或深度上限，已停止复制')
   await validateOrdinaryPath(source, true)
   await validateOrdinaryPath(destination)
   await check(source)
@@ -89,17 +92,17 @@ async function copyOrdinary(source: string, destination: string, check: PathGuar
   if (info.isDirectory()) {
     await mkdir(destination, { mode: info.mode & 0o777 })
     progress.completed++
-    manifest.push({ source, info })
+    manifest?.push({ source, info: sourceIdentity(info) })
     for await (const entry of await opendir(source)) await copyOrdinary(path.join(source, entry.name), path.join(destination, entry.name), check, progress, manifest, signal, depth + 1)
   } else {
     await copyFile(source, destination, constants.COPYFILE_EXCL)
     progress.completed++
-    manifest.push({ source, info })
+    manifest?.push({ source, info: sourceIdentity(info) })
   }
 }
 
-function sameSource(before: Stats, after: Stats, identityOnly = false): boolean {
-  return before.dev === after.dev && before.ino === after.ino && before.isDirectory() === after.isDirectory()
+function sameSource(before: SourceIdentity, after: Stats, identityOnly = false): boolean {
+  return before.dev === after.dev && before.ino === after.ino && before.directory === after.isDirectory()
     && (identityOnly || before.size === after.size && before.mtimeMs === after.mtimeMs && before.ctimeMs === after.ctimeMs && before.mode === after.mode)
 }
 
@@ -112,12 +115,13 @@ async function removeCopiedSource(manifest: CopiedEntry[], check: PathGuard, pro
     if (!sameSource(entry.info, await lstat(entry.source))) throw new ModelError('复制期间源内容发生变化，已保留源路径和目标副本，请核对后处理')
   }
   progress.stage = 'remove_source'
-  for (const entry of [...manifest].reverse()) {
+  for (let index = manifest.length - 1; index >= 0; index--) {
+    const entry = manifest[index]
     signal?.throwIfAborted()
     await validateOrdinaryPath(entry.source, true)
     await check(entry.source)
-    if (!sameSource(entry.info, await lstat(entry.source), entry.info.isDirectory())) throw new ModelError('删除源项目之前发现路径或内容变化，已停止移动，请核对两端')
-    if (entry.info.isDirectory()) await rmdir(entry.source)
+    if (!sameSource(entry.info, await lstat(entry.source), entry.info.directory)) throw new ModelError('删除源项目之前发现路径或内容变化，已停止移动，请核对两端')
+    if (entry.info.directory) await rmdir(entry.source)
     else await unlink(entry.source)
     progress.completed++
   }
@@ -184,9 +188,10 @@ export function filesystemToolDefinitions(check: PathGuard): ToolDefinition[] {
         progress.started = true
         await mkdir(path.dirname(destination), { recursive: true })
         progress.stage = 'copy'
-        const manifest: CopiedEntry[] = []
+        // 复制不需要删除源项目；移动仅保留校验字段，避免保留整树 Stats/Date 对象。
+        const manifest: CopiedEntry[] | undefined = name === 'move' ? [] : undefined
         await copyOrdinary(source, destination, check, progress, manifest, signal)
-        if (name === 'move') await removeCopiedSource(manifest, check, progress, signal)
+        if (manifest) await removeCopiedSource(manifest, check, progress, signal)
       } catch (error) {
         if (progress.started) throw new FileMutationUncertain(`操作可能已部分完成：${JSON.stringify({ operation: name, path: source, destination, stage: progress.stage, completed: progress.completed })}；${error instanceof Error ? error.message : String(error)}。先核对两端，不要原样重试或自动删除残留。`)
         throw error

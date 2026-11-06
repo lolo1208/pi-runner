@@ -61,7 +61,7 @@ export class ModelSettingsStore {
         if (!Array.isArray(raw.providers) || raw.providers.length > 20) throw new Error()
         for (const value of raw.providers) {
           const entry = asRecord(value)
-          if (!['ollama', 'chatgpt', 'openrouter', 'google', 'deepseek'].includes(String(entry.provider)) || !Array.isArray(entry.models) || entry.models.length > (entry.provider === 'openrouter' ? 5000 : entry.provider === 'google' ? GOOGLE_CATALOG_LIMIT : 200)) throw new Error()
+          if (!['claude-subscription', 'ollama', 'chatgpt', 'openrouter', 'google', 'deepseek'].includes(String(entry.provider)) || !Array.isArray(entry.models) || entry.models.length > (entry.provider === 'openrouter' ? 5000 : entry.provider === 'google' ? GOOGLE_CATALOG_LIMIT : 200)) throw new Error()
           const models: ModelDescriptor[] = entry.models.map(value => {
             const model = asRecord(value)
             if (!Array.isArray(model.capabilities) || model.capabilities.some(item => typeof item !== 'string')) throw new Error()
@@ -84,7 +84,7 @@ export class ModelSettingsStore {
           }
           if (entry.provider === 'chatgpt' && entry.baseUrl !== 'https://chatgpt.com/backend-api') throw new Error()
           if (entry.provider === 'openrouter' && entry.baseUrl !== OPENROUTER_BASE_URL) throw new Error()
-          providers.push({ provider: entry.provider as ModelProviderConnection['provider'], baseUrl: entry.provider === 'google' ? GOOGLE_BASE_URL : entry.provider === 'ollama' ? normalizeOllamaUrl(entry.baseUrl) : entry.provider === 'openrouter' ? OPENROUTER_BASE_URL : entry.provider === 'deepseek' ? DEEPSEEK_BASE_URL : 'https://chatgpt.com/backend-api', models })
+          providers.push({ provider: entry.provider as ModelProviderConnection['provider'], baseUrl: entry.provider === 'claude-subscription' ? 'https://claude-code.local' : entry.provider === 'google' ? GOOGLE_BASE_URL : entry.provider === 'ollama' ? normalizeOllamaUrl(entry.baseUrl) : entry.provider === 'openrouter' ? OPENROUTER_BASE_URL : entry.provider === 'deepseek' ? DEEPSEEK_BASE_URL : 'https://chatgpt.com/backend-api', models })
         }
       }
       const settings: SettingsFile = { version: 1, profiles, activeProfileId, reviewProfileId, reviewDisabled, providers, encryptedGoogleApiKey: raw.encryptedGoogleApiKey as string | undefined, encryptedDeepseekApiKey: raw.encryptedDeepseekApiKey as string | undefined, encryptedOpenrouterApiKey: raw.encryptedOpenrouterApiKey as string | undefined }
@@ -155,6 +155,7 @@ export class ModelSettingsStore {
     return { ...profile, autoMaxTokens: true, maxTokens: automaticOutputTokens(profile, descriptor) }
   }
   private available(settings: SettingsFile, profile: ModelProfile): boolean {
+    if (profile.provider === 'claude-subscription' && !settings.providers?.some(item => item.provider === 'claude-subscription')) return false
     if (profile.provider === 'google' && !googleDocumentedModel(profile.model)) return false
     const connection = settings.providers?.find(item => item.provider === profile.provider && item.baseUrl === profile.baseUrl)
     return !connection || connection.models.some(item => item.id === profile.model)
@@ -245,7 +246,7 @@ export class ModelSettingsStore {
 
   removeProvider(provider: unknown): Promise<ModelSettings> {
     return this.serialized(async () => {
-      if (typeof provider !== 'string' || !['ollama', 'chatgpt', 'openrouter', 'google', 'deepseek', 'custom', 'openai', 'anthropic', 'vllm'].includes(provider)) throw new ModelError('无效的模型供应商')
+      if (typeof provider !== 'string' || !['claude-subscription', 'ollama', 'chatgpt', 'openrouter', 'google', 'deepseek', 'custom', 'openai', 'anthropic', 'vllm'].includes(provider)) throw new ModelError('无效的模型供应商')
       const settings = await this.read()
       settings.profiles = settings.profiles.filter(item => item.profile.provider !== provider)
       settings.providers = (settings.providers ?? []).filter(item => item.provider !== provider)
@@ -345,16 +346,23 @@ export class ModelSettingsStore {
     })
   }
 
-  syncChatgpt(models: ModelDescriptor[]): Promise<ModelSettings> {
+  syncChatgpt(models: ModelDescriptor[], provider: 'chatgpt' | 'claude-subscription' = 'chatgpt', authoritative = false): Promise<ModelSettings> {
     return this.serialized(async () => {
       const settings = await this.read()
+      const claude = provider === 'claude-subscription'
+      const baseUrl = claude ? 'https://claude-code.local' : 'https://chatgpt.com/backend-api'
+      // 仅使用账号返回的有效目录清理过期配置，SDK 回退目录不代表账号权限。
+      if (provider === 'chatgpt' && authoritative && models.length) {
+        const currentIds = new Set(models.map(model => model.id))
+        settings.profiles = settings.profiles.filter(item => item.profile.provider !== provider || currentIds.has(item.profile.model))
+      }
       for (const model of models) {
-        if (settings.profiles.some(item => item.profile.provider === 'chatgpt' && item.profile.model === model.id)) continue
-        settings.profiles.push({ profile: { id: randomUUID(), name: model.id, provider: 'chatgpt', protocol: 'openai-compatible', baseUrl: 'https://chatgpt.com/backend-api', model: model.id,
-          temperature: null, contextTokens: null, enabled: true, thinking: null, maxTokens: 2048, tokenParameter: 'max_completion_tokens', timeoutSeconds: 120 } })
+        if (settings.profiles.some(item => item.profile.provider === provider && item.profile.model === model.id)) continue
+        settings.profiles.push({ profile: { id: randomUUID(), name: model.name?.slice(0, 80) ?? model.id, provider, protocol: claude ? 'anthropic' : 'openai-compatible', baseUrl, model: model.id,
+          temperature: null, contextTokens: null, enabled: true, thinking: null, maxTokens: 2048, tokenParameter: claude ? 'max_tokens' : 'max_completion_tokens', timeoutSeconds: 120 } })
       }
       if (settings.profiles.length > 200) throw new ModelError('最多保存 200 个模型配置')
-      settings.providers = [...(settings.providers ?? []).filter(item => item.provider !== 'chatgpt'), { provider: 'chatgpt', baseUrl: 'https://chatgpt.com/backend-api', models }]
+      settings.providers = [...(settings.providers ?? []).filter(item => item.provider !== provider), { provider, baseUrl, models }]
       this.reconcileActive(settings)
       await this.write(settings)
       return this.view(settings)
@@ -367,6 +375,7 @@ export class ModelSettingsStore {
       if (profile.provider === 'openrouter' && credential.action !== 'keep') throw new ModelError('OpenRouter 密钥由供应商统一管理，请在配置连接中更新')
       if (profile.provider === 'google' && credential.action !== 'keep') throw new ModelError('Google 密钥由供应商统一管理，请在配置连接中更新')
       if (profile.provider === 'deepseek' && credential.action !== 'keep') throw new ModelError('DeepSeek 密钥由供应商统一管理，请在配置连接中更新')
+      if (profile.provider === 'claude-subscription' && credential.action !== 'keep') throw new ModelError('Claude 订阅凭证由官方 CLI 管理，无需 API Key')
       if (profile.provider === 'chatgpt' && credential.action === 'replace') throw new ModelError('ChatGPT 订阅请通过浏览器授权，无需 API Key')
       const settings = await this.read()
       const existing = settings.profiles.find(item => item.profile.id === profile.id)
@@ -474,6 +483,11 @@ export class ModelSettingsStore {
   /** 普通对话与权限审核共用目录限制和推理归一，刷新后不使用失效的旧参数。 */
   private requestProfile(settings: SettingsFile, source: ModelProfile, descriptor?: ModelDescriptor): ModelProfile {
     const profile = { ...this.resolvedOutput(settings, source), contextTokens: source.contextTokens ?? descriptor?.maxContextTokens }
+    if (source.provider === 'claude-subscription') {
+      const selected = selectedModelThinking(source, descriptor?.thinking)
+      profile.thinkingLevel = typeof selected === 'string' ? selected as ModelProfile['thinkingLevel'] : null
+      profile.thinking = null
+    }
     if (source.provider === 'deepseek') {
       const info = deepseekModelInfo(source.model)
       profile.contextTokens = source.contextTokens ?? descriptor?.maxContextTokens ?? info.maxContextTokens

@@ -1,6 +1,10 @@
-import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync, openSync, closeSync, fstatSync, writeSync, fsyncSync, ftruncateSync, readSync } from 'node:fs'
 import path from 'node:path'
+import { open, unlink } from 'node:fs/promises'
+import { conversationJsonChunks } from './conversation-json'
+import { StringDecoder } from 'node:string_decoder'
 import { randomUUID } from 'node:crypto'
+import { applyConversationPatch, parseConversationPatch, type ConversationPatch } from '../shared/conversation-patches'
 import type { ConversationDraftUpdate, ConversationState } from '../shared/conversations'
 import { ATTACHMENT_DATA_URL } from '../shared/attachments'
 import { MAX_CUSTOM_PROMPT_LENGTH, PERMISSION_MODES, type PermissionMode } from '../shared/models'
@@ -94,7 +98,8 @@ export class ConversationStore {
   private readable = false
   /** 最近一次成功读取或保存的状态；保存时不再重新读取并解析整个文件，避免阻塞主进程。 */
   private cached: ConversationState | null = null
-  private cachedJson = ''
+  private sequence = 0
+  private basePersisted = false
   private draftRevision: string = randomUUID()
   private drafts = new Map<string, ConversationDraftUpdate>()
   private selectedId: string | null | undefined
@@ -109,7 +114,7 @@ export class ConversationStore {
     }
     // 完整快照和草稿使用代号配对，原子替换快照后，旧草稿即失效。
     // 即使写完快照后立即断电，也不会让旧草稿覆盖发送后的空输入框。
-    if (overlay.revision !== this.draftRevision) return state
+    if (overlay.revision !== this.draftRevision || (overlay.sequence ?? 0) !== this.sequence) return state
     if (overlay.version !== 1) throw new Error('会话草稿版本无效')
     this.drafts = new Map(parseDrafts(overlay.drafts, state).map(draft => [draft.id, draft]))
     this.selectedId = this.parseSelection(overlay.selectedId, state)
@@ -124,15 +129,19 @@ export class ConversationStore {
       if (draftRevision !== undefined && typeof draftRevision !== 'string') throw new Error('会话草稿代号无效')
       const state = parseState(value)
       this.draftRevision = (draftRevision as string | undefined) ?? 'legacy'
-      this.cachedJson = JSON.stringify({ ...state, draftRevision: this.draftRevision })
-      this.cached = this.loadDrafts(state)
+      this.basePersisted = true
+      this.cached = this.loadDrafts(this.loadPatches(state))
       this.readable = true
+      // 仅冷启动时压实上一次运行的增量，不在模型选择/新建会话的交互路径重写全库。
+      if (this.sequence) {
+        void this.compact().catch(() => { /* 原日志仍可恢复；后台压实失败不阻止读取。 */ })
+      }
       return this.cached
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         this.readable = true
         this.cached = { version: 1, tasks: [], selectedId: null }
-        this.cachedJson = JSON.stringify({ ...this.cached, draftRevision: this.draftRevision })
+        this.basePersisted = false
         return this.cached
       }
       this.readable = false
@@ -141,21 +150,157 @@ export class ConversationStore {
     }
   }
 
-  save(value: unknown): void {
-    if (!this.readable) throw new Error('本地会话尚未成功读取，已停止保存以保护原文件。')
-    const state = parseState(value)
-    const revision = this.drafts.size || this.selectedId !== undefined ? randomUUID() : this.draftRevision
-    const json = JSON.stringify({ ...state, draftRevision: revision })
-    // 有草稿覆盖层时必须更换代号；否则相同完整快照可以跳过写盘。
-    if (json === this.cachedJson) return
-    writeAtomic(this.file, json)
-    this.cached = state
-    this.cachedJson = json
+  /** 仅首次建库同步写入空基线；已有库由 compact 异步分段压实。 */
+  private checkpoint(): void {
+    if (!this.readable || !this.cached) throw new Error('本地会话尚未成功读取，已停止保存以保护原文件。')
+    const revision = randomUUID()
+    mkdirSync(path.dirname(this.file), { recursive: true })
+    const fd = openSync(`${this.file}.tmp`, 'w', 0o600)
+    try {
+      const write = (text: string): void => {
+        const bytes = Buffer.from(text)
+        let offset = 0
+        while (offset < bytes.length) {
+          const written = writeSync(fd, bytes, offset, bytes.length - offset)
+          if (!written) throw new Error('会话快照写入未完成')
+          offset += written
+        }
+      }
+      for (const chunk of conversationJsonChunks({ ...this.cached, draftRevision: revision })) write(chunk)
+      fsyncSync(fd)
+    } finally { closeSync(fd) }
+    // 只有新快照原子替换成功，才允许清空恢复日志和覆盖层。
+    renameSync(`${this.file}.tmp`, this.file)
+    this.basePersisted = true
+    this.sequence = 0
+    try { unlinkSync(`${this.file}.updates.jsonl`) } catch { /* 旧日志由版本代号失效。 */ }
     this.draftRevision = revision
     this.drafts.clear()
     this.selectedId = undefined
     try { unlinkSync(`${this.file}.drafts.json`) }
     catch { /* 旧覆盖层已由代号失效，清理失败不能把成功保存误报为失败。 */ }
+  }
+
+  /** 启动压实让出事件循环；任何保存改变基线后立即放弃，绝不覆盖较新的数据。 */
+  private async compact(): Promise<void> {
+    const snapshot = this.cached, sequence = this.sequence, revision = this.draftRevision
+    const stale = (): boolean => this.cached !== snapshot || this.sequence !== sequence || this.draftRevision !== revision || !this.readable
+    const nextRevision = randomUUID(), temporary = `${this.file}.checkpoint-${nextRevision}.tmp`
+    const handle = await open(temporary, 'wx', 0o600)
+    let committed = false
+    try {
+      try {
+        for (const chunk of conversationJsonChunks({ ...snapshot!, draftRevision: nextRevision })) {
+          if (stale()) return
+          await handle.writeFile(chunk, 'utf8')
+        }
+        await handle.sync()
+      } finally { await handle.close() }
+      if (stale()) return
+      // 此处到发布新版本之间没有 await，保存事务不能插入。
+      renameSync(temporary, this.file)
+      committed = true
+      this.draftRevision = nextRevision
+      this.sequence = 0
+      this.drafts.clear()
+      this.selectedId = undefined
+      try { unlinkSync(`${this.file}.updates.jsonl`) } catch { /* 旧日志由版本代号失效。 */ }
+      try { unlinkSync(`${this.file}.drafts.json`) } catch { /* 旧覆盖层由版本代号失效。 */ }
+    } finally {
+      if (!committed) await unlink(temporary).catch(() => {})
+    }
+  }
+
+  private validateChangedTask(task: ConversationState['tasks'][number], before?: ConversationState['tasks'][number]): void {
+    const candidate = { ...task }
+    // 未变化的载荷已校验过；选择模型不重新扫描本会话的 Base64、消息和队列。
+    if (before && task.messages === before.messages && task.compaction === before.compaction) {
+      delete candidate.messages; delete candidate.compaction
+    }
+    if (before && task.draftImages === before.draftImages) delete candidate.draftImages
+    if (before && task.queuedMessages === before.queuedMessages && task.queueEdit === before.queueEdit) {
+      delete candidate.queuedMessages; delete candidate.queueEdit
+    }
+    parseState({ version: 1, tasks: [candidate], selectedId: task.id })
+  }
+
+  private loadPatches(state: ConversationState): ConversationState {
+    let fd: number
+    try { fd = openSync(`${this.file}.updates.jsonl`, 'r+') }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return state; throw error }
+    this.sequence = 0
+    // 分块恢复，避免长期运行的日志被整体读取并 split 成另一份字符串数组。
+    const buffer = Buffer.alloc(64 * 1024), decoder = new StringDecoder('utf8')
+    let pending = '', committedBytes = 0
+    try {
+      let count: number
+      while ((count = readSync(fd, buffer, 0, buffer.length, null)) > 0) {
+        pending += decoder.write(buffer.subarray(0, count))
+        let end: number
+        while ((end = pending.indexOf('\n')) >= 0) {
+          const line = pending.slice(0, end)
+          committedBytes += Buffer.byteLength(line) + 1
+          pending = pending.slice(end + 1)
+          if (!line) continue
+          const entry = record(JSON.parse(line))
+          if (entry.revision !== this.draftRevision) continue
+          if (entry.sequence !== this.sequence + 1) throw new Error('会话增量顺序无效')
+          const before = new Map(state.tasks.map(task => [task.id, task]))
+          state = applyConversationPatch(state, parseConversationPatch(entry.patch), task => this.validateChangedTask(task, before.get(task.id)))
+          this.sequence++
+        }
+      }
+      // 断电留下的未完成末行不是已提交事务；只回收尾部，不跳过损坏的完整事务。
+      if (fstatSync(fd).size !== committedBytes) { ftruncateSync(fd, committedBytes); fsyncSync(fd) }
+    } finally { closeSync(fd) }
+    return state
+  }
+
+  /** 仅校验变化会话、序列化变化字段，模型切换不扫描其他会话的历史。 */
+  savePatch(input: ConversationPatch): void {
+    if (!this.readable || !this.cached) throw new Error('本地会话尚未成功读取，已停止保存以保护原文件。')
+    const incoming = parseConversationPatch(input)
+    const updates = new Map(incoming.updates.map(update => [update.id, update]))
+    for (const draft of this.drafts.values()) {
+      if (incoming.order && !incoming.order.includes(draft.id)) continue
+      const update = updates.get(draft.id) ?? { id: draft.id, fields: {}, unset: [] }
+      const fields = { ...update.fields }, unset = [...update.unset]
+      for (const key of ['draft', 'draftSkillIds'] as const) {
+        if (Object.prototype.hasOwnProperty.call(fields, key) || unset.includes(key)) continue
+        if (draft[key] === undefined) unset.push(key)
+        else Object.assign(fields, { [key]: draft[key] })
+      }
+      updates.set(draft.id, { id: draft.id, fields, unset })
+    }
+    const patch = { ...incoming, updates: [...updates.values()] }
+    const before = new Map(this.cached.tasks.map(task => [task.id, task]))
+    const next = applyConversationPatch(this.cached, patch, task => this.validateChangedTask(task, before.get(task.id)))
+    if (!patch.updates.length && !patch.order && patch.selectedId === this.cached.selectedId) return
+    if (!this.basePersisted) this.checkpoint()
+    const json = JSON.stringify({ revision: this.draftRevision, sequence: this.sequence + 1, patch }) + '\n'
+    const fd = openSync(`${this.file}.updates.jsonl`, 'a', 0o600)
+    let size: number | undefined
+    try {
+      size = fstatSync(fd).size
+      const bytes = Buffer.from(json)
+      let offset = 0
+      while (offset < bytes.length) {
+        const written = writeSync(fd, bytes, offset, bytes.length - offset)
+        if (!written) throw new Error('会话增量写入未完成')
+        offset += written
+      }
+      fsyncSync(fd)
+    } catch (error) {
+      if (size !== undefined) {
+        try { ftruncateSync(fd, size); fsyncSync(fd) } catch { this.readable = false }
+      }
+      throw error
+    } finally { closeSync(fd) }
+    this.cached = next
+    this.sequence++
+    // 已将草稿合入日志；迟到的旧覆盖层因 sequence 不匹配而失效。
+    this.drafts.clear()
+    this.selectedId = undefined
   }
 
   private parseSelection(value: unknown, state: ConversationState): string | null | undefined {
@@ -175,7 +320,7 @@ export class ConversationStore {
     const next = applyDrafts(this.cached, new Map(changes.map(draft => [draft.id, draft])))
     const retainedSelection = selectedId === undefined ? this.selectedId : selectedId
     if (retainedSelection !== undefined) next.selectedId = retainedSelection
-    writeAtomic(`${this.file}.drafts.json`, JSON.stringify({ version: 1, revision: this.draftRevision, drafts: [...drafts.values()], selectedId: retainedSelection }))
+    writeAtomic(`${this.file}.drafts.json`, JSON.stringify({ version: 1, revision: this.draftRevision, sequence: this.sequence, drafts: [...drafts.values()], selectedId: retainedSelection }))
     this.cached = next
     this.drafts = drafts
     this.selectedId = retainedSelection
