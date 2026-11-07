@@ -126,10 +126,10 @@ describe('批量文件工具', () => {
 
   it('系统提示推荐批量工具并禁止 require 数据资源', () => {
     const prompt = agentSystemPrompt({ instruction: '', mode: 'auto', planning: true })
-    expect(prompt).toContain('read_many'); expect(prompt).toContain('download_many'); expect(prompt).toContain('不要用 require')
-    expect(prompt).toContain('单文件用 read')
-    expect(prompt).toContain('大文件先搜索定位')
-    expect(prompt).toContain('不要因文件结构复杂或需要按字段筛选就改用 node -e')
-    expect(prompt).not.toContain('确需程序化解析时使用 readFileSync + JSON.parse')
+    expect(prompt).toContain('read_many'); expect(prompt).toContain('download_many'); expect(prompt).toContain('不要用 require/import')
+    expect(prompt).toContain('多个文件用 read_many')
+    expect(prompt).toContain('大文件先定位再分段读')
+    expect(prompt).toContain('不因结构复杂改用内联脚本')
+    expect(prompt).not.toContain('readFileSync')
   })
 })

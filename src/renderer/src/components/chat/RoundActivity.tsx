@@ -10,7 +10,6 @@ import { hasPlanResult, PlanResultCard } from './PlanResultCard'
 import { AiReviewBadge } from './AiReviewBadge'
 import { AiReviewReason } from './AiReviewReason'
 import { AnimatedDisclosure } from './AnimatedDisclosure'
-import { AgentStatusText } from './AgentStatusText'
 
 const toolLabels: Record<string, string> = { bash: '运行命令', powershell: '运行命令', read: '读取文件', read_many: '批量读取文件', download_many: '批量下载文件', write_many: '批量写入文件', edit_many: '批量编辑文件', write: '写入文件', download: '下载文件', edit: '编辑文件', delete: '删除文件', mkdir: '创建目录', rmdir: '删除目录', move: '移动或重命名', copy: '复制文件或目录', stat: '查看文件或目录信息', ls: '查看目录', find: '查找文件或目录', grep: '搜索内容', read_skill_file: '读取技能文件', report_skill_usage: '说明技能用途', ask_user_question: '确认需求', submit_plan: '提交计划' }
 
@@ -62,7 +61,7 @@ function groupCalls(messages: ChatMessage[]): CallGroup[] {
   return groups
 }
 
-function CallActivity({ group, executing = false, status, receivedBytes }: { group: CallGroup; executing?: boolean; status?: string; receivedBytes?: number }): React.JSX.Element {
+function CallActivity({ group, executing = false, status }: { group: CallGroup; executing?: boolean; status?: string }): React.JSX.Element {
   const [open, setOpen] = useTranscriptState('call-open', false)
   const activeIndex = executing ? group.start + group.messages.length - 1 : undefined
   // 执行中的调用尚无耗时记录，从成为当前调用起本地计时，避免显示上一次调用的耗时。
@@ -89,13 +88,13 @@ function CallActivity({ group, executing = false, status, receivedBytes }: { gro
       {message.call?.work.length ? <TranscriptPagedList preferLatest={executing && start + offset === group.messages.length - 1} items={message.call.work} label="工具记录">{work => work.map(item => <TranscriptScope key={item.id} id={`work:${item.id}`}><WorkItem item={item} busy={executing && start + offset === group.messages.length - 1} /></TranscriptScope>)}</TranscriptPagedList> : !(executing && start + offset === group.messages.length - 1) && <p className="chat-call-empty">{message.call ? '本次调用仅生成回复，没有工具执行或可展示的思考记录。' : '此历史调用未保存工作详情。'}</p>}
     </TranscriptScope>)}</TranscriptPagedList>
       {executing && <div className="chat-work-item" role="status" aria-live="polite">
-        <div className="chat-work-progress"><LoaderCircle size={14} className="chat-execution-spinner" aria-hidden="true" /><AgentStatusText status={currentStatus} receivedBytes={receivedBytes} /></div>
+        <div className="chat-work-progress"><LoaderCircle size={14} className="chat-execution-spinner" aria-hidden="true" /><span>{currentStatus}</span></div>
       </div>}
     </div></AnimatedDisclosure>
   </div>
 }
 
-export function RoundActivity({ project, messages, execution, startedAt, status, receivedBytes, busy = false, initiallyOpen = true }: { project?: string | null; messages: ChatMessage[]; execution?: ChatExecution; startedAt?: number; status?: string; receivedBytes?: number; busy?: boolean; initiallyOpen?: boolean }): React.JSX.Element {
+export function RoundActivity({ project, messages, execution, startedAt, status, busy = false, initiallyOpen = true }: { project?: string | null; messages: ChatMessage[]; execution?: ChatExecution; startedAt?: number; status?: string; busy?: boolean; initiallyOpen?: boolean }): React.JSX.Element {
   const [disclosure, setDisclosure] = useTranscriptState('round-open', { busy, open: busy && initiallyOpen })
   const open = disclosure.busy === busy ? disclosure.open : busy && initiallyOpen
   useEffect(() => {
@@ -106,14 +105,14 @@ export function RoundActivity({ project, messages, execution, startedAt, status,
   const hasPlanCards = messages.some(message => message.call?.work.some(hasPlanResult))
   return <>
     <Button variant="ghost" className="chat-round-toggle" aria-expanded={open} onClick={() => setDisclosure({ busy, open: !open })}>
-      <ExecutionLabel execution={execution ?? final?.execution} startedAt={startedAt} status={status} receivedBytes={receivedBytes} busy={busy} /><ChevronRight size={14} className={open ? 'chat-disclosure-chevron open' : 'chat-disclosure-chevron'} />
+      <ExecutionLabel execution={execution ?? final?.execution} startedAt={startedAt} status={status} busy={busy} /><ChevronRight size={14} className={open ? 'chat-disclosure-chevron open' : 'chat-disclosure-chevron'} />
     </Button>
     <AnimatedDisclosure open={open}>
     {busy && !groups.length && <div className="chat-round-calls">
-      <div className="chat-work-item" role="status" aria-live="polite"><div className="chat-work-progress"><LoaderCircle size={14} className="chat-execution-spinner" aria-hidden="true" /><AgentStatusText status={status || '正在等待模型回复…'} receivedBytes={receivedBytes} /></div></div>
+      <div className="chat-work-item" role="status" aria-live="polite"><div className="chat-work-progress"><LoaderCircle size={14} className="chat-execution-spinner" aria-hidden="true" /><span>{status || '正在等待模型回复…'}</span></div></div>
     </div>}
     {groups.length > 0 && <div className="chat-round-calls"><TranscriptPagedList preferLatest={busy} items={groups} label="调用记录">{page => page.map(group => { const message = group.messages.at(-1)!; const index = group.start + group.messages.length - 1; return <TranscriptScope id={`call:${group.start}`} key={group.start}><div className="chat-call-section">
-      <CallActivity group={group} executing={busy && index === messages.length - 1} status={status} receivedBytes={receivedBytes} />
+      <CallActivity group={group} executing={busy && index === messages.length - 1} status={status} />
       {(!hasPlanCards || busy) && message.content && (busy || index < messages.length - 1) && <ChatMarkdown project={project} content={message.content} snapshotId={message.codeSnapshotId} />}
     </div></TranscriptScope> })}</TranscriptPagedList></div>}
     </AnimatedDisclosure>

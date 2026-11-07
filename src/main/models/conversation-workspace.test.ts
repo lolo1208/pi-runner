@@ -51,8 +51,8 @@ describe('ordinary conversation workspace', () => {
 
   it('tells the agent its real working directory without a project', () => {
     const prompt = agentSystemPrompt({ instruction: '', mode: 'auto', cwd: '/tmp/conversation', planning: false })
-    expect(prompt).toContain('无项目目录')
+    expect(prompt).toContain('未绑定项目')
     expect(prompt).toContain('当前工作目录：/tmp/conversation')
-    expect(prompt).toContain('规则或 AI 审核')
+    expect(prompt).toContain('由规则判断')
   })
 })

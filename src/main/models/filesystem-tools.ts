@@ -6,9 +6,10 @@ import { ModelError } from './model-validation'
 import { validateToolPathSyntax, within } from './security-paths'
 import { validateToolInput } from './tool-inputs'
 import { FileMutationUncertain } from './tool-execution-errors'
+import { pick, type PromptLang } from '../../shared/prompt-lang'
 
 const schema = (properties: Record<string, unknown>, required: string[]): ToolDefinition['parameters'] => ({ type: 'object', properties, required, additionalProperties: false }) as ToolDefinition['parameters']
-const targetPath = { type: 'string', minLength: 1, description: '确切的相对或绝对路径，不展开通配符' }
+const targetPath = (lang: PromptLang) => ({ type: 'string', minLength: 1, description: pick(lang, '确切的相对或绝对路径，不展开通配符', 'Exact relative or absolute path, no wildcards') })
 const result = (text: string, details: unknown = {}) => ({ content: [{ type: 'text' as const, text }], details })
 type PathGuard = (target: string) => Promise<void>
 interface Progress { started: boolean; completed: number; stage: string }
@@ -127,11 +128,11 @@ async function removeCopiedSource(manifest: CopiedEntry[], check: PathGuard, pro
   }
 }
 
-export function filesystemToolDefinitions(check: PathGuard): ToolDefinition[] {
+export function filesystemToolDefinitions(check: PathGuard, lang: PromptLang = 'zh'): ToolDefinition[] {
   const tools: ToolDefinition[] = [{
-    name: 'mkdir', label: '创建目录', executionMode: 'sequential',
-    description: '创建目录及缺少的父目录，已有目录无需重复创建；失败可能已创建部分父目录，应先用 stat 核对。',
-    parameters: schema({ path: targetPath }, ['path']),
+    name: 'mkdir', label: pick(lang, '创建目录', 'Create directory'), executionMode: 'sequential',
+    description: pick(lang, '创建目录及缺少的父目录，已有目录无需重复创建；失败可能已创建部分父目录，应先用 stat 核对。', 'Create a directory and any missing parents; existing directories need no re-creation. On failure some parents may already be created — verify with stat first.'),
+    parameters: schema({ path: targetPath(lang) }, ['path']),
     execute: async (_id, args, signal) => {
       const { path: target } = validateToolInput('mkdir', args) as { path: string }
       await validateOrdinaryPath(target)
@@ -142,9 +143,9 @@ export function filesystemToolDefinitions(check: PathGuard): ToolDefinition[] {
       return result(`已创建目录：${target}`, { path: target })
     }
   }, {
-    name: 'rmdir', label: '删除目录', executionMode: 'sequential',
-    description: '删除确切路径的目录；非空目录必须显式设置 recursive=true。不会删除项目根目录、内部数据、Git 元数据、链接或特殊文件。递归删除不是事务，失败或取消可能已删除部分内容，应先核对，不能假定已回滚。',
-    parameters: schema({ path: targetPath, recursive: { type: 'boolean', description: '是否删除目录及其全部内容，默认 false' } }, ['path']),
+    name: 'rmdir', label: pick(lang, '删除目录', 'Remove directory'), executionMode: 'sequential',
+    description: pick(lang, '删除确切路径的目录；非空目录必须显式设置 recursive=true。不会删除项目根目录、内部数据、Git 元数据、链接或特殊文件。递归删除不是事务，失败或取消可能已删除部分内容，应先核对，不能假定已回滚。', 'Remove the directory at the exact path; non-empty directories require recursive=true. Never removes project root, internal data, Git metadata, links, or special files. Recursive removal is not transactional; failure or cancel may have removed some content — verify, and do not assume rollback.'),
+    parameters: schema({ path: targetPath(lang), recursive: { type: 'boolean', description: pick(lang, '是否删除目录及其全部内容，默认 false', 'Whether to remove the directory and all its contents; default false') } }, ['path']),
     execute: async (_id, args, signal) => {
       const { path: target, recursive } = validateToolInput('rmdir', args) as { path: string; recursive?: boolean }
       await validateOrdinaryTree(target, check, signal)
@@ -157,9 +158,9 @@ export function filesystemToolDefinitions(check: PathGuard): ToolDefinition[] {
       return result(`已删除目录：${target}`, { path: target, removed: progress.completed })
     }
   }, {
-    name: 'stat', label: '查看文件或目录信息',
-    description: '查看文件或目录的类型、字节大小和修改时间。查看目录内容用 ls，查找文件或目录用 find，读取文件内容用 read。',
-    parameters: schema({ path: targetPath }, ['path']),
+    name: 'stat', label: pick(lang, '查看文件或目录信息', 'View file or directory info'),
+    description: pick(lang, '查看文件或目录的类型、字节大小和修改时间。查看目录内容用 ls，查找文件或目录用 find，读取文件内容用 read。', 'View a file or directory\'s type, byte size, and modification time. Use ls for directory contents, find to locate files or directories, read to read file contents.'),
+    parameters: schema({ path: targetPath(lang) }, ['path']),
     execute: async (_id, args, signal) => {
       const { path: target } = validateToolInput('stat', args) as { path: string }
       await validateOrdinaryPath(target, true)
@@ -171,9 +172,11 @@ export function filesystemToolDefinitions(check: PathGuard): ToolDefinition[] {
     }
   }]
   for (const name of ['move', 'copy'] as const) tools.push({
-    name, label: name === 'move' ? '移动或重命名' : '复制文件或目录', executionMode: 'sequential',
-    description: `${name === 'move' ? '移动' : '复制'}普通文件或整个目录，path 是源路径，destination 是确切的新路径。目标必须不存在，独占创建，不覆盖或合并已有内容。${name === 'move' ? '移动通过复制、核对源内容后删除已复制源项目完成，支持跨文件系统，但不是原子重命名。' : ''}失败或取消可能留下部分目标，移动也可能保留两份或部分源内容；先用 stat/find 核对，不要原样重试或自动删除残留。`,
-    parameters: schema({ path: targetPath, destination: targetPath }, ['path', 'destination']),
+    name, label: name === 'move' ? pick(lang, '移动或重命名', 'Move or rename') : pick(lang, '复制文件或目录', 'Copy file or directory'), executionMode: 'sequential',
+    description: name === 'move'
+      ? pick(lang, '移动普通文件或整个目录，path 是源路径，destination 是确切的新路径。目标必须不存在，独占创建，不覆盖或合并已有内容。移动通过复制、核对源内容后删除已复制源项目完成，支持跨文件系统，但不是原子重命名。失败或取消可能留下部分目标，移动也可能保留两份或部分源内容；先用 stat/find 核对，不要原样重试或自动删除残留。', 'Move an ordinary file or whole directory; path is the source, destination is the exact new path. The destination must not exist — created exclusively, never overwriting or merging existing content. Moving copies, verifies source content, then deletes the copied source items; supports cross-filesystem, but is not an atomic rename. Failure or cancel may leave a partial destination, and moving may keep two copies or partial source content; verify with stat/find first, and do not retry as-is or auto-delete residue.')
+      : pick(lang, '复制普通文件或整个目录，path 是源路径，destination 是确切的新路径。目标必须不存在，独占创建，不覆盖或合并已有内容。失败或取消可能留下部分目标；先用 stat/find 核对，不要原样重试或自动删除残留。', 'Copy an ordinary file or whole directory; path is the source, destination is the exact new path. The destination must not exist — created exclusively, never overwriting or merging existing content. Failure or cancel may leave a partial destination; verify with stat/find first, and do not retry as-is or auto-delete residue.'),
+    parameters: schema({ path: targetPath(lang), destination: targetPath(lang) }, ['path', 'destination']),
     execute: async (_id, args, signal) => {
       const { path: source, destination } = validateToolInput(name, args) as { path: string; destination: string }
       if (within(path.resolve(source), path.resolve(destination)) || within(path.resolve(destination), path.resolve(source))) throw new ModelError('源路径和目标路径不能相同或互相包含')

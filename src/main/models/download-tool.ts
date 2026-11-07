@@ -6,6 +6,7 @@ import { validateOrdinaryPath } from './filesystem-tools'
 import { ModelError } from './model-validation'
 import { FileMutationUncertain } from './tool-execution-errors'
 import { validateToolPathSyntax } from './security-paths'
+import { pick, type PromptLang } from '../../shared/prompt-lang'
 
 const MAX_BYTES = 64 * 1024 * 1024
 const TIMEOUT_MS = 60000
@@ -77,16 +78,16 @@ function validateImage(header: Buffer, contentType: string, target: string): voi
 }
 
 /** 临时文件必须与目标同盘以原子替换；完整校验及路径复查通过后才提交。 */
-export function createDownloadToolDefinition(check: (target: string) => Promise<void>, options: { fetchRequest?: typeof fetch; maxBytes?: number; timeoutMs?: number } = {}): ToolDefinition {
+export function createDownloadToolDefinition(check: (target: string) => Promise<void>, options: { fetchRequest?: typeof fetch; maxBytes?: number; timeoutMs?: number } = {}, lang: PromptLang = 'zh'): ToolDefinition {
   const fetchRequest = options.fetchRequest ?? fetch
   const maxBytes = options.maxBytes ?? MAX_BYTES
   return {
-    name: 'download', label: '下载文件', executionMode: 'sequential',
-    description: '从 HTTP/HTTPS URL 下载图片或其他二进制文件到 path，Windows/macOS/Linux 均使用此工具。最多跟随 5 次重定向，60 秒超时，上限 64 MiB；校验状态、非空内容、长度及常见图片文件头，可提供 sha256 验证完整性。完整校验成功后才保存；目标已存在时会替换。失败或取消发生在替换前时保留原文件；已完成替换返回成功。清理警告不代表下载失败，不要重复下载。不要用 write 写图片字节，也不要用 Invoke-WebRequest -OutFile、BITS、certutil、curl -o/-O、wget 或 aria2c 下载落盘。',
+    name: 'download', label: pick(lang, '下载文件', 'Download file'), executionMode: 'sequential',
+    description: pick(lang, '从 HTTP/HTTPS URL 下载图片或其他二进制文件到 path，Windows/macOS/Linux 均使用此工具。最多跟随 5 次重定向，60 秒超时，上限 64 MiB；校验状态码、非空内容与长度；图片文件另校验文件头，可提供 sha256 验证完整性。校验通过才保存；目标已存在会替换，替换前失败或取消保留原文件，已替换则返回成功。清理警告不算失败，不要重复下载。不要用 write 写图片字节，也不要用 Invoke-WebRequest -OutFile、BITS、certutil、curl -o/-O、wget 或 aria2c 下载落盘。', 'Download an image or other binary file from an HTTP/HTTPS URL to path; use this tool on Windows/macOS/Linux. Follows up to 5 redirects, 60-second timeout, 64 MiB cap; validates status code, non-empty content, and length, accepts sha256 for integrity, and for image files additionally validates headers. Saves only after validation passes; an existing target is replaced, failure or cancel before replacement keeps the original file, and a completed replacement returns success. Cleanup warnings are not failures — do not re-download. Do not write image bytes with write, and do not download to disk with Invoke-WebRequest -OutFile, BITS, certutil, curl -o/-O, wget, or aria2c.'),
     parameters: { type: 'object', properties: {
-      url: { type: 'string', minLength: 1, description: '完整 HTTP/HTTPS 下载地址' },
-      path: { type: 'string', minLength: 1, description: '保存文件的确切相对或绝对路径' },
-      sha256: { type: 'string', pattern: '^[a-fA-F0-9]{64}$', description: '可选：可信来源提供的预期 SHA-256，不要猜测' }
+      url: { type: 'string', minLength: 1, description: pick(lang, '完整 HTTP/HTTPS 下载地址', 'Full HTTP/HTTPS download URL') },
+      path: { type: 'string', minLength: 1, description: pick(lang, '保存文件的确切相对或绝对路径', 'Exact relative or absolute path to save the file') },
+      sha256: { type: 'string', pattern: '^[a-fA-F0-9]{64}$', description: pick(lang, '可选：可信来源提供的预期 SHA-256，不要猜测', 'Optional: expected SHA-256 from a trusted source; do not guess') }
     }, required: ['url', 'path'], additionalProperties: false } as ToolDefinition['parameters'],
     execute: async (_id, args, signal) => {
       const input = structuredClone(args) as Record<string, unknown>

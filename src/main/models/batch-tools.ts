@@ -6,31 +6,38 @@ import { FileMutationUncertain, FileSnapshotStopped } from './tool-execution-err
 import { canonicalToolPath } from './security-paths'
 import { validateReadArgs } from './read-tool-input'
 import { DownloadFailure } from './download-tool'
+import { pick, type PromptLang } from '../../shared/prompt-lang'
 
 export class ToolApprovalStopped extends ModelError {}
 const MAX_ITEMS = 100
 const TEXT_BUDGET = 200000
 const IMAGE_BUDGET = 8
 const BATCH_INPUT_BUDGET = 8 * 1024 * 1024
-const batchDescriptions: Record<string, string> = {
-  write: '批量创建或完整覆盖文本文件，多文件优先使用。局部修改使用 edit_many；单文件使用 write。自动创建父目录，已有文件会覆盖，不用于图片或二进制文件。',
-  edit: '批量精确编辑文本文件，多文件优先使用。同一文件的全部替换放在一个项目内，oldText 必须在原文件中唯一且互不重叠，附近修改合并。单文件使用 edit。每个文件先校验全部替换再保存，匹配失败不修改该文件。'
+const batchDescriptions: Record<string, Record<PromptLang, string>> = {
+  write: {
+    zh: '批量创建或完整覆盖文本文件，多文件优先使用。局部修改使用 edit_many；单文件使用 write。自动创建父目录，已有文件会覆盖，不用于图片或二进制文件。',
+    en: 'Batch create or fully overwrite text files; prefer for multiple files. Use edit_many for partial changes; write for a single file. Creates parent directories automatically, overwrites existing files, not for images or binaries.'
+  },
+  edit: {
+    zh: '批量精确编辑文本文件，多文件优先使用。同一文件的全部替换放在同一条 items 项内，oldText 必须在原文件中唯一且互不重叠，附近修改合并。单文件使用 edit。每个文件先校验全部替换再保存，匹配失败不修改该文件。',
+    en: 'Batch precise editing of text files; prefer for multiple files. Put all replacements for one file in a single items entry; oldText must be unique and non-overlapping in the original file, and nearby changes merge. Use edit for a single file. Each file validates all replacements before saving; on match failure the file is left unchanged.'
+  }
 }
 const schema = (properties: Record<string, unknown>, required: string[]) => ({ type: 'object', properties, required, additionalProperties: false })
 
 /** 仅组合已完成权限包装的单项工具，不提供第二条文件访问通道。 */
-export function batchToolDefinitions(root: string, tools: ToolDefinition<any, any>[], readConcurrency = 4): ToolDefinition<any, any>[] {
+export function batchToolDefinitions(root: string, tools: ToolDefinition<any, any>[], readConcurrency = 4, lang: PromptLang = 'zh'): ToolDefinition<any, any>[] {
   return tools.filter(tool => ['read', 'download', 'write', 'edit'].includes(tool.name)).map(single => {
     const name = single.name
     const reading = name === 'read'
     const textMutation = name === 'write' || name === 'edit'
     return {
-      name: `${name}_many`, label: { read: '批量读取文件', download: '批量下载文件', write: '批量写入文件', edit: '批量编辑文件' }[name] ?? single.label, executionMode: 'sequential' as const,
+      name: `${name}_many`, label: pick(lang, { read: '批量读取文件', download: '批量下载文件', write: '批量写入文件', edit: '批量编辑文件' }[name] ?? single.label, { read: 'Batch read files', download: 'Batch download files', write: 'Batch write files', edit: 'Batch edit files' }[name] ?? single.label), executionMode: 'sequential' as const,
       description: textMutation
-        ? `${batchDescriptions[name]} 输入 JSON 最多 8 MiB，目标路径不可重复。顺序执行，继承单项权限与快照；普通错误继续，取消、拒绝授权或快照失败则停止。逐项检查 results：success 不重做，failed 修正后补做，unknown 先核对，not_executed 未开始。stopped=true 不自动重试；批次不回滚。`
+        ? pick(lang, `${batchDescriptions[name].zh} 输入 JSON 最多 8 MiB，目标路径不可重复。顺序执行，继承单项权限与快照；普通错误继续，取消、拒绝授权或快照失败则停止。逐项检查 results：success 不重做，failed 修正后补做，unknown 先核对，not_executed 未开始。stopped=true 不自动重试；批次不回滚。`, `${batchDescriptions[name].en} Input JSON up to 8 MiB, target paths must be unique. Executes sequentially, inheriting single-item permissions and snapshots; continue on ordinary errors, stop on cancel, denied approval, or snapshot failure. Check results item by item: success — do not redo; failed — redo after fixing the cause; unknown — verify first; not_executed — not started. Do not auto-retry when stopped=true; the batch does not roll back.`)
         : reading
-        ? '批量读取文件，多个独立文件优先使用；继承 read 的权限和分段规则。输入最多 8 MiB，并发最多 4，输出累计 200000 字符和 8 张图片。按输入顺序返回状态；output_limited 按 nextOffset 续读，无 nextOffset 则从原 offset（省略时为 1）缩小 limit 或分批读图，不能跳过遗漏内容。LINE_TOO_LONG 缩小 limit 无效，改用 grep 定位或说明限制。普通错误继续；取消或拒绝后停止启动新项，已启动项可能完成，不自动重试。'
-        : '批量下载文件，多文件下载优先使用本工具。顺序执行，继承 download 的权限、快照及完整性校验；批内重复目标路径会被拒绝。输入 JSON 最多 8 MiB；普通错误逐项返回；取消、拒绝授权或快照失败后停止。不自动重试，不保证批次原子性，已完成文件不会自动回滚。success 不重复下载，unknown 先核对目标；warnings 仅表示清理问题，不代表下载失败。',
+        ? pick(lang, '批量读取文件，多个独立文件优先使用；继承 read 的权限和分段规则。输入最多 8 MiB，并发最多 4，输出累计 200000 字符和 8 张图片。按输入顺序返回状态；output_limited 按 nextOffset 续读，无 nextOffset 则从原 offset（省略时为 1）缩小 limit 或分批读图，不能跳过遗漏内容。LINE_TOO_LONG 缩小 limit 无效，改用 grep 定位或说明限制。普通错误继续；取消或拒绝后停止启动新项，已启动项可能完成，不自动重试。', 'Batch read files; prefer for multiple independent files; inherits read\'s permissions and segment rules. Input up to 8 MiB, concurrency up to 4, cumulative output 200000 characters and 8 images. Returns status in input order; output_limited — continue with nextOffset, or without nextOffset re-read from the original offset (1 if omitted) with a smaller limit or read images in batches, never skipping missed content. LINE_TOO_LONG — shrinking limit does not help; use grep to locate or state the limit. Continue on ordinary errors; after cancel or denial stop starting new items (already-started ones may complete); do not auto-retry.')
+        : pick(lang, '批量下载文件，多文件下载优先使用本工具。顺序执行，继承 download 的权限、快照及完整性校验；批内重复目标路径会被拒绝。输入 JSON 最多 8 MiB；普通错误逐项返回；取消、拒绝授权或快照失败后停止。不自动重试，不保证批次原子性，已完成文件不会自动回滚。success 不重复下载，unknown 先核对目标；warnings 仅表示清理问题，不代表下载失败。', 'Batch download files; prefer for multiple-file downloads. Executes sequentially, inheriting download\'s permissions, snapshots, and integrity checks; duplicate target paths within the batch are rejected. Input JSON up to 8 MiB; ordinary errors are returned per item; stops after cancel, denied approval, or snapshot failure. No auto-retry, no batch atomicity, completed files are not rolled back. Do not re-download success items; for unknown verify the target first; warnings only indicate cleanup issues, not download failure.'),
       parameters: schema({ items: { type: 'array', minItems: 1, maxItems: MAX_ITEMS, items: reading ? schema({ path: { type: 'string', minLength: 1 }, offset: { type: 'integer', minimum: 1 }, limit: { type: 'integer', minimum: 1 } }, ['path']) : single.parameters } }, ['items']) as ToolDefinition['parameters'],
       execute: async (id, args, signal, update, context) => {
         const input = (args as { items?: unknown })?.items

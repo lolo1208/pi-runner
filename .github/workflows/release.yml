@@ -43,7 +43,7 @@ jobs:
           else
             echo 'prerelease=false' >> "$GITHUB_OUTPUT"
           fi
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: refs/tags/${{ steps.version.outputs.tag }}
           persist-credentials: false
@@ -57,7 +57,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ needs.prepare.outputs.sha }}
           persist-credentials: false
@@ -106,7 +106,7 @@ jobs:
   #   runs-on: macos-14
   #   timeout-minutes: 45
   #   steps:
-  #     - uses: actions/checkout@v4
+  #     - uses: actions/checkout@v6
   #       with:
   #         ref: ${{ needs.prepare.outputs.sha }}
   #         persist-credentials: false
@@ -140,6 +140,44 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: 汇总完整提交记录
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          mkdir -p .tmp/release-notes
+          current=$(git rev-parse HEAD)
+          previous=''
+          # 从当前提交的父提交向历史查找最近的版本标签，避免选中当前标签。
+          if git rev-parse --verify 'HEAD^' >/dev/null 2>&1; then
+            previous=$(git describe --tags --match 'v[0-9]*' --abbrev=0 'HEAD^' 2>/dev/null || true)
+          fi
+          range="$current"
+          if [[ -n "$previous" ]]; then range="$previous..$current"; fi
+          {
+            echo '## 完整提交记录'
+            echo
+            if [[ -n "$previous" ]]; then
+              printf '范围：`%s` → `%s`（不含起始标签提交）。\n\n' "$previous" "$RELEASE_TAG"
+            else
+              printf '首个版本：截至 `%s` 的全部提交。\n\n' "$RELEASE_TAG"
+            fi
+            # %B 保留完整标题和正文；缩进为 Markdown 代码块，避免正文被当作 HTML。
+            # 不过滤合并提交，不去重、不摘要；按从旧到新的顺序列出。
+            git log --reverse --format='提交：%H%n作者：%an%n日期：%aI%n%n%B%n----------------------------------------' "$range" -- | sed 's/^/    /'
+            echo
+            if [[ -n "$previous" ]]; then
+              printf 'Full Changelog: https://github.com/%s/compare/%s...%s\n' "$GH_REPO" "$previous" "$RELEASE_TAG"
+            else
+              printf 'Full Changelog: https://github.com/%s/commits/%s\n' "$GH_REPO" "$RELEASE_TAG"
+            fi
+          } > .tmp/release-notes/notes.md
       - uses: actions/download-artifact@v4
         with:
           name: windows-release
@@ -163,7 +201,7 @@ jobs:
             if [[ "$PRERELEASE" == true ]]; then edit_flags+=(--latest=false); fi
             gh release edit "$RELEASE_TAG" --draft=false --prerelease="$PRERELEASE" "${edit_flags[@]}"
           else
-            gh release create "$RELEASE_TAG" --verify-tag --title "Pi Runner $RELEASE_TAG" --generate-notes "${flags[@]}"
+            gh release create "$RELEASE_TAG" --verify-tag --title "Pi Runner $RELEASE_TAG" --notes-file .tmp/release-notes/notes.md "${flags[@]}"
           fi
           gh release upload "$RELEASE_TAG" release/pi-runner-setup.exe release/pi-runner-portable.zip --clobber
           {

@@ -7,7 +7,13 @@ import type { CodeDiffProps } from '../../CodeDiff'
 const CodeDiff = lazy(() => import('../../CodeDiff'))
 export type DiffViewMode = 'unified' | 'split'
 
+const DIFF_VIEW_MODE_KEY = 'pi-runner.diff-view-mode'
+
 export function initialDiffViewMode(): DiffViewMode {
+  try {
+    const saved = localStorage.getItem(DIFF_VIEW_MODE_KEY)
+    if (saved === 'unified' || saved === 'split') return saved
+  } catch { /* 本地存储不可用时使用默认布局。 */ }
   return window.innerWidth < 760 ? 'unified' : 'split'
 }
 
@@ -31,9 +37,13 @@ export function DiffView({ theme: explicitTheme, ...props }: Omit<CodeDiffProps,
 }
 
 export function DiffViewSwitch({ mode, onChange }: { mode: DiffViewMode; onChange(mode: DiffViewMode): void }): React.JSX.Element {
+  const selectMode = (next: DiffViewMode): void => {
+    try { localStorage.setItem(DIFF_VIEW_MODE_KEY, next) } catch { /* 本地存储不可用时保留当前选择。 */ }
+    onChange(next)
+  }
   return <div className="tool-approval-view-switch" role="group" aria-label="对比视图">
-    <Button type="button" variant="ghost" aria-pressed={mode === 'unified'} onClick={() => onChange('unified')}><List size={14} aria-hidden="true" />统一</Button>
-    <Button type="button" variant="ghost" aria-pressed={mode === 'split'} onClick={() => onChange('split')}><Columns2 size={14} aria-hidden="true" />分栏</Button>
+    <Button type="button" variant="ghost" aria-pressed={mode === 'unified'} onClick={() => selectMode('unified')}><List size={14} aria-hidden="true" />统一</Button>
+    <Button type="button" variant="ghost" aria-pressed={mode === 'split'} onClick={() => selectMode('split')}><Columns2 size={14} aria-hidden="true" />分栏</Button>
   </div>
 }
 

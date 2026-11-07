@@ -6,6 +6,7 @@ import { validateOrdinaryPath } from './filesystem-tools'
 
 import { FileMutationUncertain } from './tool-execution-errors'
 import { validateToolPathSyntax } from './security-paths'
+import { pick, type PromptLang } from '../../shared/prompt-lang'
 export { FileMutationUncertain, FileSnapshotStopped } from './tool-execution-errors'
 export { validateToolPathSyntax as validateMutationPathSyntax } from './security-paths'
 
@@ -29,13 +30,13 @@ export async function validateTextMutationTarget(target: string): Promise<void> 
 }
 
 /** 在真正写入的边界跟踪状态，不依赖异常文案或 errno 猜测文件是否已经改变。 */
-export function textMutationToolDefinitions(root: string, protectPath: (target: string) => Promise<void>): ToolDefinition<any, any, any>[] {
+export function textMutationToolDefinitions(root: string, protectPath: (target: string) => Promise<void>, lang: PromptLang = 'zh'): ToolDefinition<any, any, any>[] {
   return ['write', 'edit'].map(name => {
     const base: ToolDefinition<any, any, any> = name === 'write' ? createWriteToolDefinition(root) : createEditToolDefinition(root)
     return { ...base,
       description: name === 'write'
-        ? '创建或完整覆盖 UTF-8 文本文件，自动创建父目录；局部修改用 edit，多个文件优先 write_many。仅允许普通文件，不写图片或二进制内容；已有文件会被覆盖。'
-        : '精确替换单个文本文件，多文件优先 edit_many。每项 oldText 必须在修改前的原文件中唯一匹配；各项区域不可重叠，不按 edits 顺序累积匹配。相邻或同块修改合并，不为连接远处改动夹入大段无关文本。全部匹配校验通过才保存。',
+        ? pick(lang, '创建或完整覆盖 UTF-8 文本文件，自动创建父目录；局部修改用 edit，多个文件优先 write_many。仅允许普通文件，不写图片或二进制内容；已有文件会被覆盖。', 'Create or fully overwrite a UTF-8 text file, creating parent directories automatically; use edit for partial changes, prefer write_many for multiple files. Ordinary files only; do not write image or binary content; existing files are overwritten.')
+        : pick(lang, '精确替换单个文本文件，多文件优先 edit_many。每项 oldText 必须在修改前的原文件中唯一匹配；各项区域不可重叠，且均针对修改前的原文件匹配（不按 edits 顺序累积）。相邻或同块修改合并，不为连接远处改动夹入大段无关文本。全部匹配校验通过才保存。', 'Precisely replace in a single text file; prefer edit_many for multiple files. Each oldText must match uniquely in the original file before modification; regions must not overlap, and each is matched against the original file (matched against the original file, not applied sequentially). Merge adjacent or same-block changes; do not pad with large unrelated text to connect distant changes. Save only after all matches validate.'),
       execute: async (id, args, signal, update, context) => {
       let writeStarted = false
       const trackedWrite = async (target: string, content: string): Promise<void> => {

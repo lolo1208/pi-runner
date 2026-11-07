@@ -19,7 +19,7 @@ interface PreferencesSectionProps {
   onPreferences: (preferences: Preferences) => void
 }
 
-const CUSTOM_PROMPT_EXAMPLE = '优先使用我明确指定的语言，否则沿用交流中的主要语言；必要的技术术语与标识符保留原文。'
+const CUSTOM_PROMPT_EXAMPLE = '默认使用简体中文，包括与我的对话、文档、代码注释和日志；必要的技术术语与标识符保留原文。'
 const CUSTOM_PROMPT_PLACEHOLDER = CUSTOM_PROMPT_EXAMPLE
 
 export function GeneralSettingsSection({ preferences, onPreferences, isMac, settings, onModelSettingsChange, onBusyChange }: PreferencesSectionProps & {

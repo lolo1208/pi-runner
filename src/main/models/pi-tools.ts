@@ -18,6 +18,7 @@ import { validateReadArgs } from './read-tool-input'
 import { textMutationToolDefinitions, validateTextMutationInput, validateTextMutationTarget } from './text-mutation-tools'
 import { FileSnapshotStopped } from './tool-execution-errors'
 import { skillScriptExtension, skillInterpreterScript } from './skill-script-policy'
+import { pick, type PromptLang } from '../../shared/prompt-lang'
 
 const fileMutations = new Set(['edit', 'write', 'download', 'delete', 'mkdir', 'rmdir', 'move', 'copy'])
 const treeOperations = new Set(['rmdir', 'move', 'copy'])
@@ -54,7 +55,7 @@ export async function projectToolPath(root: string, value: string): Promise<stri
   return target
 }
 
-export function piProjectTools(root: string, beforeMutation: () => Promise<void>, permissions?: ToolPermissionContext): ToolDefinition[] {
+export function piProjectTools(root: string, beforeMutation: () => Promise<void>, permissions?: ToolPermissionContext, lang: PromptLang = 'zh'): ToolDefinition[] {
   const protectPath = async (target: string): Promise<void> => {
     validateToolPathSyntax(target)
     if (await canonicalToolPath(target) !== target) throw new ModelError('操作期间目标路径发生变化，请重新请求操作')
@@ -73,12 +74,12 @@ export function piProjectTools(root: string, beforeMutation: () => Promise<void>
     TMPDIR: os.tmpdir(), TMP: os.tmpdir(), TEMP: os.tmpdir(), PSModuleAnalysisCachePath: path.join(os.tmpdir(), 'pi-runner-ModuleAnalysisCache'),
     PYTHONPYCACHEPREFIX: path.join(os.tmpdir(), 'pi-runner-python-cache'), PIP_CACHE_DIR: path.join(os.tmpdir(), 'pi-runner-pip-cache')
   } }) }
-  const definitions: ToolDefinition<any, any>[] = [createReadToolDefinition(root), ...textMutationToolDefinitions(root, protectPath), createDownloadToolDefinition(protectPath, { fetchRequest: permissions?.downloadFetch }), createDeleteToolDefinition(), ...filesystemToolDefinitions(protectPath), createLsToolDefinition(root), createFindToolDefinition(root), createGrepToolDefinition(root), process.platform === 'win32' ? createPowerShellToolDefinition(root, localShellOptions) : createBashToolDefinition(root, localShellOptions)]
+  const definitions: ToolDefinition<any, any>[] = [createReadToolDefinition(root), ...textMutationToolDefinitions(root, protectPath, lang), createDownloadToolDefinition(protectPath, { fetchRequest: permissions?.downloadFetch }, lang), createDeleteToolDefinition(lang), ...filesystemToolDefinitions(protectPath, lang), createLsToolDefinition(root), createFindToolDefinition(root), createGrepToolDefinition(root), process.platform === 'win32' ? createPowerShellToolDefinition(root, localShellOptions) : createBashToolDefinition(root, localShellOptions)]
   const terminalOptions = (tool: ToolDefinition<any, any>) => ({
     parameters: tool.parameters,
     description: [tool.description,
-      permissions?.mode === 'auto' ? '项目自审：命令由应用规则或审核模型判断，必要时请求用户确认；常见开发命令并非无条件放行。直接文件操作和下载落盘须用专用工具，不得以脚本绕过。' : '',
-      'partial-or-unknown 时先核对结果，只补做剩余步骤；denied 或 awaiting-approval 时不要重复申请相同授权。'
+      permissions?.mode === 'auto' ? pick(lang, '项目自审：命令由应用规则或审核模型判断，必要时请求用户确认；常见开发命令并非无条件放行。直接文件操作和下载落盘须用专用工具，不得以脚本绕过。', 'Project self-review: commands are decided by app rules or a review model, asking the user when necessary; common dev commands are not unconditionally allowed. Direct file operations and downloads to disk must use dedicated tools, not scripts.') : '',
+      pick(lang, 'partial-or-unknown 时先核对结果，只补做剩余步骤；denied 或 awaiting-approval 时不要重复申请相同授权。', 'On partial-or-unknown, verify results first and only redo remaining steps; on denied or awaiting-approval, do not re-request the same authorization.')
     ].filter(Boolean).join(' ')
   })
   const approve: ToolPermissionContext['approve'] = async (...args) => {
@@ -87,11 +88,11 @@ export function piProjectTools(root: string, beforeMutation: () => Promise<void>
   }
   const wrapped: ToolDefinition<any, any>[] = definitions.map(tool => ({ ...tool,
     ...(['bash', 'powershell'].includes(tool.name) ? terminalOptions(tool) : {}),
-    ...(tool.name === 'ls' ? { description: '列出目录，默认最多 500 项，可用 limit 指定 1–1000 项；输出最多 50000 字符，扫描最多 20000 项。按名称排序，目录带 / 后缀，过滤链接和受保护内容；结果不完整时明确提示，请用 find 缩小范围。' } : {}),
-    ...(tool.name === 'read' ? { description: `${tool.description} 允许读取项目 node_modules 内、解析后仍位于该目录内的依赖链接文件（如 pnpm）；其他链接和链接写入仍禁止。` } : {}),
+    ...(tool.name === 'ls' ? { description: pick(lang, '列出目录，默认最多 500 项，可用 limit 指定 1–1000 项；输出最多 50000 字符，扫描最多 20000 项。按名称排序，目录带 / 后缀，过滤链接和受保护内容；结果不完整时明确提示，请用 find 缩小范围。', 'List a directory, up to 500 items by default (limit 1–1000); output up to 50000 characters, scan up to 20000 items. Sorted by name, directories end with /; links and protected content are filtered; when results are incomplete it says so explicitly — use find to narrow the scope.') } : {}),
+    ...(tool.name === 'read' ? { description: pick(lang, `${tool.description} 允许读取项目 node_modules 内、解析后仍位于该目录内的依赖链接文件（如 pnpm）；其他链接和链接写入仍禁止。`, `${tool.description} Reading dependency-linked files inside the project's node_modules (e.g., pnpm) whose resolved target stays within that directory is allowed; other links and link writes remain forbidden.`) } : {}),
     ...(['find', 'grep'].includes(tool.name) ? { description: [
-      tool.name === 'find' ? '按 glob 查找普通文件和目录，默认及最多返回 1000 项。' : '搜索普通文件内容，默认返回 100 项，最多 1000 项。跳过二进制和大于 1 MiB 的文件，匹配行最多展示 500 字符；正则单文件限时 100 毫秒，字面搜索用 literal=true。',
-      '不跟随链接，排除 Git 元数据、应用内部数据和 node_modules；输出最多 50000 字符、扫描最多 20000 项。截断或跳过时缩小范围，不能据此断言无匹配。'
+      tool.name === 'find' ? pick(lang, '按 glob 查找普通文件和目录，默认及最多返回 1000 项。', 'Find ordinary files and directories by glob; returns up to 1000 items by default and maximum.') : pick(lang, '搜索普通文件内容，默认返回 100 项，最多 1000 项。跳过二进制和大于 1 MiB 的文件，匹配行最多展示 500 字符；正则单文件限时 100 毫秒，字面搜索用 literal=true。', 'Search ordinary file contents; returns 100 items by default, 1000 max. Skips binaries and files over 1 MiB; matched lines show up to 500 characters; regex per file is limited to 100 ms; use literal=true for literal search.'),
+      pick(lang, '不跟随链接，排除 Git 元数据、应用内部数据和 node_modules；输出最多 50000 字符、扫描最多 20000 项。截断或跳过时缩小范围，不能据此断言无匹配。', 'Does not follow links; excludes Git metadata, app internal data, and node_modules; output up to 50000 characters, scan up to 20000 items. When truncated or skipped, narrow the scope; do not conclude "no matches".')
     ].join(' ') } : {}),
     execute: async (id, args, signal, update, context) => {
     signal?.throwIfAborted()
@@ -232,5 +233,5 @@ export function piProjectTools(root: string, beforeMutation: () => Promise<void>
     if (revalidate) await revalidate()
     return tool.execute(id, input, signal, update, context)
   } }))
-  return [...wrapped, ...batchToolDefinitions(root, wrapped, permissions?.mode === 'default' ? 1 : 4)]
+  return [...wrapped, ...batchToolDefinitions(root, wrapped, permissions?.mode === 'default' ? 1 : 4, lang)]
 }

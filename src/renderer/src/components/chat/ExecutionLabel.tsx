@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { LoaderCircle } from 'lucide-react'
 import { ModelIcon } from './ModelIcon'
-import { AgentStatusText } from './AgentStatusText'
 import type { ChatExecution } from '../../../../shared/models'
 
 export function formatExecutionDuration(elapsedMs: number): string {
@@ -10,7 +9,7 @@ export function formatExecutionDuration(elapsedMs: number): string {
   return `${Math.floor(seconds / 60)}分 ${seconds % 60}秒`
 }
 
-export function ExecutionLabel({ execution, startedAt, status, receivedBytes, busy = false }: { execution?: ChatExecution; startedAt?: number; status?: string; receivedBytes?: number; busy?: boolean }): React.JSX.Element {
+export function ExecutionLabel({ execution, startedAt, status, busy = false }: { execution?: ChatExecution; startedAt?: number; status?: string; busy?: boolean }): React.JSX.Element {
   const [now, setNow] = useState(() => performance.now())
   useEffect(() => {
     if (startedAt === undefined) return
@@ -21,6 +20,6 @@ export function ExecutionLabel({ execution, startedAt, status, receivedBytes, bu
   const elapsedMs = startedAt === undefined ? execution?.elapsedMs : now - startedAt
   return <strong className="chat-execution">{busy ? <LoaderCircle className="chat-execution-spinner" size={15} aria-label="对话进行中" /> : <ModelIcon model={execution?.model} provider={execution?.provider} />}<span className="chat-execution-model">{execution?.model || '模型未记录'}</span>
     {elapsedMs !== undefined && <span className="chat-execution-duration" aria-label={`${startedAt === undefined ? '执行耗时' : '已执行'} ${formatExecutionDuration(elapsedMs)}`}>· {formatExecutionDuration(elapsedMs)}</span>}
-    {status && <span className="chat-execution-status" role="status">· <AgentStatusText status={status} receivedBytes={receivedBytes} /></span>}
+    {status && <span className="chat-execution-status" role="status">· {status}</span>}
   </strong>
 }

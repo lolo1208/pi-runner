@@ -45,7 +45,7 @@ describe('tool review decisions', () => {
   it('uses AI review even when no project is bound', async () => {
     const complete = vi.spyOn(ModelClient.prototype, 'complete').mockResolvedValue({ text: '{"decision":"allow"}' } as ModelReply)
     expect(await new ToolReviewService(store()).review(request({ project: undefined }))).toBe('allow')
-    expect(complete.mock.calls[0]?.[2]?.[0]?.content).toContain('当前项目：未绑定')
+    expect(complete.mock.calls[0]?.[2]?.[0]?.content).toContain('"project":null')
   })
   it.each(['allow', 'ask', 'deny'] as const)('accepts strict JSON decision %s', async decision => {
     vi.spyOn(ModelClient.prototype, 'complete').mockResolvedValue({ text: JSON.stringify({ decision, reason: '评估结果' }) } as ModelReply)

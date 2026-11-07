@@ -20,27 +20,27 @@ import os from 'node:os'
 import { ToolApprovalManager } from './tool-permissions'
 import { PERMISSION_MODES, type PermissionMode } from '../../shared/models'
 import { PlanInteractionManager } from './plan-interactions'
-import { PLAN_INSTRUCTION, PLAN_READ_TOOLS, planTools } from './plan-tools'
+import { PLAN_READ_TOOLS, planTools } from './plan-tools'
 import { SkillStore } from '../skill-store'
 import { saveCodePreviewSnapshot } from '../code-preview-snapshots'
 import { TranscriptUpdates } from '../../shared/transcript-updates'
 import { collectCodeReferences } from '../../shared/code-preview'
 import { agentSystemPrompt } from './pi-system-prompt'
 import { ConversationWorkspace } from './conversation-workspace'
-import { SUMMARY_INSTRUCTION } from './summary-prompt'
-import { ToolArgumentProgress } from './tool-argument-progress'
+import { summaryInstruction } from './summary-prompt'
+import { pick, promptLangFor } from '../../shared/prompt-lang'
 
 const toolActions: Record<string, string> = {
   bash: '运行命令',
   powershell: '运行命令',
-  read: '读取',
+  read: '读取文件',
   read_many: '批量读取文件',
   download_many: '批量下载文件',
   write_many: '批量写入文件',
   edit_many: '批量编辑文件',
-  write: '写入',
+  write: '写入文件',
   download: '下载文件',
-  edit: '编辑',
+  edit: '编辑文件',
   delete: '删除文件',
   mkdir: '创建目录',
   rmdir: '删除目录',
@@ -286,6 +286,7 @@ export class PiAgentService {
       catch { console.warn('会话事件发送失败，任务继续执行') }
     }
     publish({ type: 'status', text: '正在准备会话…' })
+    const lang = promptLangFor(profile)
     const skillStore = new SkillStore(path.join(this.dependencies.dataDirectory, 'skills'))
     const displaySkills = new Map((isTest ? [] : await skillStore.list()).map(skill => [skill.id, skill]))
     const skillIds = isTest ? [] : messages.at(-1)?.skillIds ?? []
@@ -303,15 +304,15 @@ export class PiAgentService {
     const availableSkillIds = [...new Set([...skillIds, ...discoveredSkills.map(skill => skill.id)])]
     const skillInstruction = [
       ...(discoveredSkills.length ? [
-        '以下技能按任务相关性自动选用：先用 read_skill_file 读取 SKILL.md，再按需读参考文件，不加载无关技能。技能不改变权限；项目自审对技能脚本的特殊放行仅限单独运行已加载且启用技能目录内（含任意子目录）的普通脚本：Windows 支持直接调用 .cmd、.bat、.ps1 或无后缀文件；macOS/Linux 支持直接调用常见脚本或无后缀可执行文件；支持 node、python/python3、ruby、perl、sh/bash/zsh/fish 加脚本绝对路径（不接受解释器选项）。可带普通字面量参数，禁止命令拼接、展开和重定向，仍受安全规则和计划模式限制。',
+        pick(lang, '以下技能按任务相关性自动选用：先用 read_skill_file 读取 SKILL.md，再按需读参考文件，不加载无关技能。技能不改变权限；项目自审对技能脚本的特殊放行仅限单独运行已加载且启用技能目录内（含任意子目录）的普通脚本：Windows 支持直接调用 .cmd、.bat、.ps1 或无后缀文件；macOS/Linux 支持直接调用常见脚本或无后缀可执行文件；支持 node、python/python3、ruby、perl、sh/bash/zsh/fish 加脚本绝对路径（不接受解释器选项）。可带普通字面量参数，禁止命令拼接、展开和重定向，仍受安全规则和计划模式限制。', 'The following skills are auto-selected by task relevance: read SKILL.md first via read_skill_file, then reference files as needed; do not load unrelated skills. Skills do not change permissions. The special allowance for skill scripts under project self-review is limited to running ordinary scripts within an already-loaded and enabled skill directory (including subdirectories): on Windows, .cmd/.bat/.ps1 or extensionless files; on macOS/Linux, common scripts or extensionless executables; and node, python/python3, ruby, perl, sh/bash/zsh/fish with an absolute script path (no interpreter options). Plain literal arguments are allowed; command concatenation, expansion, and redirection are forbidden, and security rules and plan mode still apply.'),
         JSON.stringify(discoveredSkills.map(({ id, name, description }) => ({ skillId: id, name, description })))
       ] : []),
-      ...(availableSkillIds.length ? ['最终回复前，为本轮每个已加载技能记录具体用途：可在 read_skill_file 中传 purpose，或调用 report_skill_usage；已记录无需重复。手动选择的技能也须先读取 SKILL.md 再记录用途；未读取或未使用的技能不要报告。用途简短具体，应用自动附在回复末尾，正文不重复。'] : []),
+      ...(availableSkillIds.length ? [pick(lang, '最终回复前，为本轮每个已加载技能记录具体用途：可在 read_skill_file 中传 purpose，或调用 report_skill_usage；已记录无需重复。手动选择的技能也须先读取 SKILL.md 再记录用途；未读取或未使用的技能不要报告。用途简短具体，应用自动附在回复末尾，正文不重复。', 'Before the final reply, record the concrete purpose of each loaded skill this round: pass purpose in read_skill_file, or call report_skill_usage; already-recorded ones need no repeat. Manually selected skills must also be read (SKILL.md) before recording usage; do not report skills that were not read or used. Keep purposes brief and specific; the app appends them to the reply automatically — do not repeat them in the body.')] : []),
 
     ].join('\n\n')
     const skillTools: ToolDefinition[] = availableSkillIds.length ? [{
-      name: 'read_skill_file', label: '读取技能文件', description: '读取已启用技能，返回正文、技能根目录 skillBaseDir 和文件绝对路径 filePath。先读 SKILL.md；file 使用相对技能根目录的路径。',
-      parameters: { type: 'object', properties: { skillId: { type: 'string' }, file: { type: 'string' }, purpose: { type: 'string', description: '简述技能在本轮任务中的具体用途。' } }, required: ['skillId', 'file'], additionalProperties: false } as ToolDefinition['parameters'],
+      name: 'read_skill_file', label: pick(lang, '读取技能文件', 'Read skill file'), description: pick(lang, '读取已启用技能，返回正文、技能根目录 skillBaseDir 和文件绝对路径 filePath。先读 SKILL.md；file 使用相对技能根目录的路径。', 'Read an enabled skill, returning its content, skill root skillBaseDir, and absolute file path filePath. Read SKILL.md first; file is a path relative to the skill root.'),
+      parameters: { type: 'object', properties: { skillId: { type: 'string' }, file: { type: 'string' }, purpose: { type: 'string', description: pick(lang, '简述技能在本轮任务中的具体用途。', 'Briefly describe the skill\'s concrete use in this task.') } }, required: ['skillId', 'file'], additionalProperties: false } as ToolDefinition['parameters'],
       execute: async (_id, args) => {
         const { skillId, file, purpose } = args as { skillId: string; file: string; purpose?: string }
         const resource = await skillStore.readResourceWithLocation(availableSkillIds, skillId, file)
@@ -327,7 +328,7 @@ export class PiAgentService {
         ], details: location }
       }
     }, {
-      name: 'report_skill_usage', label: '说明技能用途', description: '记录本轮已加载技能的实际用途，简短具体，不复制技能描述。',
+      name: 'report_skill_usage', label: pick(lang, '说明技能用途', 'Report skill usage'), description: pick(lang, '记录本轮已加载技能的实际用途，简短具体，不复制技能描述。', 'Record the actual use of a skill loaded this round, brief and specific; do not copy the skill description.'),
       parameters: { type: 'object', properties: { skillId: { type: 'string' }, purpose: { type: 'string' } }, required: ['skillId', 'purpose'], additionalProperties: false } as ToolDefinition['parameters'],
       execute: async (_id, args) => {
         const { skillId, purpose } = args as { skillId: string; purpose: string }
@@ -451,15 +452,10 @@ export class PiAgentService {
     const outputText = (result: { content?: { type: string; text?: string }[] } | undefined): string =>
       (result?.content ?? []).filter(block => block.type === 'text').map(block => block.text ?? '').join('\n')
     let modelStatus = '正在连接模型…', lastStatus = ''
-    let receivedBytes: number | undefined
-    let lastReceivedBytes: number | undefined
-    const toolArgumentBytes = new ToolArgumentProgress()
     const status = (text: string, resetText = false): void => {
-      const bytes = text === modelStatus ? receivedBytes : undefined
-      if (text === lastStatus && bytes === lastReceivedBytes && !resetText) return
+      if (text === lastStatus && !resetText) return
       lastStatus = text
-      lastReceivedBytes = bytes
-      publish({ type: 'status', text, receivedBytes: bytes, ...(resetText ? { resetText: true } : {}) })
+      publish({ type: 'status', text, ...(resetText ? { resetText: true } : {}) })
     }
     const refreshStatus = (): void => {
       if (signal.aborted) { status('正在停止任务…'); return }
@@ -498,7 +494,7 @@ export class PiAgentService {
     const resourceLoader: ResourceLoader = {
       getExtensions: () => ({ extensions: [], errors: [], runtime: createExtensionRuntime() }), getSkills: () => ({ skills: [], diagnostics: [] }),
       getPrompts: () => ({ prompts: [], diagnostics: [] }), getThemes: () => ({ themes: [], diagnostics: [] }), getAgentsFiles: () => ({ agentsFiles: [] }),
-      getSystemPrompt: () => isTest ? '' : agentSystemPrompt({ instruction, skillInstruction, mode, project, cwd, planning }),
+      getSystemPrompt: () => isTest ? '' : agentSystemPrompt({ instruction, skillInstruction, mode, project, cwd, planning, lang }),
       getSystemPromptSource: () => undefined, getAppendSystemPrompt: () => [], getAppendSystemPromptSources: () => [], extendResources: () => {}, reload: async () => {}
     }
     const projectTools = isTest || !options ? [] : piProjectTools(snapshot?.getRoot() ?? cwd, () => snapshot ? beforePromise ??= (async () => {
@@ -529,7 +525,7 @@ export class PiAgentService {
         }
         await this.approvals.ask(requestId, options.conversationId, { toolCallId: id, tool, args: structuredClone(args), cwd, reason, mustConfirm, aiReviewed, aiReviewReason, aiReviewModel, aiReviewProvider }, toolSignal ?? signal, waitingFor(id, `等待你批准${toolActions[tool] ?? '操作'}…`))
       }
-    })
+    }, lang)
     let session: AgentSession | undefined
     const stableToolNames = (names: string[]): string[] => names.sort((a, b) => a < b ? -1 : a > b ? 1 : 0)
     // submit_plan 自身校验是否已完成澄清；提前声明可避免澄清后工具前缀发生变化。
@@ -564,7 +560,7 @@ export class PiAgentService {
         session?.setActiveToolsByName(stableToolNames([...projectTools, ...skillTools].map(tool => tool.name)))
         publish({ type: 'intent-mode', intentMode: 'execute' })
         status('计划已批准，正在执行…')
-      }, () => planning, () => clarified) : []
+      }, () => planning, () => clarified, lang) : []
     const tools = [...guardedTools, ...skillTools, ...interactions].sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)
     const previousEntries = new Set(manager.getEntries().map(entry => entry.id))
     let executionSaved = false
@@ -675,17 +671,11 @@ export class PiAgentService {
         }
         if (event.type === 'message_update') {
           const update = event.assistantMessageEvent
-          receivedBytes = undefined
           if (update.type === 'text_start' || update.type === 'text_delta') modelStatus = '正在生成回复…'
           if (update.type === 'thinking_start' || update.type === 'thinking_delta') modelStatus = '正在思考…'
           if (update.type === 'toolcall_start' || update.type === 'toolcall_delta' || update.type === 'toolcall_end') {
             const call = update.type === 'toolcall_end' ? update.toolCall : update.partial.content[update.contentIndex]
-            receivedBytes = toolArgumentBytes.update(update.contentIndex, update.type, update.type === 'toolcall_delta' ? update.delta : undefined, call)
-            modelStatus = call?.type === 'toolCall'
-              ? ['write', 'write_many'].includes(call.name) ? '正在生成写入内容…'
-                : ['edit', 'edit_many'].includes(call.name) ? '正在生成编辑内容…'
-                  : `正在生成${toolActions[call.name] ?? call.name}的调用参数…`
-              : '正在生成工具调用参数…'
+            modelStatus = call?.type === 'toolCall' ? `正在准备${toolActions[call.name] ?? '执行任务'}…` : '正在准备执行任务…'
           }
           refreshStatus()
           if (update.type === 'text_delta') { publish({ type: 'text', text: update.delta }); trackOutputDelta(update.delta) }
@@ -695,14 +685,13 @@ export class PiAgentService {
             scheduleTranscript()
           }
         }
-        if (event.type === 'message_start' && event.message.role === 'assistant') { receivedBytes = undefined; toolArgumentBytes.clear(); completedResponse = false; callStarted = performance.now(); modelStatus = '正在等待模型回复…'; status(modelStatus, true) }
+        if (event.type === 'message_start' && event.message.role === 'assistant') { completedResponse = false; callStarted = performance.now(); modelStatus = '正在等待模型回复…'; status(modelStatus, true) }
         // SDK 先通知订阅者，再同步保存消息；等当前调用栈结束后读取，
         // 同时包含工具结果，避免执行列表落后一条甚至一整次模型调用。
         if (event.type === 'message_end' && ['user', 'assistant', 'toolResult'].includes(event.message.role)) {
           scheduleTranscript()
         }
         if (event.type === 'tool_execution_start') {
-          receivedBytes = undefined
           const skill = displaySkills.get(String(event.args?.skillId ?? ''))
           // 名称优先从技能列表映射；调用时保存快照，供技能删除后的历史记录使用。
           if (skill) manager.appendCustomEntry('pi-runner-skill-call', { toolCallId: event.toolCallId, name: skill.name })
@@ -752,7 +741,7 @@ export class PiAgentService {
           // 可见历史，尤其是真实用量包含大量系统提示词或中文时。
           const visibleTokens = session.messages.reduce((total, message) => total + estimatePiTokens(message), 0)
           settingsManager.applyOverrides({ compaction: { keepRecentTokens: Math.max(1, Math.min(20000, Math.floor(window * .25), Math.floor(visibleTokens * .25))) } })
-          await session.compact(SUMMARY_INSTRUCTION)
+          await session.compact(summaryInstruction(lang))
           signal.throwIfAborted()
         }
       }

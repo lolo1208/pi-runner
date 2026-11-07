@@ -38,12 +38,14 @@ export function ComposerStatus({ project, profile, contextLimit, messages, promp
   const [detailsReply, setDetailsReply] = useState<ModelReply>()
   const openDetails = (): void => { if (latestReply) setDetailsReply(latestReply) }
   const measured = usage && usage.inputTokens + usage.outputTokens > 0 ? usage : undefined
+  // 历史估算与草稿估算一样延后到低优先级，避免流式期间对整段历史逐字符重算阻塞交互。
+  const deferredMessages = useDeferredValue(messages)
   const history = useMemo(() => {
-    if (!measured) return { tokens: estimateContextTokens(messages, instruction), trailing: false }
-    const lastAssistantIndex = messages.map(message => message.role).lastIndexOf('assistant')
-    const trailing = lastAssistantIndex >= 0 ? messages.slice(lastAssistantIndex + 1) : []
+    if (!measured) return { tokens: estimateContextTokens(deferredMessages, instruction), trailing: false }
+    const lastAssistantIndex = deferredMessages.map(message => message.role).lastIndexOf('assistant')
+    const trailing = lastAssistantIndex >= 0 ? deferredMessages.slice(lastAssistantIndex + 1) : []
     return { tokens: measured.inputTokens + measured.outputTokens + estimateContextTokens(trailing), trailing: trailing.length > 0 }
-  }, [messages, instruction, measured?.inputTokens, measured?.outputTokens])
+  }, [deferredMessages, instruction, measured?.inputTokens, measured?.outputTokens])
   // 附件解码与正文输入分开缓存，避免每次按键都解码大文本或统计图片。
   const attachmentTokens = useMemo(() => attachments?.length
     ? estimateContextTokens([{ role: 'user', content: '', images: attachments }]) - 4 : 0, [attachments])

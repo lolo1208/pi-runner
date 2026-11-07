@@ -12,7 +12,12 @@ export interface ContextCompaction { summary: string; coveredMessages: number }
 export interface ContextOptions { threshold: number; usage?: ModelUsage }
 export function estimateTextTokens(text: string): number {
   let tokens = 0
-  for (const character of text) tokens += /[^\x00-\x7F]/.test(character) ? 1 : .25
+  for (let index = 0; index < text.length; index++) {
+    const code = text.charCodeAt(index)
+    // 跳过代理对的后半，使 astral 字符（emoji 等）与逐码点迭代的结果一致。
+    if (code >= 0xdc00 && code <= 0xdfff) continue
+    tokens += code > 0x7f ? 1 : .25
+  }
   return Math.ceil(tokens)
 }
 export function estimateContextTokens(messages: ChatMessage[], instruction = ''): number {

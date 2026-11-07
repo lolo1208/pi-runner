@@ -3,7 +3,7 @@ import { flushSync } from 'react-dom'
 import type { ConversationState } from '../../../shared/conversations'
 import { conversationPatch } from '../../../shared/conversation-patches'
 import { BufferedSave, FLUSH_DRAFTS_EVENT } from '../lib/buffered-updates'
-import { conversationSaveError, deferRunningTranscripts } from '../lib/conversation-persistence'
+import { conversationDraftChanges, conversationSaveError, deferRunningTranscripts, withoutLegacyMessageUnset } from '../lib/conversation-persistence'
 
 const NO_BUSY_TASKS: readonly string[] = []
 
@@ -22,7 +22,17 @@ export function useConversationPersistence(loaded: boolean, tasks: ConversationS
     // 缺少增量协议时明确失败，不能悄悄回退为全库跨 IPC 复制。
     if (!window.piRunner.saveConversationPatch) throw new Error('会话增量保存接口不可用，请重启或更新应用。')
     if (!acknowledged.current) acknowledged.current = await window.piRunner.loadConversations()
-    const patch = conversationPatch(acknowledged.current, state)
+    // 纯文字草稿与选中态只写轻量覆盖层，不追加增量日志、不重写全库；消息、队列、图片等仍走全量增量。
+    const draftChanges = conversationDraftChanges(acknowledged.current, state, true)
+    if (draftChanges !== null) {
+      if (draftChanges.length || state.selectedId !== acknowledged.current.selectedId) {
+        if (!window.piRunner.saveConversationDrafts) throw new Error('会话草稿保存接口不可用，请重启或更新应用。')
+        await window.piRunner.saveConversationDrafts(draftChanges, state.selectedId)
+      }
+      acknowledged.current = state
+      return
+    }
+    const patch = withoutLegacyMessageUnset(acknowledged.current, conversationPatch(acknowledged.current, state))
     // 只过滤变化字段中的流式占位，不遍历所有历史与附件。
     for (const update of patch.updates) if (update.fields.messages) {
       update.fields.messages = update.fields.messages.filter(message => !message.historyId?.startsWith('live-thinking:') && !message.historyId?.startsWith('live:'))
