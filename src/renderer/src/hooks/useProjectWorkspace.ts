@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { isStringList, readWorkspaceViewState, writeWorkspaceViewState } from '../lib/workspace-view-state'
 import { useConversationPersistence } from './useConversationPersistence'
 import { subscribeAgentEvents } from '../lib/agent-events'
 import type { ChangedFile, Checkpoint, FileDiff } from '../../../shared/api'
@@ -63,11 +64,15 @@ export function useProjectWorkspace() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [composerFocusTaskId, setComposerFocusTaskId] = useState<string | null>(null)
   const [query, setQuery] = useState('')
-  const [collapsedProjects, setCollapsedProjects] = useState<string[]>([])
+  const [collapsedProjects, setCollapsedProjects] = useState<string[]>(() => readWorkspaceViewState('collapsed-projects', [], isStringList))
+  useLayoutEffect(() => { writeWorkspaceViewState('collapsed-projects', collapsedProjects) }, [collapsedProjects])
   const [searchOpen, setSearchOpen] = useState(false)
 
   const [loaded, setLoaded] = useState(false)
   const persistenceBaseline = useRef<import('../../../shared/conversations').ConversationState | null>(null)
+  useLayoutEffect(() => {
+    if (loaded) writeWorkspaceViewState('selected-conversation', selectedId)
+  }, [loaded, selectedId])
 
   useEffect(() => {
     let active = true
@@ -87,9 +92,13 @@ export function useProjectWorkspace() {
         restored[root] = { ...emptySnapshotState, checkpoints: [...checkpoints.values()].sort((left, right) => left.createdAt.localeCompare(right.createdAt)) }
       }
       setSnapshotsByProject(restored)
-      setSelectedId(state.selectedId)
+      const savedSelection = readWorkspaceViewState('selected-conversation', '', (value): value is string => typeof value === 'string')
+      const restoredTask = state.tasks.find(task => task.id === savedSelection)
+        ?? state.tasks.find(task => task.id === state.selectedId)
+        ?? state.tasks[0]
+      setSelectedId(restoredTask?.id ?? null)
       setLoaded(true)
-      const root = (state.tasks.find(task => task.id === state.selectedId) ?? state.tasks[0])?.project
+      const root = restoredTask?.project
       if (root) {
         void window.piRunner.openProject(root).then(opened => { if (active) setProject(opened) })
           .catch(error => { if (active) setError(`会话已恢复，但项目打开失败：${error instanceof Error ? error.message : String(error)}`) })
@@ -292,6 +301,8 @@ export function useProjectWorkspace() {
     return runAction(async () => {
       let target = root
       const directory = next.directory.trim()
+      // 编辑弹窗负责带基线校验的保存；目录重绑定只读目标文件，绝不复制旧目录提示词。
+      const savedPrompt = await window.piRunner.syncPromptFile(directory || root, '')
       if (isChatBusy) {
         // 先保存信息；当前轮次继续使用原目录，队列等待目录切换后再发送。
         const pending = { ...pendingProjectDirectories }
@@ -314,7 +325,7 @@ export function useProjectWorkspace() {
       persistProjects(projects)
 
       const name = next.name.trim()
-      const prompt = next.prompt.trim()
+      const prompt = savedPrompt
       const fallbackName = defaultProjectName(root)
       setProjectMeta(current => {
         const updated: ProjectMetaMap = { ...current }
@@ -386,6 +397,12 @@ export function useProjectWorkspace() {
     readyProjects,
     savedProjects,
     projectMeta,
+    syncProjectPrompt: (root: string, prompt: string): void => setProjectMeta(current => {
+      if ((current[root]?.prompt ?? '') === prompt) return current
+      const updated = { ...current, [root]: { ...current[root], prompt } }
+      writeProjectMetaMap(updated)
+      return updated
+    }),
     isBusy,
     error,
     setError,

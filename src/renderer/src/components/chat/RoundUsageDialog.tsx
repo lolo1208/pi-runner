@@ -29,10 +29,18 @@ export function RoundUsageDialog({ reply, onClose }: { reply: ModelReply; onClos
         <TableCell>{(call.elapsedMs / 1000).toFixed(1)} 秒</TableCell>
       </TableRow>
     })}</TableBody></Table> : <p className="round-usage-empty">此轮没有保存逐次调用明细。完成新一轮回复后可查看。</p>}
-    {reply.auxiliaryCalls?.length ? <section className="round-usage-auxiliary" aria-label="辅助模型调用"><h3>辅助调用</h3>{reply.auxiliaryCalls.map((call, index) => <div className="round-usage-auxiliary-row" key={`${call.purpose}-${index}`}>
-      <div><strong>{purposeName[call.purpose]}</strong><span>{call.model} · {call.status === 'completed' ? '完成' : call.status === 'aborted' ? '已中断' : '失败'}</span></div>
-      <span>输入 {call.usageFields?.input === false ? '—' : count(call.usage?.inputTokens)} · 输出 {call.usageFields?.output === false ? '—' : count(call.usage?.outputTokens)} · 缓存读 {call.usageFields?.cacheRead === false ? '—' : count(call.usage?.cacheReadTokens)} · 写 {call.usageFields?.cacheWrite === false ? '—' : count(call.usage?.cacheWriteTokens)} · {(call.elapsedMs / 1000).toFixed(1)} 秒</span>
-    </div>)}</section> : null}
+    {reply.auxiliaryCalls?.length ? <section className="round-usage-auxiliary" aria-label="辅助模型调用"><h3>辅助调用</h3>
+      <Table className="round-usage-table"><TableHeader><TableRow>{['用途', '模型', '状态', '输入', '输出', '缓存读取', '缓存写入', '耗时'].map(label => <TableHead key={label} scope="col">{label}</TableHead>)}</TableRow></TableHeader><TableBody>{reply.auxiliaryCalls.map((call, index) => <TableRow key={`${call.purpose}-${index}`}>
+        <TableCell><strong>{purposeName[call.purpose]}</strong></TableCell>
+        <TableCell>{call.model}</TableCell>
+        <TableCell>{call.status === 'completed' ? '完成' : call.status === 'aborted' ? '已中断' : '失败'}</TableCell>
+        <TableCell>{call.usageFields?.input === false ? '—' : count(call.usage?.inputTokens)}</TableCell>
+        <TableCell>{call.usageFields?.output === false ? '—' : count(call.usage?.outputTokens)}</TableCell>
+        <TableCell>{call.usageFields?.cacheRead === false ? '—' : count(call.usage?.cacheReadTokens)}</TableCell>
+        <TableCell>{call.usageFields?.cacheWrite === false ? '—' : count(call.usage?.cacheWriteTokens)}</TableCell>
+        <TableCell>{(call.elapsedMs / 1000).toFixed(1)} 秒</TableCell>
+      </TableRow>)}</TableBody></Table>
+    </section> : null}
     </div>
   </Modal>
 }

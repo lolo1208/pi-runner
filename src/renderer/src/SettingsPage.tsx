@@ -13,6 +13,9 @@ interface Props {
   settings: ModelSettings | null; error: string; reload(): void
   onChange(settings: ModelSettings): void; onClose(): void
   preferences: Preferences; onPreferences(value: Preferences): void
+  promptActions?: React.ReactNode
+  promptReady?: boolean
+  onPromptSettingsOpen?(): Promise<unknown>
   initialSection: string
 }
 const sections = [
@@ -31,13 +34,17 @@ export default function SettingsPage(props: Props): React.JSX.Element {
     <aside className="settings-nav">
       <Button variant="ghost" className="settings-back" disabled={busy} onClick={props.onClose}><ArrowLeft size={19} /><span>设置</span></Button>
       <div className="search-field"><Search size={15} /><Input aria-label="搜索设置" placeholder="搜索设置" value={query} onChange={e => setQuery(e.target.value)} /></div>
-      <nav aria-label="设置分类">{sections.filter(item => `${item.label} ${item.keywords}`.toLowerCase().includes(query.trim().toLowerCase())).map(item => <Button key={item.id} disabled={busy} className={section === item.id ? 'selected' : ''} aria-current={section === item.id ? 'page' : undefined} onClick={() => setSection(item.id)}><item.icon size={16} />{item.label}</Button>)}</nav>
+      <nav aria-label="设置分类">{sections.filter(item => `${item.label} ${item.keywords}`.toLowerCase().includes(query.trim().toLowerCase())).map(item => <Button key={item.id} disabled={busy} className={section === item.id ? 'selected' : ''} aria-current={section === item.id ? 'page' : undefined} onClick={() => {
+        if (item.id !== 'general' || !props.onPromptSettingsOpen) { setSection(item.id); return }
+        setBusy(true)
+        void props.onPromptSettingsOpen().then(() => setSection(item.id)).catch(() => {}).finally(() => setBusy(false))
+      }}><item.icon size={16} />{item.label}</Button>)}</nav>
       {query && !sections.some(item => `${item.label} ${item.keywords}`.toLowerCase().includes(query.trim().toLowerCase())) && <p className="hint">没有匹配的设置</p>}
     </aside>
     <main className="settings-content">
       <div className="settings-inner">
         {section === 'models' ? props.settings ? <ModelSettingsPanel settings={props.settings} onChange={props.onChange} onClose={props.onClose} onBusyChange={setBusy} /> : <><h2>模型供应商</h2><p className={props.error ? 'error' : 'hint'} role="status">{props.error || '正在读取模型配置…'}</p>{props.error && <Button onClick={props.reload}>重新读取设置</Button>}</> : null}
-        {section === 'general' && <><GeneralSettingsSection preferences={props.preferences} onPreferences={props.onPreferences} isMac={isMac} settings={props.settings} onModelSettingsChange={props.onChange} onBusyChange={setBusy} />{props.error && <p className="error" role="alert">{props.error}<Button onClick={props.reload}>重新读取设置</Button></p>}</>}
+        {section === 'general' && <>{props.promptActions}<GeneralSettingsSection promptReady={props.promptReady} preferences={props.preferences} onPreferences={props.onPreferences} isMac={isMac} settings={props.settings} onModelSettingsChange={props.onChange} onBusyChange={setBusy} />{props.error && <p className="error" role="alert">{props.error}<Button onClick={props.reload}>重新读取设置</Button></p>}</>}
         {section === 'appearance' && <AppearanceSettingsSection preferences={props.preferences} onPreferences={props.onPreferences} />}
         {section === 'skills' && <SkillsSettingsSection onBusyChange={setBusy} />}
         {section === 'about' && <AboutSettingsSection />}

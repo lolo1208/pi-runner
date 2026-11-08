@@ -266,8 +266,16 @@ function developerNeedsReview(program: string, args: string[]): boolean {
   if (program === 'gradlew') program = 'gradle'
   if (args.some(value => /^(?:publish|unpublish|login|logout|adduser|token|owner|team|deploy|release)$/i.test(value) || /(?:^|:)deploy(?:$|@)/i.test(value) || /^publish(?:To|All|Plugins)/.test(value))) return true
   // 项目依赖移除属于包管理器的常规开发操作；全局范围及危险参数仍由后续规则审核。
-  const localDependencyRemoval = ['npm', 'pnpm', 'yarn'].includes(program) && ['remove', 'uninstall'].includes(args[0])
-  if (args.some((value, index) => !(localDependencyRemoval && index === 0) && /^(?:clean|cleanall|distclean|mrproper|clobber|purge|prune|uninstall|remove|uninstall-self|self-uninstall)$/i.test(value) || /^--(?:force|break-system-packages|delete|prune|clear|wipe|reset)(?:=|$)/i.test(value))) return true
+  let operation = 0
+  if (['npm', 'pnpm', 'yarn'].includes(program)) {
+    while (operation < args.length) {
+      if (['--dir', '-C', '--filter', '-F', '--workspace', '-w'].includes(args[operation]) && args[operation + 1]) { operation += 2; continue }
+      if (/^--(?:dir|filter|workspace)=.+/.test(args[operation])) { operation++; continue }
+      break
+    }
+  }
+  const localDependencyRemoval = ['npm', 'pnpm', 'yarn'].includes(program) && ['remove', 'uninstall'].includes(args[operation])
+  if (args.some((value, index) => !(localDependencyRemoval && index === operation) && /^(?:clean|cleanall|distclean|mrproper|clobber|purge|prune|uninstall|remove|uninstall-self|self-uninstall)$/i.test(value) || /^--(?:force|break-system-packages|delete|prune|clear|wipe|reset)(?:=|$)/i.test(value))) return true
   if (program === 'rustup') return true
   if (program === 'cargo' && ['install', 'uninstall'].includes(args[0])) return true
   if (program === 'uv' && ['tool', 'python', 'self'].includes(args[0])) return true

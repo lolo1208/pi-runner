@@ -162,5 +162,5 @@
 .conversation-model-thinking { display: flex; flex-wrap: wrap; gap: 3px; padding: 3px; border-radius: 14px; background: var(--hover); }
 .conversation-model-thinking-option { flex: 1 0 auto; min-width: 34px; border: 0; padding: 4px 8px; border-radius: 11px; text-align: center; font-size: calc(12rem / 14); color: var(--muted); background: transparent; cursor: pointer; }
 .conversation-model-thinking-option[data-state="checked"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 3px #0002; }
-.conversation-model-thinking:disabled, .conversation-model-thinking[data-disabled] { opacity: .6; }
+.conversation-model-thinking-option:disabled { cursor: default; }
 .conversation-model-reasoning-hint { margin: 8px 0 0; font-size: calc(11.5rem / 14); line-height: 1.6; color: var(--muted); }

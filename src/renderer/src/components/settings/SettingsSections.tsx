@@ -22,7 +22,8 @@ interface PreferencesSectionProps {
 const CUSTOM_PROMPT_EXAMPLE = '默认使用简体中文，包括与我的对话、文档、代码注释和日志；必要的技术术语与标识符保留原文。'
 const CUSTOM_PROMPT_PLACEHOLDER = CUSTOM_PROMPT_EXAMPLE
 
-export function GeneralSettingsSection({ preferences, onPreferences, isMac, settings, onModelSettingsChange, onBusyChange }: PreferencesSectionProps & {
+export function GeneralSettingsSection({ preferences, onPreferences, isMac, settings, onModelSettingsChange, onBusyChange, promptReady = true }: PreferencesSectionProps & {
+  promptReady?: boolean
   isMac: boolean
   settings: ModelSettings | null
   onModelSettingsChange(settings: ModelSettings): void
@@ -63,7 +64,7 @@ export function GeneralSettingsSection({ preferences, onPreferences, isMac, sett
       <Label htmlFor="custom-prompt">全局提示词</Label>
       <p id="custom-prompt-description" className="hint">每次发送消息时都会附带这些指令，对所有模型和会话生效。留空则不附加，修改从下一轮对话生效。</p>
       <div className="custom-prompt-input" data-suggestion-visible={showPromptSuggestion}>
-        <Textarea ref={promptRef} id="custom-prompt" aria-describedby={showPromptSuggestion ? 'custom-prompt-description custom-prompt-shortcut' : 'custom-prompt-description'} rows={1} maxLength={MAX_CUSTOM_PROMPT_LENGTH} value={preferences.customPrompt} placeholder={CUSTOM_PROMPT_PLACEHOLDER}
+        <Textarea disabled={!promptReady} ref={promptRef} id="custom-prompt" aria-describedby={showPromptSuggestion ? 'custom-prompt-description custom-prompt-shortcut' : 'custom-prompt-description'} rows={1} maxLength={MAX_CUSTOM_PROMPT_LENGTH} value={preferences.customPrompt} placeholder={CUSTOM_PROMPT_PLACEHOLDER}
           onFocus={() => setPromptFocused(true)} onBlur={() => setPromptFocused(false)}
           onChange={event => onPreferences({ ...preferences, customPrompt: event.target.value })}
           onKeyDown={event => {

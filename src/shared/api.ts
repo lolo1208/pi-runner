@@ -9,6 +9,7 @@ export type NotificationKind = 'success' | 'failure' | 'input'
 export interface AppNotification { kind: NotificationKind; title: string; body: string; /** Windows 气泡中显示的最新一轮用户输入。 */ userInput?: string; /** 点击通知后需要选中的会话。 */ conversationId?: string }
 import type { ConversationState } from './conversations'
 export interface PiRunnerApi {
+  syncPromptFile(project: string | null, legacy: string, save?: string, expected?: string): Promise<string>
   showNotification(notification: AppNotification): Promise<void>
   /** 关闭当前显示的全部通知气泡（Windows 自定义气泡）。 */
   closeNotifications(): Promise<void>

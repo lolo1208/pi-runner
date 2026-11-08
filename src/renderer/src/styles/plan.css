@@ -2,8 +2,10 @@
 .plan-dialog .modal-heading { padding: 18px 24px; margin: 0; border-bottom: 1px solid var(--border); }
 .plan-dialog .modal-description { margin: 0; padding: 16px 24px 0; }
 .plan-question-body { padding: 20px 24px; overflow-y: auto; }
-.plan-question-meta { display: flex; justify-content: space-between; color: var(--muted); font-size: calc(12rem / 14); }
-.plan-question-body h2 { margin: 14px 0 20px; font-size: calc(17rem / 14); line-height: 1.6; }
+.plan-question-meta { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; color: var(--muted); font-size: calc(12rem / 14); }
+.plan-question-meta h2 { margin: 0; color: var(--text); font-size: calc(16rem / 14); font-weight: 500; line-height: 1.6; }
+.plan-question-meta > span { flex-shrink: 0; }
+.plan-question-description { margin: 8px 0 20px; color: var(--muted); font-size: calc(14rem / 14); font-weight: 400; line-height: 1.7; }
 .plan-options { gap: 0; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin-bottom: 16px; }
 .plan-option { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 16px; text-align: left; background: var(--surface); border-radius: 0; border: 0; }
 .plan-option + .plan-option { border-top: 1px solid var(--border); }
@@ -13,9 +15,13 @@
 .plan-option strong { font-size: calc(14rem / 14); font-weight: 500; }
 .plan-option strong small { margin-left: 10px; color: var(--accent); font-size: calc(12rem / 14); }
 .plan-option-description { display: block; margin-top: 5px; font-size: calc(13rem / 14); line-height: 1.6; color: var(--text); opacity: .85; }
-.plan-option-number { flex-shrink: 0; display: grid; place-items: center; width: calc(28rem / 14); height: calc(28rem / 14); background: var(--bg); border-radius: 7px; font-size: calc(12rem / 14); }
+.plan-option-check { flex-shrink: 0; display: grid; place-items: center; width: calc(28rem / 14); height: calc(28rem / 14); color: var(--accent); }
 .plan-dialog-actions { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 18px; }
-.plan-dialog-actions > div { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.plan-dialog-actions > div { display: flex; align-items: center; min-width: 0; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.plan-dialog-actions .plan-cancel:hover:not(:disabled) { background: var(--error-bg); color: var(--error); border-color: var(--error); }
+.plan-dialog-actions .plan-revise { margin-right: 8px; }
+.plan-dialog-actions .model-picker { min-width: 0; max-width: min(280px, 100%); }
+.plan-dialog-actions .model-picker .model-price-name-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .plan-dialog-actions .plan-submit-answer:not(:disabled),
 .plan-dialog-actions .plan-revise:not(:disabled),
 .plan-dialog-actions .plan-approve:not(:disabled) { background: var(--accent); color: var(--accent-foreground); border-color: transparent; }

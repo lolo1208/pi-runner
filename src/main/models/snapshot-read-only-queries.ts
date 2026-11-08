@@ -134,6 +134,14 @@ function basicReadOnlyQuery(program: string, args: string[]): boolean {
 
 /** 同时具有写入或执行能力的查看工具采用独立规则。 */
 function additionalReadOnlyQuery(program: string, args: string[]): boolean {
+  // 限定本地音视频文件及明确的元数据查询选项，不允许输出文件、协议或其他参数。
+  if (program === 'ffprobe') {
+    if (args.length !== 7 || args[0] !== '-v' || !['error', 'quiet'].includes(args[1])
+      || args[2] !== '-show_entries' || !/^(?:format|stream)=[a-z_]+(?:,[a-z_]+)*(?::(?:format|stream)=[a-z_]+(?:,[a-z_]+)*)*$/i.test(args[3])
+      || args[4] !== '-of' || args[5] !== 'json') return false
+    return !args[6].startsWith('-') && !/^(?:[a-z][\w+.-]*:|[\\/]{2})/i.test(args[6])
+      && /\.(?:m4a|mp3|wav|flac|ogg|mp4|mov|webm|mkv)$/i.test(args[6])
+  }
   if (program === 'ps') return queryOptions(args, ['-e', '-A', '-a', '-x', '-f', '-l', '-u', '-ww', '--forest', '--no-headers'], ['-p', '--pid', '-o', '--format', '--sort', '-Name', '-Id'])
   if (program === 'pipx') return args.length === 1 && ['list', 'environment', '--version', '--help'].includes(args[0])
   if (program === 'mdls') return queryOptions(args, ['-raw'], ['-name', '-nullMarker'])

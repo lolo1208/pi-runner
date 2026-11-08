@@ -5,12 +5,13 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import type { AgentSnapshot } from '../../../../shared/models'
 import { RoundDiffDialog } from './RoundDiffDialog'
 import { FileContextMenu } from './FileContextMenu'
-import { baseName, fileIcon } from './DiffView'
+import { baseName, DiffStat, fileIcon } from './DiffView'
 import { PROJECT_FILES_RESTORED, type RoundFileState } from '../../hooks/useRoundFileState'
 import type { RoundChangesData } from '../../hooks/useRoundChanges'
 import { useTranscriptOverlay, useTranscriptState } from './TranscriptState'
 import { TranscriptPagedList } from './TranscriptPagedList'
 import { AnimatedDisclosure } from './AnimatedDisclosure'
+import { FileChangeStatus } from './FileChangeStatus'
 
 export function RoundChanges({ round, disabled, data, onRetry, fileState = data?.fileState ?? 'checking', beforeFileState = data?.beforeFileState ?? 'checking' }: { round: AgentSnapshot; disabled?: boolean; data?: RoundChangesData; onRetry?: () => void; fileState?: RoundFileState; beforeFileState?: RoundFileState }): React.JSX.Element | null {
   const files = data?.files
@@ -43,7 +44,7 @@ export function RoundChanges({ round, disabled, data, onRetry, fileState = data?
     <header className="round-changes-header">
       <div className="round-changes-summary">
       {files ? <Tooltip><TooltipTrigger asChild><button type="button" className="round-changes-title" onClick={() => setReview('')}><span className="round-changes-title-text">已更改 {files.length} 个文件</span><ChevronRight className="round-changes-title-hint" size={14} aria-hidden="true" /></button></TooltipTrigger><TooltipContent>审查本轮 {files.length} 个文件的改动</TooltipContent></Tooltip> : <button type="button" className="round-changes-title" disabled>{data?.status === 'loading' ? '正在读取文件改动…' : data?.status === 'error' ? '文件改动读取失败' : '等待加载文件改动…'}</button>}
-        {files && <span className="tool-approval-diffstat"><em>+{additions}</em>{deletions > 0 && <em className="is-del">-{deletions}</em>}</span>}
+        {files && <DiffStat additions={additions} deletions={deletions} />}
       </div>
       {files && <div className="round-changes-actions">{(['before', 'after'] as const).map(point => {
         const state = point === 'before' ? beforeFileState : fileState
@@ -58,8 +59,8 @@ export function RoundChanges({ round, disabled, data, onRetry, fileState = data?
       })}</div>}
     </header>
     {files && <div id={listId} className="round-changes-list">
-      {files.slice(0, 3).map(file => <FileContextMenu key={file.path} project={round.project} path={file.path}><button type="button" className="round-changes-file" onClick={() => setReview(file.path)} title={file.path}>{fileIcon(file.path)}<span className="tool-approval-file-meta"><strong title={baseName(file.path)}>{baseName(file.path)}</strong><small title={file.path}>{file.path}</small></span><span className="tool-approval-diffstat">{file.binary ? '二进制' : <><em>+{file.additions}</em>{file.deletions > 0 && <em className="is-del">-{file.deletions}</em>}</>}</span></button></FileContextMenu>)}
-      {files.length > 3 && <AnimatedDisclosure open={expanded}><TranscriptPagedList items={files.slice(3)} label="本轮文件">{page => page.map(file => <FileContextMenu key={file.path} project={round.project} path={file.path}><button type="button" className="round-changes-file" onClick={() => setReview(file.path)} title={file.path}>{fileIcon(file.path)}<span className="tool-approval-file-meta"><strong title={baseName(file.path)}>{baseName(file.path)}</strong><small title={file.path}>{file.path}</small></span><span className="tool-approval-diffstat">{file.binary ? '二进制' : <><em>+{file.additions}</em>{file.deletions > 0 && <em className="is-del">-{file.deletions}</em>}</>}</span></button></FileContextMenu>)}</TranscriptPagedList></AnimatedDisclosure>}
+      {files.slice(0, 3).map(file => <FileContextMenu key={file.path} project={round.project} path={file.path}><button type="button" className="round-changes-file" onClick={() => setReview(file.path)} title={file.path}>{fileIcon(file.path)}<span className="tool-approval-file-meta"><strong title={baseName(file.path)}>{baseName(file.path)}</strong><small title={file.path}>{file.path}</small></span>{file.binary ? <span className="tool-approval-diffstat">二进制</span> : <DiffStat additions={file.additions} deletions={file.deletions} />}<FileChangeStatus status={file.status} /></button></FileContextMenu>)}
+      {files.length > 3 && <AnimatedDisclosure open={expanded}><TranscriptPagedList items={files.slice(3)} label="本轮文件">{page => page.map(file => <FileContextMenu key={file.path} project={round.project} path={file.path}><button type="button" className="round-changes-file" onClick={() => setReview(file.path)} title={file.path}>{fileIcon(file.path)}<span className="tool-approval-file-meta"><strong title={baseName(file.path)}>{baseName(file.path)}</strong><small title={file.path}>{file.path}</small></span>{file.binary ? <span className="tool-approval-diffstat">二进制</span> : <DiffStat additions={file.additions} deletions={file.deletions} />}<FileChangeStatus status={file.status} /></button></FileContextMenu>)}</TranscriptPagedList></AnimatedDisclosure>}
     </div>}
     {files && files.length > 3 && <Button className="round-changes-more" variant="ghost" aria-controls={listId} aria-expanded={expanded} aria-label={expanded ? '收起' : `更多（${hidden} 个文件）`} onClick={() => setExpanded(value => !value)}>{expanded ? <>收起 <ChevronUp size={14} aria-hidden="true" /></> : <>再显示 {hidden} 个文件 <ChevronDown size={14} aria-hidden="true" /></>}</Button>}
     {(error || data?.error) && <div className="round-changes-error" role="alert">{error || data?.error}{!files && onRetry && <Button variant="ghost" onClick={onRetry}>重试</Button>}</div>}

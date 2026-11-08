@@ -13,7 +13,7 @@ import { restrictedSearch, restrictedLs } from './restricted-search'
 import { validateToolInput } from './tool-inputs'
 import { dependencyReadPath } from './dependency-read-path'
 import { batchToolDefinitions, ToolApprovalStopped } from './batch-tools'
-import { literalCommand } from './windows-command-parser'
+import { literalCommand, literalCommandSequence } from './windows-command-parser'
 import { validateReadArgs } from './read-tool-input'
 import { textMutationToolDefinitions, validateTextMutationInput, validateTextMutationTarget } from './text-mutation-tools'
 import { FileSnapshotStopped } from './tool-execution-errors'
@@ -112,8 +112,12 @@ export function piProjectTools(root: string, beforeMutation: () => Promise<void>
     } else if (['bash', 'powershell'].includes(tool.name)) {
       const command = String(input.command ?? '')
       let risk = commandRisk(command, root)
-      // 仅信任本轮已加载技能的单条字面量调用；禁止规则和强制人工确认优先。
+      // 支持逐段校验的分号拼接调用；禁止规则和强制人工确认优先。
       if (permissions.mode === 'auto' && risk.risk === 'approve' && !risk.mustConfirm && permissions.trustedSkillScript) {
+        const trustedStatement = async (command: string): Promise<boolean> => {
+        const segmentRisk = commandRisk(command, root)
+        if (segmentRisk.risk === 'block' || segmentRisk.mustConfirm) return false
+        if (segmentRisk.risk === 'safe') return true
         const words = literalCommand(command)
         const plainArguments = words?.every(word => !/[&|<>^%!\r\n"`$]/.test(word))
         const interpretedScript = words && plainArguments && (process.platform === 'win32'
@@ -129,7 +133,18 @@ export function piProjectTools(root: string, beforeMutation: () => Promise<void>
           && !/[\\`$*?\[\]{}~\r\n]/.test(command) && !/^\s*&/.test(command)
           && skillScriptExtension(words[0]) ? words[0] : undefined
         const script = interpretedScript ?? cmdScript ?? posixScript
-        if (script && path.isAbsolute(script) && await permissions.trustedSkillScript(script)) risk = { risk: 'safe' }
+        return Boolean(script && path.isAbsolute(script) && await permissions.trustedSkillScript!(script))
+        }
+        const statements = literalCommandSequence(command)
+        if (statements) {
+          let trusted = true
+          for (const statement of statements) {
+            if (!await trustedStatement(statement)) { trusted = false; break }
+            // 组合执行时不允许切换目录，避免改变后续命令的审核范围。
+            if (statements.length > 1 && /^(?:cd|chdir|set-location|sl)$/i.test(literalCommand(statement)?.[0] ?? '')) { trusted = false; break }
+          }
+          if (trusted) risk = { risk: 'safe' }
+        }
       }
       if (risk.risk === 'block') throw new ModelError(risk.reason ?? '终端命令被安全策略拦截')
       if (permissions.mode === 'default') {

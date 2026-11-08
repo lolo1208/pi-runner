@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { IPC_CHANNELS, type PiRunnerApi } from '../shared/api'
 
 const api: PiRunnerApi = {
+  syncPromptFile: (project, legacy, save, expected) => ipcRenderer.invoke('prompts:sync', project, legacy, save, expected),
   onFlushConversations: callback => {
     const listener = (_event: Electron.IpcRendererEvent, token: string): void => {
       void Promise.resolve().then(callback).then(

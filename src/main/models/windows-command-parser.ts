@@ -1,3 +1,29 @@
+/** 仅拆分引号外的分号；每段仍须独立完成字面量解析与权限检查。 */
+export function literalCommandSequence(command: string): string[] | undefined {
+  if (!command.trim() || command.length > 16000 || /[\r\n`$\0]/.test(command)) return undefined
+  const statements: string[] = []
+  let quote = '', start = 0
+  for (let index = 0; index < command.length; index++) {
+    const character = command[index]
+    if (quote) {
+      if (character === quote) {
+        if (quote === "'" && command[index + 1] === "'") { index++; continue }
+        quote = ''
+      }
+    } else if (character === "'" || character === '"') quote = character
+    else if (character === ';') {
+      const statement = command.slice(start, index).trim()
+      if (!statement) return undefined
+      statements.push(statement)
+      start = index + 1
+    }
+  }
+  if (quote) return undefined
+  const last = command.slice(start).trim()
+  if (last) statements.push(last)
+  return statements.length && statements.length <= 64 && statements.every(statement => literalCommand(statement)) ? statements : undefined
+}
+
 /** 保守解析完整的单条 PowerShell 字面量命令，不执行脚本或展开表达式。 */
 export function literalCommand(command: string): string[] | undefined {
   if (!command.trim() || command.length > 16000 || /[\r\n`$\0]/.test(command)) return undefined
@@ -29,7 +55,10 @@ export function literalCommand(command: string): string[] | undefined {
       && (/^(?:select-object|select|format-table|ft|format-list|fl|get-command|gcm)$/i.test(tokens[0] ?? '')
         && /^[a-z_][\w.-]*(?:,[a-z_][\w.-]*)*,?$/i.test(value)
         || /^(?:select-string|sls)$/i.test(tokens[0] ?? '') && tokens.at(-1)?.toLowerCase() === '-context'
-        && /^\d+,\d+$/.test(value)))) return undefined
+        && /^\d+,\d+$/.test(value)
+        || /^(?:get-item|gi|get-filehash)$/i.test(tokens[0] ?? '') && /^[^,\s]+,$/.test(value)
+        || /^ffprobe(?:\.exe)?$/i.test(tokens[0] ?? '') && tokens.at(-1) === '-show_entries'
+        && /^[\w=:.]+(?:,[\w=:.]+)+$/.test(value)))) return undefined
     // npm 的 scoped 包名及 package@version 是字面量；其他 @ 前缀仍可能是 PowerShell splatting。
     if (!quote && value.startsWith('@') && !/^@[\w.-]+\/[\w.-]+(?:@[^\s]+)?$/.test(value)) return undefined
     tokens.push(value)

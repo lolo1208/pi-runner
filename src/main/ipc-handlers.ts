@@ -1,3 +1,4 @@
+import { PromptFiles } from './prompt-files'
 import { claudeSubscription } from './models/claude-subscription-service'
 import { clipboard, dialog, ipcMain, shell, type BrowserWindow } from 'electron'
 import path from 'node:path'
@@ -113,6 +114,8 @@ export function registerIpcHandlers(dependencies: IpcHandlerDependencies): void 
     else throw new ModelError('无效的 Claude 订阅操作')
     return { status: await claudeSubscription.status(), settings }
   }))
+  const promptFiles = new PromptFiles(dependencies.dataDirectory)
+  handle('prompts:sync', (project, legacy, save, expected) => promptFiles.access(project, legacy, save, expected))
   handle(IPC_CHANNELS.conversationsLoad, () => loadPermissions())
   handle(IPC_CHANNELS.conversationsDraftsSave, (drafts, selectedId) => {
     loadPermissions()

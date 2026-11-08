@@ -199,7 +199,7 @@ export function isCustomPlanOption(label: string): boolean {
   return /^(?:其他|其它|other|其他选项|自定义(?:回答)?|(?:填写|输入)自己的回答)(?:\s*[（(].*[）)])?$/i.test(label.trim())
 }
 export interface PlanInteraction { id: string; kind: 'questions' | 'review'; questions?: PlanQuestion[]; title?: string; content?: string }
-export interface PlanResponse { answers?: Record<string, string>; decision?: 'approve' | 'revise'; feedback?: string }
+export interface PlanResponse { answers?: Record<string, string>; decision?: 'approve' | 'revise'; feedback?: string; executionModelId?: string }
 export interface AgentRequestOptions { conversationId: string; project?: string | null; intentMode?: IntentMode }
 export interface AgentSnapshot { project: string; before: import('./api').Checkpoint; after: import('./api').Checkpoint; messageIndex?: number; undone?: boolean }
 export interface AgentEvent {

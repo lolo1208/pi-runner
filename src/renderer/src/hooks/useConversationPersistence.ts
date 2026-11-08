@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { flushPromptSaves } from '../lib/prompt-save-flush'
 import { flushSync } from 'react-dom'
 import type { ConversationState } from '../../../shared/conversations'
 import { conversationPatch } from '../../../shared/conversation-patches'
@@ -63,7 +64,7 @@ export function useConversationPersistence(loaded: boolean, tasks: ConversationS
       // 退出或失焦时不延后运行态，保存当前完整状态，失败仍保留重试队列。
       bufferedState.current = latestState.current
       save.schedule(latestState.current)
-      try { await save.flush() }
+      try { await flushPromptSaves(); await save.flush() }
       catch (error) {
         errorCallback.current(conversationSaveError(error, true))
         throw error

@@ -1,3 +1,4 @@
+import { withSharedFileLock } from './shared-file-lock'
 import { compatibleConnectionName } from '../../shared/compatible-connection-name'
 import { siliconflowPricingSnapshot } from './siliconflow-pricing'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
@@ -25,7 +26,7 @@ export class ModelSettingsStore {
   constructor(private readonly filePath: string, private readonly cipher: CredentialCipher) {}
 
   private serialized<T>(operation: () => Promise<T>): Promise<T> {
-    const result = this.queue.then(operation)
+    const result = this.queue.then(() => withSharedFileLock(this.filePath, operation))
     this.queue = result.catch(() => undefined)
     return result
   }

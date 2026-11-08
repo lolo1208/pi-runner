@@ -225,8 +225,7 @@ describe('file tool permission boundaries', () => {
 })
 
 describe('conservative command classification', () => {
-  it('allows Node type stripping without treating script execution as read-only', () => {
-    const command = 'node --experimental-strip-types tools/check-schedule.mts'
+  it.each(['node --experimental-strip-types tools/check-schedule.mts', 'node --experimental-transform-types .tmp/phase4-runtime.mjs'])('allows Node type handling without treating script execution as read-only: %s', command => {
     expect(commandRisk(command).risk).toBe('safe')
     expect(readOnlyCommand(command)).toBe(false)
   })
@@ -234,7 +233,11 @@ describe('conservative command classification', () => {
     'node --experimental-strip-types',
     'node --experimental-strip-types --unknown tools/check-schedule.mts',
     'node --experimental-strip-types --eval=process.exit()',
-    'node --experimental-strip-types --import=hook.mjs tools/check-schedule.mts'
+    'node --experimental-strip-types --import=hook.mjs tools/check-schedule.mts',
+    'node --experimental-transform-types',
+    'node --experimental-transform-types --unknown tools/check-schedule.mts',
+    'node --experimental-transform-types --eval=process.exit()',
+    'node --experimental-transform-types --import=hook.mjs tools/check-schedule.mts'
   ])('reviews unsafe or ambiguous type stripping invocation %s', command => {
     expect(commandRisk(command).risk).toBe('approve')
   })

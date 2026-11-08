@@ -21,6 +21,24 @@
 @import './styles/responsive.css';
 @import './styles/notifications.css';
 
+/* shadcn Tooltip 所需的官方 neutral 主题颜色及 Tailwind 语义映射。 */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --radius-md: calc(var(--radius) - 2px);
+}
+
+:root {
+  --radius: 0.625rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+}
+
+:root[data-theme="dark"] {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+}
+
 /* 界面元素默认不可选中：标题栏、侧边栏、输入区、状态栏、下拉菜单等只作为界面语言。 */
 html,
 body {

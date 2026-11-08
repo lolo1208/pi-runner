@@ -49,7 +49,7 @@ export function DiffViewSwitch({ mode, onChange }: { mode: DiffViewMode; onChang
 
 /** 新增 / 删除行数统计。 */
 export function DiffStat({ additions, deletions }: { additions: number; deletions: number }): React.JSX.Element {
-  return <span className="tool-approval-diffstat"><em>+{additions}</em><em className="is-del">-{deletions}</em></span>
+  return <span className="tool-approval-diffstat">{additions > 0 && <em>+{additions}</em>}{deletions > 0 && <em className="is-del">-{deletions}</em>}</span>
 }
 
 /** 文件卡片标题行：折叠箭头、文件图标、文件名与路径、右侧统计。 */

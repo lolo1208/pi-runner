@@ -258,7 +258,7 @@ class QueryParser {
       if (token.quoted === '"' && token.text.includes('$')) {
         // 仅允许将有限字面量路径片段嵌入固定的 HTTP(S) 地址路径。
         // 不允许影响主机、查询串、认证信息或路径回退，也不信任循环内重新赋值。
-        const urlTemplate = /^(https?:\/\/[^\s\/$?#]+\/[^$?#]*)\$([a-z][a-z0-9_]*)(\/[^$?#]*)?$/i.exec(token.text)
+        const urlTemplate = /^(https?:\/\/[^\s\/$?#]+\/[^$?#]*)\$([a-z][a-z0-9_]*)([./][^$?#]*)?$/i.exec(token.text)
         if (urlTemplate) {
           const parts = this.variables.get('$' + urlTemplate[2].toLowerCase())?.literals
           if (parts?.length && parts.length <= 100 && parts.every(part => /^[a-z0-9._\/-]+$/i.test(part) && part.split('/').every(segment => segment && segment !== '.' && segment !== '..'))) {
@@ -375,7 +375,7 @@ class QueryParser {
   }
   private command(input: Value = {}): Value {
     const program = this.take().text.toLowerCase()
-    if (!/^[a-z][\w-]*$/.test(program)) throw Error('command')
+    if (!/^[a-z][\w-]*(?:\.exe)?$/.test(program)) throw Error('command')
     if (program === 'foreach-object') {
       if (this.peek('value')) {
         // 仅对已知 Regex Match 对象投影 Value，避免调用其他对象同名方法。
@@ -414,7 +414,7 @@ class QueryParser {
         && args.at(-1)?.toLowerCase() === '-path' && this.input[this.position + 1]?.kind === 'word'
         && this.input[this.position + 1].text.startsWith('-')
       ) { this.take(); args.push('userprofile'); values.push({}); continue }
-      if (token.kind === 'word') { args.push(this.take().text); values.push({}); continue }
+      if (token.kind === 'word') { args.push(this.take().text); values.push({ literal: token.text }); continue }
       // 参数位置的 . 与 .. 是当前/上级目录字面量，不是成员访问。
       if (token.kind === 'symbol' && (token.text === '.' || token.text === '..')) {
         this.take(); args.push(token.text); values.push({ literal: token.text }); continue
@@ -431,6 +431,16 @@ class QueryParser {
     if (program === 'add-type') {
       // 只允许加载系统绘图库，不允许编译源码或加载任意程序集。
       if (dynamic || args.length !== 2 || args[0].toLowerCase() !== '-assemblyname' || args[1].toLowerCase() !== 'system.drawing') throw Error('assembly')
+    } else if (['curl', 'curl.exe'].includes(program)) {
+      // 每个展开后的 URL 都交给原有网络查询规则验证，不放行未知原生参数。
+      const expanded: string[][] = [[]]
+      for (let index = 0; index < args.length; index++) {
+        const choices = values[index]?.urls ?? (values[index]?.literal !== undefined || !dynamic ? [args[index]] : undefined)
+        if (!choices?.length || expanded.length * choices.length > 100) throw Error('curl argument')
+        const previous = expanded.splice(0)
+        for (const prefix of previous) for (const choice of choices) expanded.push([...prefix, choice])
+      }
+      if (!expanded.every(arguments_ => this.query([program, ...arguments_.map(arg => "'" + arg.replace(/'/g, "''") + "'")].join(' ')))) throw Error('curl query')
     } else if (['invoke-webrequest', 'invoke-restmethod'].includes(program)) {
       // Anonymous GET only. URI variables must originate entirely from literal URLs.
       let uri = false

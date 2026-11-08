@@ -8,6 +8,7 @@ import { applyTranscriptPatch } from '../../shared/transcript-updates'
 import type { QueueEditState } from '../../shared/conversations'
 import type { ChatgptUsage, OpenrouterUsage, ChatImage, ChatMessage, ModelProfile, ModelProfileView, ModelProviderConnection, ModelReply, ModelSettings, OutputSpeed, ProviderId } from '../../shared/models'
 import { unwrapModelResult } from './model-result'
+import { ConversationModelPicker } from './components/chat/ConversationModelPicker'
 import { ChatComposer } from './components/chat/ChatComposer'
 import type { QueuedMessage } from './components/chat/MessageQueue'
 import { ChatTranscript } from './components/chat/ChatTranscript'
@@ -48,6 +49,7 @@ interface Props {
   initialQueueEdit?: QueueEditState
   onQueueChange?(queue: QueuedMessage[], paused: boolean, edit?: QueueEditState): void
   profiles?: ModelProfileView[]
+  resolveCustomPrompt?(): Promise<string>
   customPrompt?: string
   compressionThreshold?: number; initialCompaction?: ContextCompaction
   onCompactionChange?(compaction: ContextCompaction | undefined): void
@@ -63,7 +65,7 @@ interface Props {
   profile: ModelProfileView | undefined; onBusyChange(busy: boolean, historyOnly?: boolean): void; onOpenSettings(section?: 'models' | 'skills'): void
   onMessagesChange?(messages: ChatMessage[], restored?: boolean): void; settingsDisabled?: boolean; sendWithCtrlEnter?: boolean
 }
-function ModelChat({ initialNativeHistory, onHistoryRestored, onRetainChange, notificationNavigationRequest = 0, snapshots, onSnapshotsChange, initialIntentMode = 'execute', onIntentChange, initialPermissionMode = 'default', onPermissionChange, active = true, projectReady = true, projectCurrent = true, conversationId, initialMessages = [], initialDraft = '', initialDraftImages = [], initialDraftSkillIds = [], initialQueue = [], initialQueuePaused = false, initialQueueEdit, onQueueChange, initialCompaction, onCompactionChange, compressionThreshold = DEFAULT_COMPRESSION_THRESHOLD, onDraftChange, profile: defaultProfile, profiles, project, providers, onModelSettingsChange, onBusyChange, onReplyComplete, onTaskEnd, onWaitingForInputChange, onOpenSettings, onMessagesChange, initialModelId, onModelChange, settingsDisabled, sendWithCtrlEnter = true, customPrompt = '' }: Props): React.JSX.Element {
+function ModelChat({ initialNativeHistory, onHistoryRestored, onRetainChange, notificationNavigationRequest = 0, snapshots, onSnapshotsChange, initialIntentMode = 'execute', onIntentChange, initialPermissionMode = 'default', onPermissionChange, active = true, projectReady = true, projectCurrent = true, conversationId, initialMessages = [], initialDraft = '', initialDraftImages = [], initialDraftSkillIds = [], initialQueue = [], initialQueuePaused = false, initialQueueEdit, onQueueChange, initialCompaction, onCompactionChange, compressionThreshold = DEFAULT_COMPRESSION_THRESHOLD, onDraftChange, profile: defaultProfile, profiles, project, providers, onModelSettingsChange, onBusyChange, onReplyComplete, onTaskEnd, onWaitingForInputChange, onOpenSettings, onMessagesChange, initialModelId, onModelChange, settingsDisabled, sendWithCtrlEnter = true, resolveCustomPrompt, customPrompt = '' }: Props): React.JSX.Element {
   const [permissionMode, setPermissionMode] = useState(initialPermissionMode)
   const [intentMode, setIntentMode] = useState<IntentMode>(initialIntentMode)
   const intentCallback = useRef(onIntentChange)
@@ -180,18 +182,21 @@ function ModelChat({ initialNativeHistory, onHistoryRestored, onRetainChange, no
     } catch (e) { setError(e instanceof Error ? e.message : '权限切换失败，请重试') }
     finally { setPermissionChanging(false) }
   }, [conversationId, onPermissionChange])
+  const [thinkingSaving, setThinkingSaving] = useState(false)
   /** 快捷面板内的推理修改：按设置页的字段归一规则只重写推理相关字段，其余参数原样保存。 */
   const changeThinking = useCallback(async (target: ModelProfileView, value: boolean | string | null): Promise<void> => {
-    if (target.provider !== 'claude-subscription' && target.provider !== 'chatgpt' && target.provider !== 'ollama' && target.provider !== 'openrouter' && target.provider !== 'google') return
+    if (target.provider !== 'claude-subscription' && target.provider !== 'chatgpt' && target.provider !== 'ollama' && target.provider !== 'openrouter' && target.provider !== 'google' && target.provider !== 'deepseek') return
     const { hasApiKey: _hasApiKey, available: _available, ...base } = target
     const next: ModelProfile = { ...base,
-      thinkingLevel: (target.provider === 'claude-subscription' || target.provider === 'chatgpt' || target.provider === 'openrouter' || target.provider === 'google') && typeof value === 'string' ? value as ModelProfile['thinkingLevel'] : null,
+      thinkingLevel: (target.provider === 'claude-subscription' || target.provider === 'chatgpt' || target.provider === 'openrouter' || target.provider === 'google' || target.provider === 'deepseek') && typeof value === 'string' ? value as ModelProfile['thinkingLevel'] : null,
       ollamaThinkingLevel: target.provider === 'ollama' && typeof value === 'string' ? value : null,
       thinking: typeof value === 'boolean' ? value : null }
+    setThinkingSaving(true)
     try {
       const settings = unwrapModelResult(await window.piRunner.saveModelProfile({ profile: next, credential: { action: 'keep' } }))
       onModelSettingsChange?.(settings)
     } catch (e) { setError(e instanceof Error ? e.message : '推理强度保存失败，请重试') }
+    finally { setThinkingSaving(false) }
   }, [onModelSettingsChange])
   const getApprovalPreview = useCallback(async (approval: ToolApproval) => {
     if (!requestId || !conversationId) throw new Error('审批请求已失效')
@@ -398,7 +403,10 @@ function ModelChat({ initialNativeHistory, onHistoryRestored, onRetainChange, no
     let replyReceived = false
     try {
       onBusyChange(true)
-      const instruction = customPrompt.trim()
+      // 每次实际发送（含队列和手动重试）重新读取一次；同一请求中的工具循环、
+      // 自动网络重试和计划批准后的继续执行共用此快照，不在任务中途切换自定义规则。
+      const instruction = (resolveCustomPrompt ? await resolveCustomPrompt() : customPrompt).trim()
+      if (cancelledRef.current) throw new Error('已取消发送')
       const requestContext = { threshold: compressionThreshold, usage: contextUsage }
       const requestMessages = (conversationId ? nativeHistory.current ? [message] : next : contextMessages(next, compaction))
         .map(({ execution: _execution, snapshotHash: _snapshotHash, ...message }) => message)
@@ -464,14 +472,14 @@ function ModelChat({ initialNativeHistory, onHistoryRestored, onRetainChange, no
     } finally { deletionRunning.current = false; setDeletingRound(false); onBusyChange(false, true) }
   }, [messages, conversationId, historyReady, snapshots, onMessagesChange, onCompactionChange, onSnapshotsChange, onBusyChange])
   return <section className="model-chat" aria-label="模型对话">
-    {active && interaction && interactionOpen && <PlanDialog key={interaction.id} interaction={interaction} onDismiss={() => setInteractionOpen(false)} onCancel={() => {
+    {active && interaction && interactionOpen && <PlanDialog key={interaction.id} interaction={interaction} modelSettingsBusy={thinkingSaving} modelPicker={disabled => <ConversationModelPicker profile={profile} profiles={availableProfiles} providers={providers} disabled={disabled || settingsDisabled || stopping} onSelect={id => { setSelectedModelId(id); onModelChange?.(id) }} onThinkingChange={changeThinking} onOpenSettings={onOpenSettings} />} onDismiss={() => setInteractionOpen(false)} onCancel={() => {
       void stopRequest().catch(() => setError('取消计划失败，请重试'))
     }} onRespond={async response => {
       if (!requestId || !conversationId) throw new Error('计划交互已失效')
       const progress = response.answers ? '已提交回答，正在与模型沟通…' : response.decision === 'revise' ? '已提交修改意见，正在完善计划…' : ''
       setPlanProgress(progress)
       try {
-        unwrapModelResult(await window.piRunner.respondPlanInteraction(requestId, conversationId, interaction.id, response))
+        unwrapModelResult(await window.piRunner.respondPlanInteraction(requestId, conversationId, interaction.id, response.decision === 'approve' ? { ...response, executionModelId: profile?.id } : response))
       } catch (e) { setPlanProgress(''); throw e }
     }} />}
     {active && fullConfirmation && conversationId && <FullAccessDialog key={fullConfirmation.approval.id} onRespond={async allow => {

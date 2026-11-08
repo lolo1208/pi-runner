@@ -32,7 +32,7 @@ export async function canonicalToolPath(target: string): Promise<string> {
   }
 }
 
-export const hiddenData = new Set(['.git', '.pi-runner'])
+export const hiddenData = new Set(['.git', '.pi-runner', '.pi-runner-dev'])
 export const hiddenProjectData = (name: string): boolean => hiddenData.has(name.toLowerCase()) || name.toLowerCase().startsWith('.pi-runner-check-')
 
 /** 即使当前用户可读，也不允许 Agent 读取的高危凭证目录。 */

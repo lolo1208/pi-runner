@@ -1,3 +1,5 @@
+import { usePromptFile } from './hooks/usePromptFile'
+import { PromptFileActions } from './components/PromptFileActions'
 import { Toaster } from '@/components/ui/sonner'
 import { Button } from '@/components/ui/button'
 import React, { useEffect, useMemo, useRef, useState } from 'react'
@@ -156,9 +158,35 @@ export default function App(): React.JSX.Element {
     void window.piRunner.setSleepBlocker?.(sleepBlocking)?.catch(() => {})
     return () => { void window.piRunner.setSleepBlocker?.(false)?.catch(() => {}) }
   }, [sleepBlocking])
-  const updatePreferences = (next: Preferences): void => {
+  const globalPrompt = usePromptFile(null, preferences.customPrompt, true)
+  const persistPreferences = (next: Preferences): void => {
     setPreferences(next)
     try { localStorage.setItem('pi-runner.preferences', JSON.stringify({ ...next, sendWithCtrlEnterVersion: 1 })) } catch { setError('偏好设置未能保存，重启后将恢复默认值。请检查本地存储。') }
+  }
+  const updatePreferences = (next: Preferences): void => {
+    if (next.customPrompt !== globalPrompt.draft) globalPrompt.change(next.customPrompt)
+    persistPreferences(next)
+  }
+  const syncPrompts = async (root: string | null, flush = true): Promise<{ global: string; project: string }> => {
+    if (flush && globalPrompt.dirty()) await globalPrompt.save()
+    const [global, projectPrompt] = await Promise.all([
+      globalPrompt.read(),
+      root ? window.piRunner.syncPromptFile(root, projectMeta[root]?.prompt ?? '') : Promise.resolve(''),
+    ])
+    setPreferences(current => {
+      if (current.customPrompt === global) return current
+      const next = { ...current, customPrompt: global }
+      try { localStorage.setItem('pi-runner.preferences', JSON.stringify({ ...next, sendWithCtrlEnterVersion: 1 })) }
+      catch { /* 文件是提示词真实来源；缓存失败不阻断发送，也不丢失磁盘内容。 */ }
+      return next
+    })
+    if (root) workspace.syncProjectPrompt(root, projectPrompt)
+    return { global, project: projectPrompt }
+  }
+  const openPromptSettings = async (): Promise<void> => {
+    setSettingsSection('general')
+    try { await syncPrompts(currentTask?.project ?? null, false) }
+    catch (e) { setSettingsError(e instanceof Error ? e.message : '提示词读取失败') }
   }
   /** 按开关发送系统通知；macOS 走系统通知，Windows 走桌面右下角气泡。 */
   // 程序处于激活状态且正在查看该会话时不再弹出通知，避免打扰当前操作。
@@ -222,19 +250,19 @@ export default function App(): React.JSX.Element {
         onCloseSearch={() => { setQuery(''); setSearchOpen(false) }}
         onToggleProject={root => setCollapsedProjects(items => items.includes(root) ? items.filter(item => item !== root) : [...items, root])}
         onPendingProjectRemovalChange={setPendingProjectRemoval}
-        onEditProject={root => { setError(''); setProjectEditTarget(root) }}
+        onEditProject={root => { setError(''); void syncPrompts(root, false).then(() => setProjectEditTarget(root)).catch(e => setError(e instanceof Error ? e.message : '提示词读取失败')) }}
         onRemoveProject={removeProject}
         onSelectTask={selectConversation}
         onEditTask={task => setConversationEditId(task.id)}
         onRemoveTask={removeTask}
         onCreateProjectTask={root => root === UNLINKED_PROJECT_LABEL ? createOrdinaryTask() : chooseExistingProject(root)}
-        onOpenSettings={() => setSettingsSection('general')}
+        onOpenSettings={() => { void openPromptSettings() }}
       />
       <PanelResizer className="task-panel-resizer" label="调整项目列表和对话面板宽度" onResize={resizeSidebar} onReset={() => appRef.current?.parentElement?.style.removeProperty('--task-sidebar-width')} />
       <main className="conversation" ref={conversationRef}>
         <header className="conversation-header"><Button className="icon-button" aria-label={toolsOpen ? '收起工具栏' : '展开工具栏'} aria-expanded={toolsOpen} onClick={() => setToolsOpen(value => !value)}>{toolsOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}</Button></header>
         {!currentTask && <section className="no-task-state"><FolderOpen size={30} /><h1>开始一段对话</h1><p>直接开始普通对话，或选择项目目录。</p><Button className="project-new-button conversation-action-button" onClick={() => setProjectPickerOpen(true)}><MessageCirclePlus size={17} aria-hidden="true" />新建对话</Button></section>}
-        {mountedTasks.map(task => <div className="task-chat" key={task.id} hidden={task.id !== currentTask?.id}><ModelChat initialNativeHistory={task.messages?.length ? restoredHistories.current.get(task.id) : undefined} onHistoryRestored={native => restoredHistories.current.set(task.id, native)} onRetainChange={retain => setRetainedTaskIds(items => retain ? items.includes(task.id) ? items : [...items, task.id] : items.includes(task.id) ? items.filter(id => id !== task.id) : items)} onSnapshotsChange={agentSnapshots => setTasks(items => items.map(item => item.id === task.id ? { ...item, agentSnapshots } : item))} notificationNavigationRequest={notificationNavigationRequests[task.id] ?? 0} snapshots={task.agentSnapshots} active={task.id === currentTask?.id && settingsSection === null} projectReady={task.project === null || (!pendingProjectDirectories[task.project] && [...readyProjects].some(root => sameProjectPath(root, task.project!)))} projectCurrent={!isBusy && Boolean(project && task.project && sameProjectPath(project, task.project))} conversationId={task.id} initialIntentMode={task.intentMode} onIntentChange={intentMode => setTasks(items => items.map(item => item.id === task.id ? { ...item, intentMode } : item))} initialPermissionMode={task.permissionMode} onPermissionChange={permissionMode => setTasks(items => items.map(item => item.id === task.id ? { ...item, permissionMode } : item))} compressionThreshold={preferences.compressionThreshold} initialCompaction={task.compaction} onCompactionChange={compaction => setTasks(items => items.map(item => item.id === task.id ? { ...item, compaction } : item))} initialModelId={task.modelId} onModelChange={modelId => setTasks(items => items.map(item => item.id === task.id && item.modelId !== modelId ? { ...item, modelId } : item))} customPrompt={composeCustomPrompt(task.prompt, task.project ? projectMeta[task.project]?.prompt : undefined, preferences.customPrompt)} project={task.project} providers={settings?.providers} initialMessages={task.messages} initialDraft={task.draft} initialDraftImages={task.draftImages} initialDraftSkillIds={task.draftSkillIds} initialQueue={task.queuedMessages} initialQueuePaused={task.queuePaused} initialQueueEdit={task.queueEdit} onQueueChange={(queuedMessages, queuePaused, queueEdit) => setTasks(items => items.map(item => item.id === task.id && (item.queuedMessages !== queuedMessages || item.queuePaused !== queuePaused || item.queueEdit !== queueEdit) ? { ...item, queuedMessages, queuePaused, queueEdit } : item))} onDraftChange={(draft, draftImages, draftSkillIds) => setTasks(items => items.map(item => item.id === task.id && (item.draft !== draft || item.draftImages !== draftImages || item.draftSkillIds !== draftSkillIds) ? { ...item, draft, draftImages, draftSkillIds } : item))} profile={activeProfile} profiles={settings?.profiles} onModelSettingsChange={setSettings} onWaitingForInputChange={(waiting, reason) => {
+        {mountedTasks.map(task => <div className="task-chat" key={task.id} hidden={task.id !== currentTask?.id}><ModelChat initialNativeHistory={task.messages?.length ? restoredHistories.current.get(task.id) : undefined} onHistoryRestored={native => restoredHistories.current.set(task.id, native)} onRetainChange={retain => setRetainedTaskIds(items => retain ? items.includes(task.id) ? items : [...items, task.id] : items.includes(task.id) ? items.filter(id => id !== task.id) : items)} onSnapshotsChange={agentSnapshots => setTasks(items => items.map(item => item.id === task.id ? { ...item, agentSnapshots } : item))} notificationNavigationRequest={notificationNavigationRequests[task.id] ?? 0} snapshots={task.agentSnapshots} active={task.id === currentTask?.id && settingsSection === null} projectReady={task.project === null || (!pendingProjectDirectories[task.project] && [...readyProjects].some(root => sameProjectPath(root, task.project!)))} projectCurrent={!isBusy && Boolean(project && task.project && sameProjectPath(project, task.project))} conversationId={task.id} initialIntentMode={task.intentMode} onIntentChange={intentMode => setTasks(items => items.map(item => item.id === task.id ? { ...item, intentMode } : item))} initialPermissionMode={task.permissionMode} onPermissionChange={permissionMode => setTasks(items => items.map(item => item.id === task.id ? { ...item, permissionMode } : item))} compressionThreshold={preferences.compressionThreshold} initialCompaction={task.compaction} onCompactionChange={compaction => setTasks(items => items.map(item => item.id === task.id ? { ...item, compaction } : item))} initialModelId={task.modelId} onModelChange={modelId => setTasks(items => items.map(item => item.id === task.id && item.modelId !== modelId ? { ...item, modelId } : item))} resolveCustomPrompt={async () => { const prompts = await syncPrompts(task.project); return composeCustomPrompt(task.prompt, prompts.project, prompts.global) }} customPrompt={composeCustomPrompt(task.prompt, task.project ? projectMeta[task.project]?.prompt : undefined, preferences.customPrompt)} project={task.project} providers={settings?.providers} initialMessages={task.messages} initialDraft={task.draft} initialDraftImages={task.draftImages} initialDraftSkillIds={task.draftSkillIds} initialQueue={task.queuedMessages} initialQueuePaused={task.queuePaused} initialQueueEdit={task.queueEdit} onQueueChange={(queuedMessages, queuePaused, queueEdit) => setTasks(items => items.map(item => item.id === task.id && (item.queuedMessages !== queuedMessages || item.queuePaused !== queuePaused || item.queueEdit !== queueEdit) ? { ...item, queuedMessages, queuePaused, queueEdit } : item))} onDraftChange={(draft, draftImages, draftSkillIds) => setTasks(items => items.map(item => item.id === task.id && (item.draft !== draft || item.draftImages !== draftImages || item.draftSkillIds !== draftSkillIds) ? { ...item, draft, draftImages, draftSkillIds } : item))} profile={activeProfile} profiles={settings?.profiles} onModelSettingsChange={setSettings} onWaitingForInputChange={(waiting, reason) => {
           setWaitingTaskIds(items => waiting ? items.includes(task.id) ? items : [...items, task.id] : items.includes(task.id) ? items.filter(id => id !== task.id) : items)
           if (waiting && reason) sendNotification('input', task.title, reason === 'plan-question' ? '计划正在等待你的回答' : reason === 'plan-review' ? '计划已准备好，等待你的批准' : '需要你批准一个操作', task.id)
           if (waiting) setCollapsedProjects(items => items.filter(root => root !== (task.project ?? UNLINKED_PROJECT_LABEL)))
@@ -257,7 +285,7 @@ export default function App(): React.JSX.Element {
         onToolChange={setTool}
       />}
     </div>
-    {settingsSection !== null && <SettingsPage initialSection={settingsSection} settings={settings} error={settingsError} reload={loadSettings} preferences={preferences} onPreferences={updatePreferences} onChange={setSettings} onClose={() => setSettingsSection(null)} />}
+    {settingsSection !== null && <SettingsPage promptActions={<PromptFileActions error={globalPrompt.error} reload={() => globalPrompt.read(true)} retry={() => globalPrompt.save()} overwrite={() => globalPrompt.save(true)} />} promptReady={globalPrompt.ready} onPromptSettingsOpen={async () => { try { return await syncPrompts(currentTask?.project ?? null, false) } catch (e) { setSettingsError(e instanceof Error ? e.message : '提示词读取失败') } }} initialSection={settingsSection} settings={settings} error={settingsError} reload={loadSettings} preferences={{ ...preferences, customPrompt: globalPrompt.draft }} onPreferences={updatePreferences} onChange={setSettings} onClose={() => setSettingsSection(null)} />}
     {projectPickerOpen && <ProjectPickerDialog
       projects={knownProjects}
       projectNames={projectNames}

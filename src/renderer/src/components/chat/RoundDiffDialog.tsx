@@ -7,6 +7,7 @@ import type { ChangedFile, FileDiff } from '../../../../shared/api'
 import type { AgentSnapshot } from '../../../../shared/models'
 import { FileContextMenu } from './FileContextMenu'
 import { PagedList } from '../PagedList'
+import { FileChangeStatus } from './FileChangeStatus'
 
 const STATUS_LABELS: Record<ChangedFile['status'], string> = { A: '新增文件', M: '修改文件', D: '删除文件' }
 
@@ -32,7 +33,7 @@ function FileReview({ round, file, mode, defaultExpanded }: { round: AgentSnapsh
       hidden={STATUS_LABELS[file.status]}
       expanded={expanded}
       onToggle={() => setExpanded(value => !value)}
-      trailing={file.binary ? <span className="tool-approval-binary">二进制</span> : <DiffStat additions={file.additions} deletions={file.deletions} />}
+      trailing={<>{file.binary ? <span className="tool-approval-binary">二进制</span> : <DiffStat additions={file.additions} deletions={file.deletions} />}<FileChangeStatus status={file.status} /></>}
     /></FileContextMenu>
     {expanded && <div className="tool-approval-file-body">
       {error

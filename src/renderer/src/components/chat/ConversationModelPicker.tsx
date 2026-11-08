@@ -55,6 +55,7 @@ export function ConversationModelPicker({ profile, profiles, providers, disabled
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({})
   const groupId = useId()
   const [thinkingSaving, setThinkingSaving] = useState(false)
+  const [pendingThinking, setPendingThinking] = useState<{ profileId: string; value: boolean | string | null } | null>(null)
   const enabledProfiles = profiles.filter(item => item.enabled !== false && item.available !== false)
   const search = query.trim().toLocaleLowerCase()
   const filtered = enabledProfiles.filter(item => `${item.name} ${item.model} ${PROVIDER_PRESETS.find(preset => preset.id === item.provider)?.label ?? ''}`.toLocaleLowerCase().includes(search))
@@ -63,15 +64,17 @@ export function ConversationModelPicker({ profile, profiles, providers, disabled
   const descriptor = profile ? findModelDescriptor(providers, profile) : undefined
   const thinkingOptions = (descriptor?.thinking?.values ?? []).map(value => ({ key: `${typeof value === 'boolean' ? 'boolean' : 'level'}:${value}`, label: thinkingLabel(value) ?? String(value), raw: value }))
   const configuredThinking = profile ? selectedModelThinking(profile, descriptor?.thinking) : null
-  const selectedThinkingKey = thinkingOptions.find(option => option.raw === configuredThinking)?.key
+  const displayedThinking = pendingThinking && pendingThinking.profileId === profile?.id ? pendingThinking.value : configuredThinking
+  const selectedThinkingKey = thinkingOptions.find(option => option.raw === displayedThinking)?.key
   const showThinking = thinkingOptions.some(option => option.raw !== false && option.raw !== 'off')
-  const configuredThinkingLabel = thinkingLabel(configuredThinking)
+  const configuredThinkingLabel = thinkingLabel(displayedThinking)
 
   const changeThinking = async (value: boolean | string | null): Promise<void> => {
     if (!profile || !onThinkingChange || thinkingSaving) return
+    setPendingThinking({ profileId: profile.id, value })
     setThinkingSaving(true)
     try { await onThinkingChange(profile, value) }
-    finally { setThinkingSaving(false) }
+    finally { setThinkingSaving(false); setPendingThinking(null) }
   }
 
   return <Popover.Root open={open && !disabled} onOpenChange={next => {
@@ -139,7 +142,7 @@ export function ConversationModelPicker({ profile, profiles, providers, disabled
                 const raw = thinkingOptions.find(option => option.key === value)?.raw
                 if (raw !== undefined) void changeThinking(raw)
               }}>
-                {thinkingOptions.map(option => <RadioGroupItem key={option.key} variant="segmented" className="conversation-model-thinking-option" value={option.key}>{option.label}</RadioGroupItem>)}
+                {thinkingOptions.map(option => <RadioGroupItem key={option.key} variant="segmented" className="conversation-model-thinking-option disabled:opacity-100" value={option.key}>{option.label}</RadioGroupItem>)}
               </RadioGroup>
             </>
             : <p className="conversation-model-reasoning-hint">{providers?.length ? `${profile.name} 未提供可调整的推理强度。` : `${profile.name} 的模型信息尚未读取，请在模型设置中刷新列表。`}</p>}

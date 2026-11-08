@@ -59,6 +59,7 @@ const toolActions: Record<string, string> = {
 const emptyUsage = (): Usage => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } })
 export interface PiAgentDependencies {
   dataDirectory: string
+  resolveExecutionModel?(id: string): Promise<{ profile: ModelProfile; apiKey: string }>
   getProject(): string | undefined
   emit(event: AgentEvent): void
   fetchRequest?: typeof fetch
@@ -344,6 +345,7 @@ export class PiAgentService {
     const mode = options ? this.permission(options.conversationId) : 'default'
     let planning = !isTest && options?.intentMode === 'plan'
     let planningMutationAttempted = false
+    let executionModelId: string | undefined
     let approvedPlan: { title: string; content: string } | undefined
     let executionTransitionPending = false, executionToolCalls = 0
     let clarified = false, interactionVersion = 0
@@ -473,7 +475,7 @@ export class PiAgentService {
     const previousBoundaryEntry = [...manager.getEntries()].reverse().find(entry => entry.type === 'custom' && entry.customType === 'pi-runner-cache-boundary' && (entry.data as { profileId?: string }).profileId === profile.id)
     const previousBoundary = previousBoundaryEntry?.type === 'custom' ? (previousBoundaryEntry.data as { boundary?: { signature: string; index: number } }).boundary : undefined
     let cacheInfo: { fields?: { input: boolean; output: boolean; cacheRead: boolean; cacheWrite: boolean }; fingerprint?: { prompt: string; tools: string }; upstream?: string; boundary?: { signature: string; index: number } } = {}
-    const provider = await createPiProvider(profile, apiKey, attachments, responses, limits => { rateLimits = limits }, this.dependencies.fetchRequest, this.dependencies.chatgpt, onModelRequestActive, attempt => {
+    let provider = await createPiProvider(profile, apiKey, attachments, responses, limits => { rateLimits = limits }, this.dependencies.fetchRequest, this.dependencies.chatgpt, onModelRequestActive, attempt => {
       onModelRequestActive(true)
       modelStatus = `Google 服务繁忙，正在重试（${attempt}/3）…`
       refreshStatus()
@@ -545,6 +547,7 @@ export class PiAgentService {
         publishTranscript()
         const response = await this.interactions.ask(requestId, options.conversationId, details, toolSignal ?? signal, waitingFor('plan-interaction', details.kind === 'questions' ? '等待你回答问题…' : '等待你审阅计划…'))
         signal.throwIfAborted()
+        if (response.decision === 'approve') executionModelId = response.executionModelId
         interactionVersion++
         if (details.kind === 'questions') { clarified = true; session?.setActiveToolsByName(planningTools()) }
         manager.appendCustomEntry('pi-runner-plan-message', { role: 'user', content: response.answers ? (details.questions ?? []).map(question => `${question.header || question.question}：${response.answers![question.id]}`).join('\n') : response.decision === 'approve' ? '批准计划并开始执行' : `修改计划：${response.feedback}` } satisfies ChatMessage)
@@ -610,7 +613,7 @@ export class PiAgentService {
         return executionTransitionPending ? { action: 'end' } : decision || undefined
       }
       signal.throwIfAborted()
-      unsubscribe = session.subscribe(event => {
+      const onSessionEvent: Parameters<typeof session.subscribe>[0] = event => {
         if (event.type === 'turn_start') { modelStatus = '正在连接模型…'; refreshStatus() }
         if (event.type === 'message_end' && event.message.role === 'assistant') {
           liveAssistant = undefined
@@ -721,7 +724,8 @@ export class PiAgentService {
         if (event.type === 'auto_retry_start') { modelStatus = `模型请求失败，正在等待第 ${event.attempt} 次重试…`; refreshStatus() }
         if (event.type === 'auto_retry_end') { modelStatus = event.success ? '正在整理回复…' : '模型重试失败，正在处理…'; refreshStatus() }
         if (event.type === 'agent_end') { modelStatus = '正在整理回复…'; refreshStatus() }
-      })
+      }
+      unsubscribe = session.subscribe(onSessionEvent)
       const prepared = attachments.prepare(messages.at(-1)!)
       if (!isTest) {
         // SDK 的 prompt 检查发生在新消息入队之前；补算新消息及中文历史，
@@ -771,6 +775,24 @@ export class PiAgentService {
       if (approvedPlan) {
         signal.throwIfAborted()
         executionTransitionPending = false
+        if (executionModelId && this.dependencies.resolveExecutionModel) {
+          // 审批后重新读取配置，确保同一模型刚保存的推理强度也生效。
+          const selected = await this.dependencies.resolveExecutionModel(executionModelId)
+          signal.throwIfAborted()
+          const nextProfile = selected.profile
+          const nextProvider = await createPiProvider(nextProfile, selected.apiKey, attachments, useFileResponses(nextProfile, this.transcript(manager, displaySkills)), limits => { rateLimits = limits }, this.dependencies.fetchRequest, this.dependencies.chatgpt, onModelRequestActive)
+          signal.throwIfAborted()
+          unsubscribe?.()
+          session.dispose()
+          profile = nextProfile
+          apiKey = selected.apiKey
+          provider = nextProvider
+          cacheInfo = {}
+          session = (await createAgentSession({ cwd, agentDir: path.join(this.dependencies.dataDirectory, 'agent-config'), modelRuntime: provider.runtime, model: provider.model, thinkingLevel: provider.thinkingLevel, sessionManager: manager, settingsManager, resourceLoader,
+            tools: tools.map(tool => tool.name), customTools: tools })).session
+          session.setActiveToolsByName(stableToolNames([...projectTools, ...skillTools].map(tool => tool.name)))
+          unsubscribe = session.subscribe(onSessionEvent)
+        }
         status('计划已批准，正在执行…')
         // 隐藏消息直接 triggerTurn 不会刷新系统提示词。先排入下一轮，
         // 再用空输入启动 prompt 的完整刷新流程；空输入不会显示在对话中。

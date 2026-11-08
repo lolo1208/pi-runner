@@ -1,7 +1,8 @@
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ChevronDown, ChevronUp, MessageCirclePlus, Search, Settings, X } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useState } from 'react'
+import { isStringList, readWorkspaceViewState, writeWorkspaceViewState } from '../lib/workspace-view-state'
 import { Virtuoso } from 'react-virtuoso'
 import { Modal } from '@/components/ui/modal'
 import { UNLINKED_PROJECT_LABEL } from '../app-types'
@@ -41,7 +42,8 @@ interface ProjectSidebarProps {
 export function ProjectSidebar({ groups, busyProjectRoots, projectNames, hasMatchingTasks, currentTaskId, busyTaskIds, waitingTaskIds, query, searchOpen, collapsedProjects, pendingProjectRemoval, isBusy, onStartTask, onToggleSearch, onQueryChange, onCloseSearch, onToggleProject, onPendingProjectRemovalChange, onEditProject, onRemoveProject, onSelectTask, onEditTask, onRemoveTask, onCreateProjectTask, onOpenSettings }: ProjectSidebarProps): React.JSX.Element {
   const [now, setNow] = useState(Date.now)
   const [deletingTask, setDeletingTask] = useState<Task | null>(null)
-  const [expandedTaskProjects, setExpandedTaskProjects] = useState<Set<string>>(() => new Set())
+  const [expandedTaskProjects, setExpandedTaskProjects] = useState<Set<string>>(() => new Set(readWorkspaceViewState('expanded-task-projects', [], isStringList)))
+  useLayoutEffect(() => { writeWorkspaceViewState('expanded-task-projects', [...expandedTaskProjects]) }, [expandedTaskProjects])
   const toggleTaskExpansion = (root: string): void => {
     setExpandedTaskProjects(previous => {
       const next = new Set(previous)

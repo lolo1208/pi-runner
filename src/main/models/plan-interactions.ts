@@ -42,7 +42,8 @@ export class PlanInteractionManager {
       if (!['approve', 'revise'].includes(response.decision ?? '')) throw new ModelError('请选择批准或修改计划')
       if (response.feedback !== undefined && (typeof response.feedback !== 'string' || response.feedback.length > 8000)) throw new ModelError('修改意见不能超过 8000 个字符')
       if (response.decision === 'revise' && !response.feedback?.trim()) throw new ModelError('请填写希望如何修改计划')
-      pending.finish({ decision: response.decision, feedback: response.feedback?.trim() })
+      if (response.executionModelId !== undefined && (typeof response.executionModelId !== 'string' || !response.executionModelId.trim() || response.executionModelId.length > 128)) throw new ModelError('执行模型无效')
+      pending.finish({ decision: response.decision, feedback: response.feedback?.trim(), executionModelId: response.executionModelId })
     }
   }
 }

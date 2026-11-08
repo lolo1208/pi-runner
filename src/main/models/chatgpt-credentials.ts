@@ -1,3 +1,4 @@
+import { withSharedFileLock } from './shared-file-lock'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -10,7 +11,7 @@ export class ChatgptCredentials implements CredentialStore {
   private queue: Promise<unknown> = Promise.resolve()
   constructor(private readonly file: string, private readonly cipher: CredentialCipher) {}
   private serialized<T>(action: () => Promise<T>): Promise<T> {
-    const result = this.queue.then(action)
+    const result = this.queue.then(() => withSharedFileLock(this.file, action))
     this.queue = result.catch(() => undefined)
     return result
   }

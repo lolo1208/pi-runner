@@ -1,4 +1,6 @@
 import { app, BrowserWindow, dialog, Menu, net, safeStorage, shell, Tray } from 'electron'
+import { dataPaths } from './data-paths'
+import { shareWindowsEncryptionKey } from './shared-encryption'
 import { flushRendererConversations } from './flush-conversations'
 import path from 'node:path'
 import { pathToFileURL, fileURLToPath } from 'node:url'
@@ -34,10 +36,11 @@ const sleepBlocker = new SleepBlocker()
 const mainDirectory = path.dirname(fileURLToPath(import.meta.url))
 const rendererFile = path.join(mainDirectory, '../renderer/index.html')
 const appDataDirectory = app.getPath('appData')
+const storagePaths = dataPaths(appDataDirectory, app.getPath('home'), app.isPackaged)
 const iconDirectory = app.isPackaged ? path.join(process.resourcesPath, 'icons') : path.join(app.getAppPath(), 'resources', 'icons')
 const windowIcon = path.join(iconDirectory, process.platform === 'win32' ? 'icon.ico' : 'icon.png')
 // userData 目录：安装版固定为 pi-runner，开发模式使用独立的 pi-runner-dev，避免与已安装的正式版争用缓存导致 0x5 拒绝访问。
-// 单实例锁按 userData 目录区分：开发版和安装版各自单实例，可同时运行且数据互不干扰。
+// 单实例锁及浏览器缓存隔离；模型配置与授权单独共享。
 if (!app.isPackaged) {
   app.setPath('userData', path.join(appDataDirectory, 'pi-runner-dev'))
 } else {
@@ -54,6 +57,10 @@ if (!hasSingleInstanceLock) {
     // 启动初始化尚未完成时，首个实例会在初始化结束后正常显示窗口。
     showMainWindow()
   })
+}
+// 获得开发版单实例锁后、Chromium 初始化安全存储前，对齐正式版密钥。
+if (hasSingleInstanceLock && !app.isPackaged && process.platform === 'win32') {
+  shareWindowsEncryptionKey(storagePaths.models, storagePaths.userData)
 }
 const isDevelopment = !app.isPackaged && Boolean(process.env.ELECTRON_RENDERER_URL)
 const rendererUrl = isDevelopment ? process.env.ELECTRON_RENDERER_URL! : pathToFileURL(rendererFile).href
@@ -151,22 +158,23 @@ if (hasSingleInstanceLock) void app.whenReady().then(() => {
   createTray()
   if (process.platform === 'win32') app.setAppUserModelId('dev.pirunner.desktop')
   if (process.platform === 'darwin') app.dock?.setIcon(path.join(iconDirectory, 'icon.png'))
-  piRunnerDirectory = path.join(app.getPath('home'), '.pi-runner')
+  piRunnerDirectory = storagePaths.workspace
   const cipher = {
     isAvailable: () => safeStorage.isEncryptionAvailable() && (process.platform !== 'linux' || safeStorage.getSelectedStorageBackend() !== 'basic_text'),
     encrypt: (value: string) => safeStorage.encryptString(value),
     decrypt: (value: Buffer) => safeStorage.decryptString(value)
   }
-  modelSettings = new ModelSettingsStore(path.join(app.getPath('userData'), 'model-settings.json'), cipher)
+  modelSettings = new ModelSettingsStore(path.join(storagePaths.models, 'model-settings.json'), cipher)
   // 订阅网络沿用 Electron 的系统代理；不向授权接口或模型接口发送浏览器 Cookie。
   const subscriptionFetch: typeof fetch = (input, init) => net.fetch(input instanceof URL ? input.href : input, { ...init, credentials: 'omit' })
   const modelFetch: typeof fetch = (input, init) => ['openrouter.ai', 'generativelanguage.googleapis.com', 'api.deepseek.com', 'api.groq.com'].includes(new URL(input instanceof Request ? input.url : String(input)).hostname) ? subscriptionFetch(input, init) : fetch(input, init)
   claudeSubscription.initialize(modelSettings)
   configureClaudeRelayFetch(subscriptionFetch)
-  chatgptService = new ChatgptService(new ChatgptCredentials(path.join(app.getPath('userData'), 'chatgpt-auth.enc'), cipher), modelSettings, subscriptionFetch)
+  chatgptService = new ChatgptService(new ChatgptCredentials(path.join(storagePaths.models, 'chatgpt-auth.enc'), cipher), modelSettings, subscriptionFetch)
   const reviewService = new ToolReviewService(modelSettings, modelFetch, chatgptService)
-  modelService = new ModelService(modelSettings, new PiAgentService({ dataDirectory: piRunnerDirectory, protectedDirectories: [app.getPath('userData')], chatgpt: chatgptService,
+  modelService = new ModelService(modelSettings, new PiAgentService({ dataDirectory: piRunnerDirectory, protectedDirectories: [app.getPath('userData'), storagePaths.models, path.join(app.getPath('home'), '.pi-runner'), path.join(app.getPath('home'), '.pi-runner-dev')], chatgpt: chatgptService,
     fetchRequest: modelFetch,
+    resolveExecutionModel: id => modelSettings.getForRequest(id),
     // 下载仅发匿名 GET，不继承模型认证头、Cookie 或订阅请求配置。
     downloadFetch: anonymousDownloadFetch,
     review: request => reviewService.reviewWithSource(request),

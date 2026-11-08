@@ -19,7 +19,6 @@ class ClaudeSubscriptionService {
   private proxy?: string
   private proxyLoading?: Promise<void>
   private async loadProxy(): Promise<void> {
-    if (this.proxy !== undefined) return
     await (this.proxyLoading ??= readClaudeProxy().then(value => { this.proxy = value }).finally(() => { this.proxyLoading = undefined }))
   }
   async setProxy(value: unknown): Promise<void> {

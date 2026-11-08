@@ -60,6 +60,8 @@ VIAddVersionKey "LegalCopyright" "Pi Runner"
 !else
   InstallDir "$LOCALAPPDATA\Programs\${APP_DIRECTORY_NAME}"
   InstallDirRegKey HKCU "Software\PiRunner" "InstallDir"
+  !define MUI_ICON "${APP_ICON}"
+  !define MUI_UNICON "${APP_ICON}"
   !define MUI_ABORTWARNING
   !define MUI_FINISHPAGE_RUN "$INSTDIR\${APP_EXE}"
   !insertmacro MUI_PAGE_DIRECTORY

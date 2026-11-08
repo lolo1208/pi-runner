@@ -87,7 +87,7 @@ function projectIgnored(rules: Map<string, ProjectMatcher>, relative: string): b
   return matchRules(rules, relative) === true
 }
 
-const EXCLUDED_NAMES = new Set(['.git', '.pi-runner', 'node_modules', 'dist', 'out', 'build-work', 'release', 'exports', '.aws', '.ssh', '.cache', '.tmp', '.turbo', '.next', '.nuxt', 'coverage', '__pycache__', '.pytest_cache'])
+const EXCLUDED_NAMES = new Set(['.git', '.pi-runner', '.pi-runner-dev', 'node_modules', 'dist', 'out', 'build-work', 'release', 'exports', '.aws', '.ssh', '.cache', '.tmp', '.turbo', '.next', '.nuxt', 'coverage', '__pycache__', '.pytest_cache'])
 
 // 只排除有明确工具用途的目录名，避免把 src/build、bin、lib 等源码或资源目录整体隐藏。
 const EXCLUDED_DIRECTORIES = new Set([

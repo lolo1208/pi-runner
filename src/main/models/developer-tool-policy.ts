@@ -122,7 +122,7 @@ export function developerToolPolicy(program: string, args: string[]): DeveloperT
     if (args.some(value => /^--(?:eval|print|require|import|loader|experimental-loader|preload|inspect(?:-brk|-wait)?|allow-[\w-]+|trust|unsafely-ignore-certificate-errors)(?:=|$)/.test(value) || /^-[^-]*[eprA]/.test(value))) return review('运行时内联代码、启动加载器、调试入口或扩大权限需要审核。')
     if (['node', 'nodejs'].includes(program)) {
       if (args.length === 2 && ['--check', '-c'].includes(args[0]) && !args[1].startsWith('-')) return read
-      if (args[0] === '--experimental-strip-types') return /\.[cm]?[jt]s$/i.test(args[1] ?? '') && !args[1].startsWith('-') ? develop : review('Node 类型剥离的执行入口不明确，需要审核。')
+      if (['--experimental-strip-types', '--experimental-transform-types'].includes(args[0])) return /\.[cm]?[jt]s$/i.test(args[1] ?? '') && !args[1].startsWith('-') ? develop : review('Node 类型处理的执行入口不明确，需要审核。')
       if (args[0] === '--test') return develop
       if (args[0] === '--watch') return args.length > 1 && /\.[cm]?js$/i.test(args[1]) ? develop : review('Node watch 的执行入口不明确，需要审核。')
       return /\.[cm]?js$/i.test(args[0] ?? '') ? develop : review('Node 的未知选项、标准输入或交互入口需要审核。')
