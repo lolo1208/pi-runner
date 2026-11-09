@@ -1,3 +1,4 @@
+import { app, net } from 'electron'
 import { createHash, randomUUID } from 'node:crypto'
 import { lstat, mkdir, open, rename, unlink } from 'node:fs/promises'
 import path from 'node:path'
@@ -16,7 +17,7 @@ export class DownloadFailure extends ModelError {
   constructor(message: string, readonly code: string) { super(message) }
 }
 
-/** 自定义 fetch/流即使忽略 signal，也不能让网络等待永久挂起。 */
+/** 即使网络或流未及时响应 signal，也不能让等待永久挂起。 */
 function downloadAwait<T>(pending: Promise<T>, signal: AbortSignal, discard?: (value: T) => void): Promise<T> {
   return new Promise((resolve, reject) => {
     let settled = false
@@ -78,12 +79,11 @@ function validateImage(header: Buffer, contentType: string, target: string): voi
 }
 
 /** 临时文件必须与目标同盘以原子替换；完整校验及路径复查通过后才提交。 */
-export function createDownloadToolDefinition(check: (target: string) => Promise<void>, options: { fetchRequest?: typeof fetch; maxBytes?: number; timeoutMs?: number } = {}, lang: PromptLang = 'zh'): ToolDefinition {
-  const fetchRequest = options.fetchRequest ?? fetch
+export function createDownloadToolDefinition(check: (target: string) => Promise<void>, options: { maxBytes?: number; timeoutMs?: number } = {}, lang: PromptLang = 'zh'): ToolDefinition {
   const maxBytes = options.maxBytes ?? MAX_BYTES
   return {
     name: 'download', label: pick(lang, '下载文件', 'Download file'), executionMode: 'sequential',
-    description: pick(lang, '从 HTTP/HTTPS URL 下载图片或其他二进制文件到 path，Windows/macOS/Linux 均使用此工具。最多跟随 5 次重定向，60 秒超时，上限 64 MiB；校验状态码、非空内容与长度；图片文件另校验文件头，可提供 sha256 验证完整性。校验通过才保存；目标已存在会替换，替换前失败或取消保留原文件，已替换则返回成功。清理警告不算失败，不要重复下载。不要用 write 写图片字节，也不要用 Invoke-WebRequest -OutFile、BITS、certutil、curl -o/-O、wget 或 aria2c 下载落盘。', 'Download an image or other binary file from an HTTP/HTTPS URL to path; use this tool on Windows/macOS/Linux. Follows up to 5 redirects, 60-second timeout, 64 MiB cap; validates status code, non-empty content, and length, accepts sha256 for integrity, and for image files additionally validates headers. Saves only after validation passes; an existing target is replaced, failure or cancel before replacement keeps the original file, and a completed replacement returns success. Cleanup warnings are not failures — do not re-download. Do not write image bytes with write, and do not download to disk with Invoke-WebRequest -OutFile, BITS, certutil, curl -o/-O, wget, or aria2c.'),
+    description: pick(lang, '从 HTTP/HTTPS URL 下载图片或其他二进制文件到 path，Windows/macOS/Linux 均使用此工具。使用 Electron 网络栈及系统代理，自动跟随重定向（次数由 Chromium 限制），60 秒超时，上限 64 MiB；校验状态码、非空内容与长度；图片文件另校验文件头，可提供 sha256 验证完整性。校验通过才保存；目标已存在会替换，替换前失败或取消保留原文件，已替换则返回成功。清理警告不算失败，不要重复下载。不要用 write 写图片字节，也不要用 Invoke-WebRequest -OutFile、BITS、certutil、curl -o/-O、wget 或 aria2c 下载落盘。', 'Download an image or other binary file from an HTTP/HTTPS URL to path; use this tool on Windows/macOS/Linux. Uses Electron networking and system proxy settings; follows redirects within the Chromium redirect limit, 60-second timeout, 64 MiB cap; validates status code, non-empty content, and length, accepts sha256 for integrity, and for image files additionally validates headers. Saves only after validation passes; an existing target is replaced, failure or cancel before replacement keeps the original file, and a completed replacement returns success. Cleanup warnings are not failures — do not re-download. Do not write image bytes with write, and do not download to disk with Invoke-WebRequest -OutFile, BITS, certutil, curl -o/-O, wget, or aria2c.'),
     parameters: { type: 'object', properties: {
       url: { type: 'string', minLength: 1, description: pick(lang, '完整 HTTP/HTTPS 下载地址', 'Full HTTP/HTTPS download URL') },
       path: { type: 'string', minLength: 1, description: pick(lang, '保存文件的确切相对或绝对路径', 'Exact relative or absolute path to save the file') },
@@ -105,16 +105,15 @@ export function createDownloadToolDefinition(check: (target: string) => Promise<
         downloadSignal.throwIfAborted()
         await validateDownloadTarget(target)
         await check(target)
-        let url = downloadUrl(input.url)
-        for (let redirects = 0; ; redirects++) {
-          response = await downloadAwait(fetchRequest(url.href, { method: 'GET', redirect: 'manual', credentials: 'omit', signal: downloadSignal }), downloadSignal,
-            late => { void late.body?.cancel().catch(() => {}) })
-          if (![301, 302, 303, 307, 308].includes(response.status)) break
-          const location = response.headers.get('location')
-          if (response.body) await downloadAwait(response.body.cancel(), downloadSignal)
-          if (!location || redirects >= 5) throw new ModelError('下载重定向缺少目标或超过 5 次，未保存文件')
-          url = downloadUrl(new URL(location, url).href)
-        }
+        await downloadAwait(app.whenReady(), downloadSignal)
+        const url = downloadUrl(input.url)
+        // Electron 的 manual 模式会取消重定向，交由 Chromium 跟随并限制次数。
+        // 不使用会话 Cookie、认证凭据、自定义协议处理器或 Referer。
+        response = await downloadAwait(net.fetch(url.href, {
+          method: 'GET', redirect: 'follow', credentials: 'omit', referrerPolicy: 'no-referrer',
+          bypassCustomProtocolHandlers: true, signal: downloadSignal
+        }), downloadSignal, late => { void late.body?.cancel().catch(() => {}) })
+        const finalUrl = response.url ? downloadUrl(response.url) : url
         if (response.status !== 200 || !response.body) throw new DownloadFailure(`下载失败：HTTP ${response.status}，未保存文件`, 'DOWNLOAD_HTTP_ERROR')
         const lengthText = response.headers.get('content-length')
         const expectedLength = lengthText === null ? undefined : Number(lengthText)
@@ -158,13 +157,13 @@ export function createDownloadToolDefinition(check: (target: string) => Promise<
           committed = true
           temporary = undefined
           output.push({ type: 'text', text: `下载完成并通过校验：${target}（${bytes} 字节，SHA-256: ${sha256}）` })
-          return { content: output, details: { path: target, url: url.href, bytes, contentType, sha256, warnings } }
+          return { content: output, details: { path: target, url: finalUrl.href, bytes, contentType, sha256, warnings } }
         } finally { await file.close().catch(() => {}) }
       } catch (error) {
         const timedOut = downloadSignal.reason?.name === 'TimeoutError'
         failure = committed ? new FileMutationUncertain('下载目标已替换，但结果生成失败；请先核对文件，不要直接重试')
           : downloadSignal.aborted ? new DownloadFailure(timedOut ? '下载超过时间限制，未保存文件' : '下载已取消，未保存文件', timedOut ? 'DOWNLOAD_TIMEOUT' : 'DOWNLOAD_CANCELLED')
-            : error instanceof ModelError ? error : new DownloadFailure('下载失败，请检查网络、URL 和目标路径；未保存文件', 'DOWNLOAD_FAILED')
+            : error instanceof ModelError ? error : new DownloadFailure(`下载失败：${error instanceof Error ? error.message : '未知错误'}；请检查网络、URL 和目标路径；未保存文件`, 'DOWNLOAD_FAILED')
         throw failure
       } finally {
         // 清理失败不能覆盖原始错误，也不能把成功替换误报为下载失败。

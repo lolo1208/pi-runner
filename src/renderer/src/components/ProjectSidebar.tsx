@@ -113,6 +113,6 @@ export function ProjectSidebar({ groups, busyProjectRoots, projectNames, hasMatc
     <Modal open={Boolean(pendingProjectRemoval)} onOpenChange={open => { if (!open) onPendingProjectRemovalChange(null) }} title="移除此项目？" description="同时移除此项目的对话，并删除 Pi Runner 快照数据。项目文件会保留。" closeDisabled={pendingProjectRemoval ? projectRemovalDisabled(pendingProjectRemoval) : isBusy}>
       <div className="modal-actions"><Button variant="outline" autoFocus disabled={isBusy} onClick={() => onPendingProjectRemovalChange(null)}>取消</Button><Button variant="destructive" disabled={pendingProjectRemoval ? projectRemovalDisabled(pendingProjectRemoval) : isBusy} onClick={() => { if (pendingProjectRemoval) onRemoveProject(pendingProjectRemoval) }}>确认移除</Button></div>
     </Modal>
-    <div className="sidebar-bottom"><Button onClick={onOpenSettings}><Settings size={16} />设置<small>v0.1</small></Button></div>
+    <div className="sidebar-bottom"><Button onClick={onOpenSettings}><Settings size={16} />设置<small>v{__APP_VERSION__}</small></Button></div>
   </aside>
 }

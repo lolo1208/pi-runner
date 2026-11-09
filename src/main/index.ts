@@ -19,7 +19,6 @@ import { GoogleClient } from './models/google-client'
 import { DeepseekClient } from './models/deepseek-client'
 import { OpenrouterClient } from './models/openrouter-client'
 import { ToolReviewService } from './models/tool-review-service'
-import { anonymousDownloadFetch } from './models/download-fetch'
 import { SleepBlocker } from './sleep-blocker'
 
 let mainWindow: BrowserWindow | null = null
@@ -160,9 +159,9 @@ if (hasSingleInstanceLock) void app.whenReady().then(() => {
   if (process.platform === 'darwin') app.dock?.setIcon(path.join(iconDirectory, 'icon.png'))
   piRunnerDirectory = storagePaths.workspace
   const cipher = {
-    isAvailable: () => safeStorage.isEncryptionAvailable() && (process.platform !== 'linux' || safeStorage.getSelectedStorageBackend() !== 'basic_text'),
-    encrypt: (value: string) => safeStorage.encryptString(value),
-    decrypt: (value: Buffer) => safeStorage.decryptString(value)
+    isAvailable: async () => await safeStorage.isAsyncEncryptionAvailable() && (process.platform !== 'linux' || safeStorage.getSelectedStorageBackend() !== 'basic_text'),
+    encrypt: (value: string) => safeStorage.encryptStringAsync(value),
+    decrypt: async (value: Buffer) => (await safeStorage.decryptStringAsync(value)).result
   }
   modelSettings = new ModelSettingsStore(path.join(storagePaths.models, 'model-settings.json'), cipher)
   // 订阅网络沿用 Electron 的系统代理；不向授权接口或模型接口发送浏览器 Cookie。
@@ -176,7 +175,6 @@ if (hasSingleInstanceLock) void app.whenReady().then(() => {
     fetchRequest: modelFetch,
     resolveExecutionModel: id => modelSettings.getForRequest(id),
     // 下载仅发匿名 GET，不继承模型认证头、Cookie 或订阅请求配置。
-    downloadFetch: anonymousDownloadFetch,
     review: request => reviewService.reviewWithSource(request),
     getProject: () => snapshotManager?.getRoot(), emit: event => { mainWindow?.webContents.send(IPC_CHANNELS.agentEvent, event) } }), undefined, new OpenrouterClient(subscriptionFetch), new GoogleClient(subscriptionFetch), new DeepseekClient(subscriptionFetch), modelFetch)
   registerIpcHandlers({

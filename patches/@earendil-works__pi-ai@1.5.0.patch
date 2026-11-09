@@ -12,8 +12,8 @@ diff --git a/dist/api/google-generative-ai.js b/dist/api/google-generative-ai.js
              if (!apiKey) {
                  throw new Error(`No API key for provider: ${model.provider}`);
              }
--            const client = createClient(model, apiKey, options?.headers);
-+            const client = createClient(model, apiKey, options?.headers, options?.fetch);
+-            const client = createClient(model, apiKey, options?.headers, options?.identity);
++            const client = createClient(model, apiKey, options?.headers, options?.identity, options?.fetch);
              let params = buildParams(model, normalizedContext, options);
              const nextParams = await options?.onPayload?.(params, model);
              if (nextParams !== undefined) {
@@ -21,9 +21,9 @@ diff --git a/dist/api/google-generative-ai.js b/dist/api/google-generative-ai.js
          },
      });
  };
--function createClient(model, apiKey, optionsHeaders) {
+-function createClient(model, apiKey, optionsHeaders, identity) {
 -    const httpOptions = {};
-+function createClient(model, apiKey, optionsHeaders, fetchRequest) {
++function createClient(model, apiKey, optionsHeaders, identity, fetchRequest) {
 +    const httpOptions = { fetch: fetchRequest, retryOptions: { attempts: 1 } };
      if (model.baseUrl) {
          httpOptions.baseUrl = model.baseUrl;

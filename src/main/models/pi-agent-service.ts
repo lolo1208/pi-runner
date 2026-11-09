@@ -63,7 +63,6 @@ export interface PiAgentDependencies {
   getProject(): string | undefined
   emit(event: AgentEvent): void
   fetchRequest?: typeof fetch
-  downloadFetch?: typeof fetch
   chatgpt?: ChatgptService
   protectedDirectories?: string[]
   /** 工具权限第二层自动审核；未提供时回退到逐次询问。 */
@@ -504,7 +503,7 @@ export class PiAgentService {
       try { before = await snapshot.prepareCheckpoint() }
       finally { refreshStatus() }
     })() : Promise.resolve(), {
-      mode, project: snapshot?.getRoot(), workspace: !project ? cwd : undefined, protectedDirectories: [this.dependencies.dataDirectory, ...(this.dependencies.protectedDirectories ?? [])], downloadFetch: this.dependencies.downloadFetch,
+      mode, project: snapshot?.getRoot(), workspace: !project ? cwd : undefined, protectedDirectories: [this.dependencies.dataDirectory, ...(this.dependencies.protectedDirectories ?? [])],
       trustedSkillScript: file => skillStore.trustedScript(file, [...usedSkills.keys()]),
       approve: async (id, tool, args, reason, toolSignal, mustConfirm) => {
         // 第二层：项目自审模式下先做规则/AI 自动审核，再决定是否弹出问询框。

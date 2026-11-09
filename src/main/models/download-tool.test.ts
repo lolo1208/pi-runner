@@ -8,11 +8,15 @@ import { createDownloadToolDefinition } from './download-tool'
 import { piProjectTools } from './pi-tools'
 import { commandRisk } from './tool-permissions'
 
+const electron = vi.hoisted(() => ({ fetch: vi.fn(), whenReady: vi.fn(async () => {}) }))
+vi.mock('electron', () => ({ app: { whenReady: electron.whenReady }, net: { fetch: electron.fetch } }))
+
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aDZkAAAAASUVORK5CYII=', 'base64')
 const digest = createHash('sha256').update(png).digest('hex')
 describe('dedicated download tool', () => {
   let root: string, base: string, server: Server, hits: number
   beforeEach(async () => {
+    electron.fetch.mockReset().mockImplementation((url, init) => fetch(url, init))
     root = await mkdtemp(path.join(os.tmpdir(), 'download-tool-')); hits = 0
     server = createServer((request, response) => {
       hits++
@@ -53,9 +57,9 @@ describe('dedicated download tool', () => {
     const body = new ReadableStream<Uint8Array>({ start(controller) {
       controller.enqueue(png.subarray(0, 5)); controller.enqueue(png.subarray(5, 12)); controller.enqueue(png.subarray(12)); controller.close()
     } })
-    const fetchRequest = vi.fn(async () => new Response(body)) as unknown as typeof fetch
+    electron.fetch.mockResolvedValueOnce(new Response(body))
     const target = path.join(root, 'image.png')
-    await execute({ url: `${base}/image`, path: target, sha256: digest }, { fetchRequest })
+    await execute({ url: `${base}/image`, path: target, sha256: digest })
     expect(await readFile(target)).toEqual(png)
   })
   it.each(['/missing', '/partial', '/empty', '/html', '/fake-image', '/huge-header', '/loop', '/bad-redirect'])('preserves existing files and cleans temporary files after %s', async route => {
@@ -69,13 +73,13 @@ describe('dedicated download tool', () => {
     expect(await readdir(root)).toEqual([])
   })
   it('caps streamed bytes even without Content-Length', async () => {
-    const fetchRequest = vi.fn(async () => new Response(png)) as unknown as typeof fetch
-    await expect(execute({ url: `${base}/image`, path: path.join(root, 'new.png') }, { fetchRequest, maxBytes: 16 })).rejects.toThrow('大小上限')
+    electron.fetch.mockResolvedValueOnce(new Response(png))
+    await expect(execute({ url: `${base}/image`, path: path.join(root, 'new.png') }, { maxBytes: 16 })).rejects.toThrow('大小上限')
     expect(await readdir(root)).toEqual([])
   })
   it('rejects a mismatched Content-Length', async () => {
-    const fetchRequest = vi.fn(async () => new Response(png, { headers: { 'content-length': String(png.length + 1) } })) as unknown as typeof fetch
-    await expect(execute({ url: `${base}/image`, path: path.join(root, 'new.png') }, { fetchRequest })).rejects.toThrow('长度')
+    electron.fetch.mockResolvedValueOnce(new Response(png, { headers: { 'content-length': String(png.length + 1) } }))
+    await expect(execute({ url: `${base}/image`, path: path.join(root, 'new.png') })).rejects.toThrow('长度')
     expect(await readdir(root)).toEqual([])
   })
   it.each(['file:///etc/passwd', 'ftp://example.com/file', 'https://user:password@example.com/file', 'not-a-url'])('rejects unsupported URL %s before network access', async url => {
@@ -85,10 +89,10 @@ describe('dedicated download tool', () => {
   it('cancels a pending stream without replacing the original', async () => {
     const target = path.join(root, 'image.png'); await writeFile(target, 'old')
     const controller = new AbortController()
-    const fetchRequest: typeof fetch = async (url, init) => {
+    electron.fetch.mockImplementationOnce(async (url, init) => {
       const response = await fetch(url, init); setTimeout(() => controller.abort(), 15); return response
-    }
-    await expect(execute({ url: `${base}/stream`, path: target }, { fetchRequest }, controller.signal)).rejects.toThrow('取消')
+    })
+    await expect(execute({ url: `${base}/stream`, path: target }, {}, controller.signal)).rejects.toThrow('取消')
     expect(await readFile(target, 'utf8')).toBe('old'); expect(await readdir(root)).toEqual(['image.png'])
   })
   it('times out a pending stream and removes its partial download', async () => {

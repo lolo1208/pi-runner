@@ -14,9 +14,9 @@ import { automaticOutputTokens, systemOutputTokens } from '../../shared/output-t
 import { DEEPSEEK_BASE_URL, DEEPSEEK_DEFAULT_OUTPUT_TOKENS, deepseekModelInfo, deepseekThinking } from '../../shared/deepseek'
 
 export interface CredentialCipher {
-  isAvailable(): boolean
-  encrypt(value: string): Buffer
-  decrypt(value: Buffer): string
+  isAvailable(): boolean | Promise<boolean>
+  encrypt(value: string): Buffer | Promise<Buffer>
+  decrypt(value: Buffer): string | Promise<string>
 }
 interface StoredProfile { profile: ModelProfile; encryptedApiKey?: string }
 interface SettingsFile { compatibleConnections?: (CompatibleConnection & { encryptedApiKey?: string })[]; version: 1; activeProfileId: string | null; reviewProfileId: string | null; reviewDisabled?: boolean; profiles: StoredProfile[]; providers?: ModelProviderConnection[]; encryptedOpenrouterApiKey?: string; encryptedGoogleApiKey?: string; encryptedDeepseekApiKey?: string }
@@ -140,8 +140,8 @@ export class ModelSettingsStore {
     finally { await rm(temporaryPath, { force: true }).catch(() => undefined) }
   }
 
-  private view(settings: SettingsFile): ModelSettings {
-    return { activeProfileId: settings.activeProfileId, reviewProfileId: settings.reviewProfileId, reviewDisabled: Boolean(settings.reviewDisabled), encryptionAvailable: this.cipher.isAvailable(),
+  private async view(settings: SettingsFile): Promise<ModelSettings> {
+    return { activeProfileId: settings.activeProfileId, reviewProfileId: settings.reviewProfileId, reviewDisabled: Boolean(settings.reviewDisabled), encryptionAvailable: await this.cipher.isAvailable(),
       compatibleConnections: (settings.compatibleConnections ?? []).map(({ encryptedApiKey, ...c }) => ({ ...c, models: siliconflowPricingSnapshot(c.baseUrl, c.models), hasApiKey: Boolean(encryptedApiKey) })),
       providers: (settings.providers ?? []).map(connection => ({ ...connection,
         // 升级前保存的 Google 目录没有单价，读取时补齐，无需用户重新刷新。
@@ -192,8 +192,8 @@ export class ModelSettingsStore {
       if (!c) throw new ModelError('连接不存在')
       let apiKey = ''
       if (c.encryptedApiKey) {
-        if (!this.cipher.isAvailable()) throw new ModelError('系统安全存储不可用')
-        try { apiKey = this.cipher.decrypt(Buffer.from(c.encryptedApiKey, 'base64')) } catch { throw new ModelError('密钥解密失败，请重新配置连接') }
+        if (!await this.cipher.isAvailable()) throw new ModelError('系统安全存储不可用')
+        try { apiKey = await this.cipher.decrypt(Buffer.from(c.encryptedApiKey, 'base64')) } catch { throw new ModelError('密钥解密失败，请重新配置连接') }
       }
       const { encryptedApiKey: _, ...connection } = c
       return { connection, apiKey }
@@ -213,8 +213,8 @@ export class ModelSettingsStore {
         let encryptedApiKey = c?.encryptedApiKey
         if (command.apiKey !== undefined && command.apiKey !== '') {
           if (typeof command.apiKey !== 'string' || command.apiKey.length > 8192 || /[^\x21-\x7e]/.test(command.apiKey)) throw new ModelError('API Key 格式无效')
-          if (!this.cipher.isAvailable()) throw new ModelError('系统安全存储不可用')
-          encryptedApiKey = this.cipher.encrypt(command.apiKey).toString('base64')
+          if (!await this.cipher.isAvailable()) throw new ModelError('系统安全存储不可用')
+          encryptedApiKey = (await this.cipher.encrypt(command.apiKey)).toString('base64')
         }
         if (!encryptedApiKey) throw new ModelError('请输入 API Key')
         if (!c) { if (connections.length >= 100) throw new ModelError('最多保存 100 个连接'); c = { id, name, baseUrl, compatibleApi: 'chat-completions', models: [] }; connections.push(c) }
@@ -265,8 +265,8 @@ export class ModelSettingsStore {
     return this.serialized(async () => {
       const settings = await this.read()
       if (!settings.encryptedOpenrouterApiKey) throw new ModelError('请先配置 OpenRouter API Key')
-      if (!this.cipher.isAvailable()) throw new ModelError('系统安全存储不可用，无法读取 API Key')
-      try { return this.cipher.decrypt(Buffer.from(settings.encryptedOpenrouterApiKey, 'base64')) }
+      if (!await this.cipher.isAvailable()) throw new ModelError('系统安全存储不可用，无法读取 API Key')
+      try { return await this.cipher.decrypt(Buffer.from(settings.encryptedOpenrouterApiKey, 'base64')) }
       catch { throw new ModelError('OpenRouter API Key 解密失败，请重新输入密钥') }
     })
   }
@@ -275,8 +275,8 @@ export class ModelSettingsStore {
     return this.serialized(async () => {
       const settings = await this.read()
       if (apiKey !== undefined) {
-        if (!this.cipher.isAvailable()) throw new ModelError('系统安全存储不可用，无法保存 API Key；不会以明文保存')
-        try { settings.encryptedOpenrouterApiKey = this.cipher.encrypt(apiKey).toString('base64') }
+        if (!await this.cipher.isAvailable()) throw new ModelError('系统安全存储不可用，无法保存 API Key；不会以明文保存')
+        try { settings.encryptedOpenrouterApiKey = (await this.cipher.encrypt(apiKey)).toString('base64') }
         catch { throw new ModelError('API Key 加密失败，原配置未更改') }
       }
       settings.providers = [...(settings.providers ?? []).filter(item => item.provider !== 'openrouter'), { provider: 'openrouter', baseUrl: OPENROUTER_BASE_URL, models }]
@@ -290,8 +290,8 @@ export class ModelSettingsStore {
     return this.serialized(async () => {
       const settings = await this.read()
       if (!settings.encryptedGoogleApiKey) throw new ModelError('请先配置 Google AI Studio API Key')
-      if (!this.cipher.isAvailable()) throw new ModelError('系统安全存储不可用，无法读取 API Key')
-      try { return this.cipher.decrypt(Buffer.from(settings.encryptedGoogleApiKey, 'base64')) }
+      if (!await this.cipher.isAvailable()) throw new ModelError('系统安全存储不可用，无法读取 API Key')
+      try { return await this.cipher.decrypt(Buffer.from(settings.encryptedGoogleApiKey, 'base64')) }
       catch { throw new ModelError('Google API Key 解密失败，请重新配置连接') }
     })
   }
@@ -300,8 +300,8 @@ export class ModelSettingsStore {
     return this.serialized(async () => {
       const settings = await this.read()
       if (apiKey !== undefined) {
-        if (!this.cipher.isAvailable()) throw new ModelError('系统安全存储不可用，无法保存 API Key')
-        try { settings.encryptedGoogleApiKey = this.cipher.encrypt(apiKey).toString('base64') }
+        if (!await this.cipher.isAvailable()) throw new ModelError('系统安全存储不可用，无法保存 API Key')
+        try { settings.encryptedGoogleApiKey = (await this.cipher.encrypt(apiKey)).toString('base64') }
         catch { throw new ModelError('API Key 加密失败，原配置未更改') }
       }
       // 目录与用户配置分离，只在启用或编辑时保存模型，避免大目录耗尽配置额度。
@@ -316,8 +316,8 @@ export class ModelSettingsStore {
     return this.serialized(async () => {
       const settings = await this.read()
       if (!settings.encryptedDeepseekApiKey) throw new ModelError('请先配置 DeepSeek API Key')
-      if (!this.cipher.isAvailable()) throw new ModelError('系统安全存储不可用，无法读取 API Key')
-      try { return this.cipher.decrypt(Buffer.from(settings.encryptedDeepseekApiKey, 'base64')) }
+      if (!await this.cipher.isAvailable()) throw new ModelError('系统安全存储不可用，无法读取 API Key')
+      try { return await this.cipher.decrypt(Buffer.from(settings.encryptedDeepseekApiKey, 'base64')) }
       catch { throw new ModelError('DeepSeek API Key 解密失败，请重新配置连接') }
     })
   }
@@ -326,8 +326,8 @@ export class ModelSettingsStore {
     return this.serialized(async () => {
       const settings = await this.read()
       if (apiKey !== undefined) {
-        if (!this.cipher.isAvailable()) throw new ModelError('系统安全存储不可用，无法保存 API Key')
-        try { settings.encryptedDeepseekApiKey = this.cipher.encrypt(apiKey).toString('base64') }
+        if (!await this.cipher.isAvailable()) throw new ModelError('系统安全存储不可用，无法保存 API Key')
+        try { settings.encryptedDeepseekApiKey = (await this.cipher.encrypt(apiKey)).toString('base64') }
         catch { throw new ModelError('API Key 加密失败，原配置未更改') }
       }
       settings.providers = [...(settings.providers ?? []).filter(item => item.provider !== 'deepseek'), { provider: 'deepseek', baseUrl: DEEPSEEK_BASE_URL, models }]
@@ -409,8 +409,8 @@ export class ModelSettingsStore {
       if (credential.action === 'keep' && encryptedApiKey && (existing?.profile.baseUrl !== profile.baseUrl || existing.profile.protocol !== profile.protocol)) throw new ModelError('服务地址或协议已改变，请重新输入对应 API Key，或选择删除密钥后保存')
       if (credential.action === 'remove') encryptedApiKey = undefined
       if (credential.action === 'replace') {
-        if (!this.cipher.isAvailable()) throw new ModelError('系统安全存储不可用，无法保存 API Key；不会以明文保存')
-        try { encryptedApiKey = this.cipher.encrypt(credential.value!).toString('base64') }
+        if (!await this.cipher.isAvailable()) throw new ModelError('系统安全存储不可用，无法保存 API Key；不会以明文保存')
+        try { encryptedApiKey = (await this.cipher.encrypt(credential.value!)).toString('base64') }
         catch { throw new ModelError('API Key 加密失败，原配置未更改') }
       }
       const entry = { profile, encryptedApiKey }
@@ -470,8 +470,8 @@ export class ModelSettingsStore {
       let apiKey = ''
       const encryptedKey = entry.profile.provider === 'google' ? settings.encryptedGoogleApiKey : entry.profile.provider === 'openrouter' ? settings.encryptedOpenrouterApiKey : entry.profile.provider === 'deepseek' && entry.profile.baseUrl === DEEPSEEK_BASE_URL ? settings.encryptedDeepseekApiKey ?? entry.encryptedApiKey : entry.encryptedApiKey
       if (encryptedKey) {
-        if (!this.cipher.isAvailable()) return null
-        try { apiKey = this.cipher.decrypt(Buffer.from(encryptedKey, 'base64')) }
+        if (!await this.cipher.isAvailable()) return null
+        try { apiKey = await this.cipher.decrypt(Buffer.from(encryptedKey, 'base64')) }
         catch { return null }
       }
       if (!apiKey && ['google', 'openai', 'anthropic', 'deepseek', 'openrouter'].includes(entry.profile.provider)) return null
@@ -518,8 +518,8 @@ export class ModelSettingsStore {
       let apiKey = ''
       const encryptedKey = entry.profile.provider === 'google' ? settings.encryptedGoogleApiKey : entry.profile.provider === 'openrouter' ? settings.encryptedOpenrouterApiKey : entry.profile.provider === 'deepseek' && entry.profile.baseUrl === DEEPSEEK_BASE_URL ? settings.encryptedDeepseekApiKey ?? entry.encryptedApiKey : entry.encryptedApiKey
       if (encryptedKey) {
-        if (!this.cipher.isAvailable()) throw new ModelError('系统安全存储不可用，无法读取 API Key')
-        try { apiKey = this.cipher.decrypt(Buffer.from(encryptedKey, 'base64')) }
+        if (!await this.cipher.isAvailable()) throw new ModelError('系统安全存储不可用，无法读取 API Key')
+        try { apiKey = await this.cipher.decrypt(Buffer.from(encryptedKey, 'base64')) }
         catch { throw new ModelError('API Key 解密失败，请在设置中重新输入密钥') }
       }
       if (!apiKey && ['google', 'openai', 'anthropic', 'deepseek', 'openrouter'].includes(entry.profile.provider)) throw new ModelError('请先保存该服务的 API Key')

@@ -486,33 +486,32 @@
 .provider-detail > .chatgpt-authorization { margin-top: 16px; padding-top: 4px; border-top: 1px solid var(--border); }
 .chatgpt-authorization .error, .chatgpt-authorization .success { overflow-wrap: anywhere; }
 
-/* 关于页面 */
-.about-header-card {
-  padding: 22px 24px;
-}
+/* 关于页面的结构与主题样式。 */
+.about-section { max-width: 860px; margin: 0 auto; container-type: inline-size; }
+.about-section > h2 { margin-bottom: 0; }
+.about-header-card { padding: 40px 0 32px; border-bottom: 1px solid var(--border); }
 
 .about-brand-row {
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: 24px;
+  flex-wrap: wrap;
 }
 
 .about-brand-logo {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 52px;
-  height: 52px;
-  border-radius: 12px;
-  background: var(--hover);
-  border: 1px solid var(--border);
+  width: 72px;
+  height: 72px;
+  align-self: center;
   flex-shrink: 0;
   overflow: hidden;
 }
 
 .about-brand-logo img {
-  width: 34px;
-  height: 34px;
+  width: 72px;
+  height: 72px;
   object-fit: contain;
 }
 
@@ -529,34 +528,35 @@
 
 .about-title-row h3 {
   margin: 0;
-  font-size: calc(18rem / 14);
+  font-size: calc(30rem / 14);
   font-weight: 600;
   letter-spacing: -0.01em;
 }
 
+.about-title-row h3 > span { margin-left: 10px; font-size: calc(14rem / 14); font-weight: 400; color: var(--muted); letter-spacing: .08em; }
+.about-intro { margin: 6px 0 0; font-size: calc(13rem / 14); line-height: 1.8; color: var(--muted); }
+.about-version-label { color: var(--muted); font-size: calc(12rem / 14); }
 .about-version-badge {
   display: inline-flex;
   align-items: center;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: var(--hover);
-  border: 1px solid var(--border);
-  color: var(--muted);
-  font-size: calc(11rem / 14);
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  user-select: text;
+  color: var(--text);
+  font-size: calc(18rem / 14);
   font-weight: 500;
   font-variant-numeric: tabular-nums;
 }
 
 .about-tagline {
-  margin: 6px 0 0;
+  margin: 8px 0 0;
   color: var(--muted);
   font-size: calc(13rem / 14);
   line-height: 1.5;
 }
 
-.about-actions {
-  flex-shrink: 0;
-}
+.about-actions { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; width: 180px; max-width: 100%; }
+.about-copy-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 
 .about-copy-btn {
   display: inline-flex;
@@ -565,21 +565,16 @@
   font-size: calc(12rem / 14);
 }
 
-.about-features-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 20px;
-}
+.about-capabilities { padding: 30px 0 10px; }
+.about-boundaries h3 { font-size: calc(15rem / 14); font-weight: 600; margin: 0 0 20px; }
+.about-features-grid { display: grid; gap: 0; }
 
 .about-feature-item {
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 16px;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--border);
 }
 
 .about-feature-icon {
@@ -588,9 +583,7 @@
   justify-content: center;
   width: 32px;
   height: 32px;
-  border-radius: 8px;
-  background: var(--hover);
-  color: var(--text);
+  color: var(--muted);
   flex-shrink: 0;
 }
 
@@ -609,20 +602,22 @@
 .about-feature-content p {
   margin: 4px 0 0;
   font-size: calc(12rem / 14);
-  line-height: 1.6;
+  line-height: 1.8;
   color: var(--muted);
 }
 
-.about-specs-card {
-  padding: 6px 20px;
-}
+.about-boundaries { padding: 20px 24px; margin: 20px 0 30px; background: var(--sidebar); border-radius: 8px; }
+.about-boundaries h3 { margin-bottom: 8px; font-size: calc(13rem / 14); }
+.about-boundaries p { color: var(--muted); font-size: calc(12rem / 14); line-height: 1.8; margin: 0; }
+.about-specs-card { padding: 0; }
 
 .about-spec-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 12px 0;
-  font-size: calc(13rem / 14);
+  gap: 20px;
+  font-size: calc(12rem / 14);
 }
 
 .about-spec-label {
@@ -631,7 +626,10 @@
 
 .about-spec-value {
   color: var(--text);
-  font-weight: 500;
+  font-weight: 400;
+  text-align: right;
+  overflow-wrap: anywhere;
+  user-select: text;
   font-variant-numeric: tabular-nums;
 }
 
@@ -641,18 +639,23 @@
 }
 
 .about-footer {
-  text-align: center;
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  border-top: 1px solid var(--border);
+  margin-top: 24px;
   padding: 20px 0 10px;
   color: var(--muted);
   font-size: calc(12rem / 14);
 }
 
-@media (max-width: 680px) {
-  .about-brand-row {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-  .about-features-grid {
-    grid-template-columns: 1fr;
-  }
+@container (max-width: 580px) {
+  .about-brand-row { gap: 18px; align-items: flex-start; }
+  .about-brand-info { flex-basis: calc(100% - 90px); }
+  .about-actions { width: 100%; flex-direction: row; flex-wrap: wrap; align-items: center; padding-top: 6px; }
+  .about-actions .about-copy-btn { margin-left: auto; }
+  .about-version-badge { font-size: calc(14rem / 14); }
+  .about-title-row h3 { font-size: calc(25rem / 14); }
+  .about-boundaries { padding: 16px; }
 }

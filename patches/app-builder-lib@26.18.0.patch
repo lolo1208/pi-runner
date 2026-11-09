@@ -16,17 +16,3 @@ index eb7914fead5762fbbf40ae836d9429d51daddfc6..67a276d62de798787058985aba84124e
                  builder_util_1.log.debug({ manager }, "node_modules are hoisted");
                  return true;
              }
-diff --git a/out/node-module-collector/pnpmNodeModulesCollector.js b/out/node-module-collector/pnpmNodeModulesCollector.js
-index 8853912e013d3769f3e763d06720a94091a7ffaa..2b86b54bcec33d0179cf4e152764f180b71450ce 100644
---- a/out/node-module-collector/pnpmNodeModulesCollector.js
-+++ b/out/node-module-collector/pnpmNodeModulesCollector.js
-@@ -77,7 +77,8 @@ class PnpmNodeModulesCollector extends nodeModulesCollector_1.NodeModulesCollect
-         const skipDownwardSearch = !(await this.isHoisted.value);
-         const promise = (async () => {
-             const fromDep = parentPath ? await this.cache.locatePackageVersion({ pkgName, parentDir: parentPath, requiredRange, skipDownwardSearch }) : null;
--            if (fromDep) {
-+            // pnpm 提供的是已解析版本；父目录找到的旧版不能当作 overrides 提前返回。
-+            if (fromDep && (!memoKey || fromDep.packageJson.version === requiredRange)) {
-                 return fromDep;
-             }
-             return this.cache.locatePackageVersion({ pkgName, parentDir: this.rootDir, requiredRange, skipDownwardSearch });

@@ -8,6 +8,9 @@ import { piProjectTools } from './pi-tools'
 import { agentSystemPrompt } from './pi-system-prompt'
 import { PLAN_READ_TOOLS } from './plan-tools'
 
+const electron = vi.hoisted(() => ({ fetch: vi.fn() }))
+vi.mock('electron', () => ({ app: { whenReady: async () => {} }, net: { fetch: electron.fetch } }))
+
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
 async function temporary() { const root = await mkdtemp(path.join(os.tmpdir(), 'pi-batch-')); roots.push(root); return root }
@@ -87,8 +90,8 @@ describe('批量文件工具', () => {
   it('模拟下载继承校验与快照，失败不影响后续项', async () => {
     const root = await temporary()
     const approve = vi.fn(), snapshot = vi.fn()
-    const downloadFetch = vi.fn(async (url: string) => new Response(url.endsWith('/bad') ? '' : 'bytes', { status: url.endsWith('/bad') ? 404 : 200 })) as unknown as typeof fetch
-    const tool = piProjectTools(root, snapshot, { mode: 'auto', project: root, protectedDirectories: [], approve, downloadFetch }).find(tool => tool.name === 'download_many')!
+    electron.fetch.mockReset().mockImplementation(async (url: string) => new Response(url.endsWith('/bad') ? '' : 'bytes', { status: url.endsWith('/bad') ? 404 : 200 }))
+    const tool = piProjectTools(root, snapshot, { mode: 'auto', project: root, protectedDirectories: [], approve }).find(tool => tool.name === 'download_many')!
     const output = await run(tool, ['good', 'bad', 'last'].map(name => ({ path: `${name}.bin`, url: `https://example.test/${name}` })))
     expect(output.details.results.map((item: any) => item.status)).toEqual(['success', 'failed', 'success'])
     expect(await readFile(path.join(root, 'good.bin'), 'utf8')).toBe('bytes')
@@ -97,11 +100,12 @@ describe('批量文件工具', () => {
 
   it('项目外写入走审核，拒绝后不继续下载', async () => {
     const root = await temporary(), outside = await temporary()
-    const approve = vi.fn(async () => { throw new Error('用户拒绝') }), downloadFetch = vi.fn()
-    const tool = piProjectTools(root, vi.fn(), { mode: 'auto', project: root, protectedDirectories: [], approve, downloadFetch }).find(tool => tool.name === 'download_many')!
+    const approve = vi.fn(async () => { throw new Error('用户拒绝') })
+    electron.fetch.mockReset()
+    const tool = piProjectTools(root, vi.fn(), { mode: 'auto', project: root, protectedDirectories: [], approve }).find(tool => tool.name === 'download_many')!
     // 系统临时目录本来可写，使用明确位于临时目录之外的目标。
     const output = await run(tool, [{ path: path.join(os.homedir(), 'pi-batch-review.bin'), url: 'https://example.test/a' }, { path: path.join(outside, 'b'), url: 'https://example.test/b' }])
-    expect(approve).toHaveBeenCalledTimes(1); expect(downloadFetch).not.toHaveBeenCalled()
+    expect(approve).toHaveBeenCalledTimes(1); expect(electron.fetch).not.toHaveBeenCalled()
     expect(output.details.results.map((item: any) => item.status)).toEqual(['failed', 'not_executed'])
   })
 

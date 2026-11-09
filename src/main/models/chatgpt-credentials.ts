@@ -21,10 +21,10 @@ export class ChatgptCredentials implements CredentialStore {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
       throw new ModelError('无法读取 ChatGPT 授权，请检查应用数据目录权限')
     }
-    if (!this.cipher.isAvailable()) throw new ModelError('系统安全存储不可用，无法读取 ChatGPT 授权')
+    if (!await this.cipher.isAvailable()) throw new ModelError('系统安全存储不可用，无法读取 ChatGPT 授权')
     try {
       if (data.length > 128 * 1024) throw new Error()
-      const value = JSON.parse(this.cipher.decrypt(data))
+      const value = JSON.parse(await this.cipher.decrypt(data))
       if (value.type !== 'oauth' || typeof value.access !== 'string' || !value.access || typeof value.refresh !== 'string' || !value.refresh || !Number.isFinite(value.expires)) throw new Error()
       return value as Credential
     } catch { throw new ModelError('ChatGPT 授权解密失败，请退出账号后重新授权') }
@@ -41,10 +41,10 @@ export class ChatgptCredentials implements CredentialStore {
       const next = await fn(current)
       options?.signal?.throwIfAborted()
       if (!next) return current
-      if (next.type !== 'oauth' || !this.cipher.isAvailable()) throw new ModelError('系统安全存储不可用，无法保存 ChatGPT 授权；不会以明文保存')
+      if (next.type !== 'oauth' || !await this.cipher.isAvailable()) throw new ModelError('系统安全存储不可用，无法保存 ChatGPT 授权；不会以明文保存')
       const temporary = `${this.file}.${randomUUID()}.tmp`
       try {
-        const data = this.cipher.encrypt(JSON.stringify(next))
+        const data = await this.cipher.encrypt(JSON.stringify(next))
         await mkdir(path.dirname(this.file), { recursive: true })
         await writeFile(temporary, data, { flag: 'wx', mode: 0o600 })
         options?.signal?.throwIfAborted()

@@ -7,7 +7,7 @@ import { GroupedModelSelect } from './GroupedModelSelect'
 import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
-import { ArrowRightToLine, Check, Copy, GitCompare, Lock, Monitor, Moon, RotateCcw, ShieldCheck, Sliders, Sun } from 'lucide-react'
+import { ArrowRightToLine, Check, Copy, GitCompare, Lock, Monitor, Moon, RotateCcw, ShieldCheck, Sun } from 'lucide-react'
 import type { Preferences, ThemePreference } from '../../preferences'
 import { useLayoutEffect, useRef, useState } from 'react'
 import { MAX_CUSTOM_PROMPT_LENGTH, REVIEW_MODEL_OFF, type ModelSettings } from '../../../../shared/models'
@@ -172,77 +172,85 @@ export function AppearanceSettingsSection({ preferences, onPreferences }: Prefer
 
 export function AboutSettingsSection(): React.JSX.Element {
   const [copied, setCopied] = useState(false)
+  const [copyError, setCopyError] = useState('')
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useLayoutEffect(() => () => { if (copyTimer.current) clearTimeout(copyTimer.current) }, [])
 
   const handleCopy = async (): Promise<void> => {
     try {
-      await navigator.clipboard.writeText('Pi Runner · 行动派 0.1.0')
+      await navigator.clipboard.writeText(`Pi Runner · 行动派 v${__APP_VERSION__}`)
+      setCopyError('')
       setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
+      if (copyTimer.current) clearTimeout(copyTimer.current)
+      copyTimer.current = setTimeout(() => setCopied(false), 2000)
     } catch {
-      // 忽略剪贴板写入失败
+      setCopyError('复制失败，请选择下方版本号手动复制。')
     }
   }
 
   return <div className="about-section">
-    <h2>关于 Pi Runner · 行动派</h2>
-    <p className="section-description">面向本地桌面的 AI 编程助手与安全受控开发环境。</p>
+    <h2>关于</h2>
 
-    <section className="settings-card about-header-card">
+    <section className="about-header-card" aria-label="产品与版本">
       <div className="about-brand-row">
         <div className="about-brand-logo">
           <img src="./icons/app-icon.png" alt="Pi Runner 图标" draggable={false} />
         </div>
         <div className="about-brand-info">
           <div className="about-title-row">
-            <h3>Pi Runner · 行动派</h3>
-            <span className="about-version-badge">0.1.0</span>
+            <h3>Pi Runner<span>行动派</span></h3>
           </div>
-          <p className="about-tagline">本地桌面 AI 编程助手，让代码改动透明受控、清晰可溯。</p>
+          <p className="about-tagline">从一个想法，到一次真正的行动。</p>
+          <p className="about-intro">本地桌面 AI 编程助手。通过对话推进项目，在执行中审查操作，在改动后查看差异。</p>
         </div>
         <div className="about-actions">
+          <span className="about-version-label">当前版本</span>
+          <span className="about-version-badge">v{__APP_VERSION__}</span>
           <Button variant="outline" size="sm" onClick={handleCopy} className="about-copy-btn">
             {copied ? <Check size={14} /> : <Copy size={14} />}
-            <span>{copied ? '已复制' : '复制版本'}</span>
+            <span aria-live="polite">{copied ? '已复制' : '复制版本'}</span>
           </Button>
         </div>
       </div>
     </section>
 
+    {copyError && <p className="error" role="alert">{copyError}</p>}
+    <section className="about-capabilities" aria-label="产品功能">
     <div className="about-features-grid">
       <div className="about-feature-item">
         <div className="about-feature-icon"><ShieldCheck size={18} /></div>
         <div className="about-feature-content">
-          <h4>工具级权限审核</h4>
-          <p>文件与终端操作在工具函数内做三层审核：命令分类、自动审核、用户确认，拦截越界访问与高危操作。</p>
-        </div>
-      </div>
-      <div className="about-feature-item">
-        <div className="about-feature-icon"><Sliders size={18} /></div>
-        <div className="about-feature-content">
-          <h4>细粒度安全审批</h4>
-          <p>支持每次询问、项目自审与完全访问三种权限模式。项目自审自动放行安全操作，无法确定时询问你。</p>
+          <h4>执行之前，先掌握权限</h4>
+          <p>每次询问、项目自审与完全访问，按任务选择权限模式。审核存疑时，交由你确认。</p>
         </div>
       </div>
       <div className="about-feature-item">
         <div className="about-feature-icon"><GitCompare size={18} /></div>
         <div className="about-feature-content">
-          <h4>差异比对与快照</h4>
-          <p>内置代码差异检查与历史快照，每轮会话的代码修改均清晰透明。</p>
+          <h4>改动之后，看清来龙去脉</h4>
+          <p>查看代码差异，按轮恢复项目文件。独立影子 Git 保存快照，不改写项目自身的 Git 历史。</p>
         </div>
       </div>
       <div className="about-feature-item">
         <div className="about-feature-icon"><Lock size={18} /></div>
         <div className="about-feature-content">
-          <h4>本地优先与加密</h4>
-          <p>模型凭证使用系统安全存储加密，项目文件与会话数据保存在本地。</p>
+          <h4>数据所在，始终清楚</h4>
+          <p>会话与快照保存在本机，API Key 使用系统安全存储加密。模型请求会直接发送给相应服务商。</p>
         </div>
       </div>
     </div>
 
-    <section className="settings-card about-specs-card">
+    </section>
+
+    <aside className="about-boundaries" aria-labelledby="about-boundaries-title">
+      <h3 id="about-boundaries-title">关于权限与恢复</h3>
+      <p>工具权限审核不等同于操作系统沙箱。快照不是完整备份：依赖、构建产物、凭证等排除项，以及项目外改动，不在恢复范围内。</p>
+    </aside>
+
+    <section className="about-specs-card" aria-label="技术信息">
       <div className="about-spec-row">
-        <span className="about-spec-label">程序版本</span>
-        <span className="about-spec-value">0.1.0</span>
+        <span className="about-spec-label">代理引擎</span>
+        <span className="about-spec-value">pi-coding-agent</span>
       </div>
       <div className="about-spec-divider" />
       <div className="about-spec-row">
@@ -262,7 +270,8 @@ export function AboutSettingsSection(): React.JSX.Element {
     </section>
 
     <footer className="about-footer">
-      <p>© 2026 Pi Runner · 保留所有权利</p>
+      <span>Pi Runner · 行动派</span>
+      <span>© 2026 Pi Runner · 保留所有权利</span>
     </footer>
   </div>
 }

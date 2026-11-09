@@ -74,6 +74,8 @@ function createSnapshotGit(root: string, repository: string, staging: string): S
   return simpleGit({
     baseDir: root,
     maxConcurrentProcesses: 1,
+    // 仅允许应用固定设置的隔离变量，不放行任意 Git 环境变量。
+    allowEnvironment: ['GIT_CONFIG_NOSYSTEM', 'GIT_ATTR_NOSYSTEM', 'GIT_CONFIG_GLOBAL', 'GIT_DIR', 'GIT_WORK_TREE'],
     trimmed: false,
     // Fixed null path disables hooks, including on Git for Windows. Never accept a caller-supplied path.
     unsafe: { allowUnsafeHooksPath: true, allowUnsafeConfigPaths: true },

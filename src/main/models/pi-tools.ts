@@ -34,7 +34,6 @@ export interface ToolPermissionContext {
   /** The current conversation is the only tool-accessible subtree inside app data. */
   workspace?: string
   protectedDirectories: string[]
-  downloadFetch?: typeof fetch
   trustedSkillScript?(script: string): Promise<boolean>
   approve(id: string, tool: string, args: Record<string, unknown>, reason: string, signal?: AbortSignal, mustConfirm?: boolean): Promise<void>
 }
@@ -74,7 +73,7 @@ export function piProjectTools(root: string, beforeMutation: () => Promise<void>
     TMPDIR: os.tmpdir(), TMP: os.tmpdir(), TEMP: os.tmpdir(), PSModuleAnalysisCachePath: path.join(os.tmpdir(), 'pi-runner-ModuleAnalysisCache'),
     PYTHONPYCACHEPREFIX: path.join(os.tmpdir(), 'pi-runner-python-cache'), PIP_CACHE_DIR: path.join(os.tmpdir(), 'pi-runner-pip-cache')
   } }) }
-  const definitions: ToolDefinition<any, any>[] = [createReadToolDefinition(root), ...textMutationToolDefinitions(root, protectPath, lang), createDownloadToolDefinition(protectPath, { fetchRequest: permissions?.downloadFetch }, lang), createDeleteToolDefinition(lang), ...filesystemToolDefinitions(protectPath, lang), createLsToolDefinition(root), createFindToolDefinition(root), createGrepToolDefinition(root), process.platform === 'win32' ? createPowerShellToolDefinition(root, localShellOptions) : createBashToolDefinition(root, localShellOptions)]
+  const definitions: ToolDefinition<any, any>[] = [createReadToolDefinition(root), ...textMutationToolDefinitions(root, protectPath, lang), createDownloadToolDefinition(protectPath, {}, lang), createDeleteToolDefinition(lang), ...filesystemToolDefinitions(protectPath, lang), createLsToolDefinition(root), createFindToolDefinition(root), createGrepToolDefinition(root), process.platform === 'win32' ? createPowerShellToolDefinition(root, localShellOptions) : createBashToolDefinition(root, localShellOptions)]
   const terminalOptions = (tool: ToolDefinition<any, any>) => ({
     parameters: tool.parameters,
     description: [tool.description,
