@@ -43,7 +43,7 @@ jobs:
           else
             echo 'prerelease=false' >> "$GITHUB_OUTPUT"
           fi
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7.0.1
         with:
           ref: refs/tags/${{ steps.version.outputs.tag }}
           persist-credentials: false
@@ -57,14 +57,15 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ needs.prepare.outputs.sha }}
           persist-credentials: false
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@v6.1.1
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: '24'
+          node-version: '26'
+          check-latest: true
           cache: pnpm
       - name: 安装锁定依赖
         run: pnpm install --frozen-lockfile
@@ -89,8 +90,9 @@ jobs:
               throw "发行文件缺失或为空：$file"
             }
           }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         with:
+          compression-level: 0
           name: windows-release
           path: |
             release/pi-runner-setup.exe
@@ -98,49 +100,67 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # macOS 暂不编译。启用时取消本任务注释，并在 publish.needs 中加入 macos，
-  # 同时在 publish 的下载、校验和上传步骤加入 macos-release 的 DMG。
-  # 正式公开分发前应配置 Apple 签名与公证密钥；当前模板生成未签名 DMG。
-  # macos:
-  #   needs: prepare
-  #   runs-on: macos-14
-  #   timeout-minutes: 45
-  #   steps:
-  #     - uses: actions/checkout@v6
-  #       with:
-  #         ref: ${{ needs.prepare.outputs.sha }}
-  #         persist-credentials: false
-  #     - uses: pnpm/action-setup@v4
-  #     - uses: actions/setup-node@v4
-  #       with:
-  #         node-version: '24'
-  #         cache: pnpm
-  #     - run: pnpm install --frozen-lockfile
-  #     - name: 从标签设置发行版本
-  #       env:
-  #         RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
-  #       run: |
-  #         node -e 'const fs = require("node:fs"); const file = "package.json"; const pkg = JSON.parse(fs.readFileSync(file, "utf8")); pkg.version = process.env.RELEASE_TAG.slice(1); fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + "\n");'
-  #     - run: pnpm electron:install
-  #     - run: pnpm icons:generate
-  #     - run: pnpm dist:mac
-  #       env:
-  #         CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-  #     - uses: actions/upload-artifact@v4
-  #       with:
-  #         name: macos-release
-  #         path: release/*.dmg
-  #         if-no-files-found: error
-  #         retention-days: 7
+  # 当前生成未签名 DMG；正式公开分发前应配置 Apple 签名与公证。
+  macos:
+    needs: prepare
+    # macos-26 为 Apple Silicon ARM64 runner，不再构建 Intel 版本。
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6.1.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26'
+          architecture: arm64
+          check-latest: true
+          cache: pnpm
+      - name: 安装锁定依赖
+        run: pnpm install --frozen-lockfile
+      - name: 从标签设置发行版本
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          node -e 'const fs = require("node:fs"); const file = "package.json"; const pkg = JSON.parse(fs.readFileSync(file, "utf8")); pkg.version = process.env.RELEASE_TAG.slice(1); fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + "\n");'
+      - name: 准备 Electron 运行时
+        run: pnpm electron:install
+      - name: 生成应用图标
+        run: pnpm icons:generate
+      - name: 编译 macOS DMG
+        run: pnpm dist:mac
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: 校验并统一发行文件名
+        shell: bash
+        env:
+          RELEASE_ARCH: arm64
+        run: |
+          shopt -s nullglob
+          files=(release/*.dmg)
+          if [[ ${#files[@]} -ne 1 ]] || [[ ! -s "${files[0]}" ]]; then
+            echo '预期生成一个非空的 macOS DMG 文件' >&2
+            exit 1
+          fi
+          mv "${files[0]}" "release/pi-runner-macos-$RELEASE_ARCH.dmg"
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          compression-level: 0
+          name: macos-release-arm64
+          path: release/pi-runner-macos-arm64.dmg
+          if-no-files-found: error
+          retention-days: 7
 
   publish:
-    needs: [prepare, windows]
+    needs: [prepare, windows, macos]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ needs.prepare.outputs.sha }}
           fetch-depth: 0
@@ -178,9 +198,13 @@ jobs:
               printf 'Full Changelog: https://github.com/%s/commits/%s\n' "$GH_REPO" "$RELEASE_TAG"
             fi
           } > .tmp/release-notes/notes.md
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8.0.2
         with:
           name: windows-release
+          path: release
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: macos-release-arm64
           path: release
       - name: 创建 Release 并更新下载附件
         shell: bash
@@ -192,6 +216,7 @@ jobs:
         run: |
           test -s release/pi-runner-setup.exe
           test -s release/pi-runner-portable.zip
+          test -s release/pi-runner-macos-arm64.dmg
           flags=()
           if [[ "$PRERELEASE" == true ]]; then
             flags+=(--prerelease --latest=false)
@@ -203,9 +228,10 @@ jobs:
           else
             gh release create "$RELEASE_TAG" --verify-tag --title "Pi Runner $RELEASE_TAG" --notes-file .tmp/release-notes/notes.md "${flags[@]}"
           fi
-          gh release upload "$RELEASE_TAG" release/pi-runner-setup.exe release/pi-runner-portable.zip --clobber
+          gh release upload "$RELEASE_TAG" release/pi-runner-setup.exe release/pi-runner-portable.zip release/pi-runner-macos-arm64.dmg --clobber
           {
             echo '## 发行下载'
+            echo "- [macOS Apple Silicon DMG](https://github.com/$GH_REPO/releases/download/$RELEASE_TAG/pi-runner-macos-arm64.dmg)"
             echo "- [Windows x64 安装包](https://github.com/$GH_REPO/releases/download/$RELEASE_TAG/pi-runner-setup.exe)"
             echo "- [Windows x64 解压即用 ZIP](https://github.com/$GH_REPO/releases/download/$RELEASE_TAG/pi-runner-portable.zip)"
           } >> "$GITHUB_STEP_SUMMARY"

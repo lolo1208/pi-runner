@@ -155,7 +155,7 @@ function createWindow(): void {
 if (hasSingleInstanceLock) void app.whenReady().then(() => {
   // Tray 必须在 app ready 之后创建；这里在初始化服务前立即建好，启动即显示托盘图标。
   createTray()
-  if (process.platform === 'win32') app.setAppUserModelId('dev.pirunner.desktop')
+  if (process.platform === 'win32') app.setAppUserModelId('com.pirunner.app')
   if (process.platform === 'darwin') app.dock?.setIcon(path.join(iconDirectory, 'icon.png'))
   piRunnerDirectory = storagePaths.workspace
   const cipher = {
