@@ -12,12 +12,13 @@ Pi Runner 是一款本地运行的桌面 AI 编程助手。它让你通过对话
 
 ## 下载发行版
 
-在本仓库的 **Releases** 页面下载 Windows x64 版本：
+在本仓库的 **Releases** 页面下载对应系统的版本：
 
-- `pi-runner-setup.exe`：安装包。
-- `pi-runner-portable.zip`：解压到可写目录后运行 `Pi Runner.exe`，无需安装。
+- `pi-runner-setup.exe`：Windows x64 安装包。
+- `pi-runner-portable.zip`：Windows x64 便携版，解压到可写目录后运行 `Pi Runner.exe`，无需安装。
+- `pi-runner-macos-arm64.dmg`：macOS Apple Silicon（M 系列）版本，打开后将 `Pi Runner.app` 拖入 Applications；不支持 Intel Mac。
 
-Windows 包暂未签名，系统可能提示未知发布者，请确认下载来源。macOS 打包配置已预留，暂不自动构建和发布。
+Windows 包暂未签名，系统可能提示未知发布者，请确认下载来源。macOS 包暂未进行 Developer ID 签名与 Apple 公证，首次打开可能提示“已损坏”或无法验证开发者，处理方法见[macOS 安装与首次启动](docs/user-guide.md#macos-安装与首次启动)。
 
 维护者推送 `v*` 版本标签即可自动发布，构建版本自动取自标签，无需修改 `package.json`，也可在 Actions 中手动指定已有标签，详见[自动发布说明](docs/development-guide.md#github-自动发布)。
 

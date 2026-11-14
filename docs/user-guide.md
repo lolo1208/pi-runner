@@ -1,5 +1,29 @@
 # 使用指南
 
+## macOS 安装与首次启动
+
+当前发布的 `pi-runner-macos-arm64.dmg` 仅支持 Apple Silicon（M 系列），不支持 Intel Mac。
+
+1. 从本仓库的 GitHub Releases 下载 DMG。
+2. 打开 DMG，将 `Pi Runner.app` 拖入 Applications（应用程序）文件夹。
+3. 从 Applications 启动应用。
+
+### 提示“已损坏”或无法验证开发者
+
+当前 macOS 发行包暂未进行 Developer ID 签名与 Apple 公证。从浏览器下载后，macOS Gatekeeper 可能阻止运行，提示“已损坏”或无法验证开发者；这不一定表示文件真的损坏。
+
+**仅当你确认文件来自本仓库的 GitHub Releases，且信任该应用时**，打开 macOS「终端」，执行：
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Pi Runner.app"
+```
+
+执行完成后，重新从 Applications 打开应用。如果安装位置或应用名称不同，请将命令中的路径替换为实际路径，并保留引号。
+
+此命令仅递归移除该应用的下载隔离属性，不会关闭系统 Gatekeeper，也不会为应用补上签名或公证。不要对来源不明的应用执行，不要扩大到整个 Applications 目录，也无需关闭系统安全检查。
+
+如果仍无法启动，请重新从 Releases 下载并确认芯片架构匹配，保留完整报错信息以便排查；此方法不能修复真正损坏的文件或架构不兼容问题。
+
 ## 模型配置
 
 1. 打开「设置 → 模型供应商」，添加供应商并配置密钥或服务地址。
