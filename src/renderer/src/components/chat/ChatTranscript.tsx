@@ -63,7 +63,7 @@ interface ChatTranscriptProps {
   streamedText?: string
   agentStatus?: string
   isBusy?: boolean
-  execution?: { model: string; provider?: ProviderId; startedAt: number; firstMessage: number }
+  execution?: { model: string; provider?: ProviderId; startedAt: number; firstMessage: number; pausedAt?: number }
   hasProfile: boolean
   settingsDisabled?: boolean
   onOpenSettings: () => void

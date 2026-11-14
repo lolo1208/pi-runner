@@ -4,6 +4,8 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { AiReviewBadge } from './AiReviewBadge'
 import { AiReviewReason } from './AiReviewReason'
+import { SyntaxCode } from './SyntaxCode'
+import { highlightCommand } from '../../lib/command-syntax'
 import type { ToolApproval } from '../../../../shared/models'
 
 function operation(approval: ToolApproval) {
@@ -19,7 +21,7 @@ function operation(approval: ToolApproval) {
   if (approval.tool === 'write') return { title: `请求写入 ${name || '文件'}`, path: file, icon: FilePlus2 }
   if (approval.tool === 'download') return { title: `请求下载 ${name || '文件'}`, path: `${String(approval.args.url ?? '')} → ${file}`, icon: FilePlus2 }
   if (['read', 'ls', 'find', 'grep', 'stat'].includes(approval.tool)) return { title: `请求访问 ${name || '文件或目录'}`, path: file || approval.cwd, icon: FileSearch }
-  if (command) return { title: '请求执行终端命令', path: approval.cwd, icon: Terminal }
+  if (command) return { title: '请求执行终端命令', path: command, icon: Terminal }
   return { title: '请求批准操作', path: file || approval.cwd, icon: ShieldQuestion }
 }
 
@@ -30,7 +32,7 @@ export function ToolApprovalCard({ approval, onRespond, onViewDetails, repeat, o
   const respond = (allow: boolean): void => { if (answering) return; setAnswering(true); void onRespond(allow).finally(() => setAnswering(false)) }
   return <section className="tool-approval-card" aria-label="工具操作审批">
     <Icon size={18} aria-hidden="true" />
-    <div className="tool-approval-summary"><strong>{summary.title}<AiReviewBadge show={approval.aiReviewed} /></strong><small title={summary.path}>{summary.path}</small>{approval.aiReviewed && <AiReviewReason reviews={[{ decision: 'ask', reason: approval.aiReviewReason, model: approval.aiReviewModel, provider: approval.aiReviewProvider }]} />}</div>
+    <div className="tool-approval-summary"><strong>{summary.title}<AiReviewBadge show={approval.aiReviewed} /></strong><small title={summary.path}>{Icon === Terminal ? <SyntaxCode code={summary.path} language="shell" inline tokens={highlightCommand(summary.path)} /> : summary.path}</small>{approval.aiReviewed && <AiReviewReason reviews={[{ decision: 'ask', reason: approval.aiReviewReason, model: approval.aiReviewModel, provider: approval.aiReviewProvider }]} />}</div>
     <div className="tool-approval-actions"><Button type="button" variant="ghost" className="tool-approval-details" onClick={onViewDetails}>查看详情</Button>{!approval.mustConfirm && <label className="tool-approval-repeat"><Checkbox checked={repeat} onCheckedChange={value => onRepeatChange(value === true)} /><span>重复不再提醒</span></label>}<Button type="button" variant="outline" disabled={answering} onClick={() => respond(false)}>拒绝</Button><Button type="button" className="tool-approval-approve" disabled={answering} onClick={() => respond(true)}>批准</Button></div>
   </section>
 }

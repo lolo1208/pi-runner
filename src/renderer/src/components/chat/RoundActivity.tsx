@@ -61,23 +61,31 @@ function groupCalls(messages: ChatMessage[]): CallGroup[] {
   return groups
 }
 
-function CallActivity({ group, executing = false, status }: { group: CallGroup; executing?: boolean; status?: string }): React.JSX.Element {
+function CallActivity({ group, executing = false, status, pausedAt }: { group: CallGroup; executing?: boolean; status?: string; pausedAt?: number }): React.JSX.Element {
   const [open, setOpen] = useTranscriptState('call-open', false)
   const activeIndex = executing ? group.start + group.messages.length - 1 : undefined
   // 执行中的调用尚无耗时记录，从成为当前调用起本地计时，避免显示上一次调用的耗时。
-  const startedRef = useRef<number | undefined>(undefined)
-  const [now, setNow] = useState(() => performance.now())
+  const accumulatedRef = useRef(0)
+  const [runningMs, setRunningMs] = useState<number | undefined>(undefined)
   useEffect(() => {
-    if (!executing) { startedRef.current = undefined; return }
-    startedRef.current = performance.now()
-    setNow(performance.now())
-    const timer = setInterval(() => setNow(performance.now()), 1000)
-    return () => clearInterval(timer)
-  }, [activeIndex])
+    accumulatedRef.current = 0
+    setRunningMs(executing ? 0 : undefined)
+  }, [activeIndex, executing])
+  useEffect(() => {
+    if (!executing || pausedAt !== undefined) return
+    const started = performance.now()
+    const timer = setInterval(() => setRunningMs(accumulatedRef.current + performance.now() - started), 1000)
+    return () => {
+      clearInterval(timer)
+      accumulatedRef.current += Math.max(0, (pausedAt ?? performance.now()) - started)
+    }
+  }, [activeIndex, executing, pausedAt])
+  useEffect(() => {
+    if (executing && pausedAt !== undefined) setRunningMs(accumulatedRef.current)
+  }, [executing, pausedAt, activeIndex])
   const completed = executing ? group.messages.slice(0, -1) : group.messages
   const recordedMs = completed.reduce((sum, message) => sum + (message.call?.elapsedMs ?? 0), 0)
   const missingDuration = completed.some(message => message.call?.elapsedMs === undefined)
-  const runningMs = executing && startedRef.current !== undefined ? now - startedRef.current : undefined
   const duration = `${executing ? '已耗时' : '耗时'} ${missingDuration ? '未记录' : formatExecutionDuration(recordedMs + (runningMs ?? 0))}`
   const currentStatus = status || '正在等待模型回复…'
   return <div className="chat-call">
@@ -94,7 +102,7 @@ function CallActivity({ group, executing = false, status }: { group: CallGroup; 
   </div>
 }
 
-export function RoundActivity({ project, messages, execution, startedAt, status, busy = false, initiallyOpen = true }: { project?: string | null; messages: ChatMessage[]; execution?: ChatExecution; startedAt?: number; status?: string; busy?: boolean; initiallyOpen?: boolean }): React.JSX.Element {
+export function RoundActivity({ project, messages, execution, startedAt, status, busy = false, initiallyOpen = true }: { project?: string | null; messages: ChatMessage[]; execution?: ChatExecution & { pausedAt?: number }; startedAt?: number; status?: string; busy?: boolean; initiallyOpen?: boolean }): React.JSX.Element {
   const [disclosure, setDisclosure] = useTranscriptState('round-open', { busy, open: busy && initiallyOpen })
   const open = disclosure.busy === busy ? disclosure.open : busy && initiallyOpen
   useEffect(() => {
@@ -112,7 +120,7 @@ export function RoundActivity({ project, messages, execution, startedAt, status,
       <div className="chat-work-item" role="status" aria-live="polite"><div className="chat-work-progress"><LoaderCircle size={14} className="chat-execution-spinner" aria-hidden="true" /><span>{status || '正在等待模型回复…'}</span></div></div>
     </div>}
     {groups.length > 0 && <div className="chat-round-calls"><TranscriptPagedList preferLatest={busy} items={groups} label="调用记录">{page => page.map(group => { const message = group.messages.at(-1)!; const index = group.start + group.messages.length - 1; return <TranscriptScope id={`call:${group.start}`} key={group.start}><div className="chat-call-section">
-      <CallActivity group={group} executing={busy && index === messages.length - 1} status={status} />
+      <CallActivity group={group} executing={busy && index === messages.length - 1} status={status} pausedAt={execution?.pausedAt} />
       {(!hasPlanCards || busy) && message.content && (busy || index < messages.length - 1) && <ChatMarkdown project={project} content={message.content} snapshotId={message.codeSnapshotId} />}
     </div></TranscriptScope> })}</TranscriptPagedList></div>}
     </AnimatedDisclosure>

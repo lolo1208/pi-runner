@@ -19,7 +19,7 @@
 .plan-dialog-actions { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 18px; }
 .plan-dialog-actions > div { display: flex; align-items: center; min-width: 0; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .plan-dialog-actions .plan-cancel:hover:not(:disabled) { background: var(--error-bg); color: var(--error); border-color: var(--error); }
-.plan-dialog-actions .plan-revise { margin-right: 8px; }
+.plan-dialog-actions .plan-revise { margin-right: 20px; }
 .plan-dialog-actions .model-picker { min-width: 0; max-width: min(280px, 100%); }
 .plan-dialog-actions .model-picker .model-price-name-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .plan-dialog-actions .plan-submit-answer:not(:disabled),
@@ -29,6 +29,9 @@
 .plan-dialog-actions .plan-revise:hover:not(:disabled),
 .plan-dialog-actions .plan-approve:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 88%, var(--text)); }
 .plan-review-dialog { width: min(1000px, calc(100vw - 32px)); }
+.plan-dialog .modal-title { padding-right: calc(64rem / 14); }
+.plan-dialog .plan-minimize { right: calc(22px + 28rem / 14); }
+.plan-dialog .plan-minimize:focus-visible { outline: 2px solid var(--accent) !important; outline-offset: 2px; }
 .plan-review-body { display: flex; min-height: 0; overflow-y: auto; flex: 1; }
 .plan-contents { flex: 0 0 180px; padding: 24px 20px; border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 16px; font-size: calc(12rem / 14); }
 .plan-contents > span { color: var(--muted); }
@@ -77,6 +80,8 @@
 .plan-review-footer label { display: block; font-size: calc(12rem / 14); margin-bottom: 8px; }
 .plan-review-footer textarea { min-height: calc(64rem / 14); max-height: calc(120rem / 14); }
 .plan-waiting { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; border: 1px solid var(--border); border-radius: 10px; margin-bottom: 12px; background: var(--surface); }
+.plan-waiting .plan-review-trigger { background: var(--accent); color: var(--accent-foreground); border-color: transparent; }
+.plan-waiting .plan-review-trigger:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 88%, var(--text)); }
 .plan-progress { justify-content: flex-start; }
 .plan-round-results { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .plan-result-card { min-width: 0; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); overflow-wrap: anywhere; }

@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react'
-import { Check, ListTodo } from 'lucide-react'
+import { Check, ListTodo, Minus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Modal } from '@/components/ui/modal'
 import { Textarea } from '@/components/ui/textarea'
@@ -9,7 +9,7 @@ import { isCustomPlanOption } from '../../../../shared/models'
 
 import { PlanContent, parsePlan } from './PlanContent'
 
-export function PlanDialog({ interaction, onRespond, onDismiss, onCancel, modelPicker, modelSettingsBusy = false }: { modelSettingsBusy?: boolean; modelPicker?: (disabled: boolean) => ReactNode; interaction: PlanInteraction; onRespond(response: PlanResponse): Promise<void>; onDismiss(): void; onCancel(): void }): React.JSX.Element {
+export function PlanDialog({ interaction, open = true, onRespond, onDismiss, onCancel, modelPicker, modelSettingsBusy = false }: { open?: boolean; modelSettingsBusy?: boolean; modelPicker?: (disabled: boolean) => ReactNode; interaction: PlanInteraction; onRespond(response: PlanResponse): Promise<void>; onDismiss(): void; onCancel(): void }): React.JSX.Element {
   const [step, setStep] = useState(0)
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [custom, setCustom] = useState<Record<string, string>>({})
@@ -28,7 +28,7 @@ export function PlanDialog({ interaction, onRespond, onDismiss, onCancel, modelP
     finally { setSubmitting(false) }
   }
   const { tokens, sections } = useMemo(() => parsePlan(interaction.content ?? ''), [interaction.content])
-  return <Modal open onOpenChange={open => { if (!open) onDismiss() }} closeDisabled={submitting} closeLabel="收起计划对话框" title={interaction.kind === 'questions' ? '确认需求' : '审阅计划'} contentClassName={`plan-dialog ${interaction.kind === 'review' ? 'plan-review-dialog' : ''}`}>
+  return <Modal open={open} onOpenChange={open => { if (!open) onDismiss() }} closeExtra={<Button type="button" variant="ghost" className="modal-close plan-minimize" aria-label={interaction.kind === 'questions' ? '最小化确认需求' : '最小化审阅计划'} title={interaction.kind === 'questions' ? '最小化确认需求' : '最小化审阅计划'} disabled={submitting} onClick={onDismiss}><Minus size={16} aria-hidden="true" /></Button>} closeDisabled={submitting} closeLabel="收起计划对话框" title={interaction.kind === 'questions' ? '确认需求' : '审阅计划'} contentClassName={`plan-dialog ${interaction.kind === 'review' ? 'plan-review-dialog' : ''}`}>
     {interaction.kind === 'questions' && question ? <div className="plan-question-body">
       <div className="plan-question-meta"><h2 id="plan-question-title">{question.header}</h2><span>{step + 1}/{questions.length}</span></div>
       <p id="plan-question-description" className="plan-question-description">{question.question}</p>
@@ -52,7 +52,7 @@ export function PlanDialog({ interaction, onRespond, onDismiss, onCancel, modelP
         <label htmlFor="plan-feedback">修改意见</label>
         <Textarea id="plan-feedback" placeholder="告诉助手应该如何调整计划…" value={feedback} maxLength={8000} disabled={submitting} onChange={event => setFeedback(event.target.value)} />
         {error && <p className="error" role="alert">{error}</p>}
-        <footer className="plan-dialog-actions"><Button className="plan-cancel" variant="ghost" onClick={onCancel} disabled={submitting}>停止计划</Button><div><Button className="plan-revise" variant="outline" disabled={!feedback.trim() || submitting} onClick={() => { void submit({ decision: 'revise', feedback }) }}>修改计划</Button>{modelPicker?.(submitting)}<Button className="plan-approve" disabled={submitting || modelSettingsBusy || !!feedback.trim()} onClick={() => { void submit({ decision: 'approve' }) }}><Check size={15} />批准计划并开始执行</Button></div></footer>
+        <footer className="plan-dialog-actions"><Button className="plan-cancel" variant="ghost" onClick={onCancel} disabled={submitting}>停止计划</Button><div><Button className="plan-revise" variant="outline" disabled={!feedback.trim() || submitting} onClick={() => { void submit({ decision: 'revise', feedback }) }}>修改计划</Button>{modelPicker?.(submitting || !!feedback.trim())}<Button className="plan-approve" disabled={submitting || modelSettingsBusy || !!feedback.trim()} onClick={() => { void submit({ decision: 'approve' }) }}><Check size={15} />批准计划并开始执行</Button></div></footer>
       </div>
     </>}
   </Modal>

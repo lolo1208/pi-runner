@@ -137,10 +137,23 @@ export function piProjectTools(root: string, beforeMutation: () => Promise<void>
         const statements = literalCommandSequence(command)
         if (statements) {
           let trusted = true
-          for (const statement of statements) {
+          for (const [index, statement] of statements.entries()) {
+            const words = literalCommand(statement)
+            const changesDirectory = /^(?:cd|chdir|set-location|sl)$/i.test(words?.[0] ?? '')
+            if (statements.length > 1 && changesDirectory) {
+              // 只接受首段显式切回当前审核目录；不改变后续命令的权限范围。
+              // 仅限 PowerShell 的两个位置参数，拒绝选项、相对路径和通配符。
+              const directory = words?.[1]
+              if (tool.name !== 'powershell' || index !== 0 || words?.length !== 2
+                || !directory || !path.isAbsolute(directory) || /[*?\[\]`$%!]/.test(directory)
+                || path.resolve(directory).toLowerCase() !== path.resolve(root).toLowerCase()
+                || process.platform !== 'win32') { trusted = false; break }
+              await validateOrdinaryPath(directory)
+              await protectPath(directory)
+              if (await canonicalToolPath(directory) !== await canonicalToolPath(root)) { trusted = false; break }
+              continue
+            }
             if (!await trustedStatement(statement)) { trusted = false; break }
-            // 组合执行时不允许切换目录，避免改变后续命令的审核范围。
-            if (statements.length > 1 && /^(?:cd|chdir|set-location|sl)$/i.test(literalCommand(statement)?.[0] ?? '')) { trusted = false; break }
           }
           if (trusted) risk = { risk: 'safe' }
         }

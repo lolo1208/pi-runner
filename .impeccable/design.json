@@ -6,7 +6,8 @@
     "shadows": [
       { "name": "modal", "value": "0 18px 55px #0003", "purpose": "普通模态框抬升。" },
       { "name": "alert", "value": "0 18px 48px #0003", "purpose": "警示确认框。" },
-      { "name": "tool-panel", "value": "-10px 0 35px #0002", "purpose": "窄屏右侧工具浮层。" }
+      { "name": "tool-panel", "value": "-10px 0 35px #0002", "purpose": "窄屏右侧工具浮层。" },
+      { "name": "permission-menu", "value": "0 2px 8px #0002", "purpose": "权限模式菜单；Tooltip 本身不声明阴影。" }
     ],
     "motion": [
       { "name": "button-colors", "value": "background-color .15s, color .15s, border-color .15s", "purpose": "按钮状态变化。" },
@@ -17,7 +18,8 @@
       { "name": "wide-settings", "value": "1600px" },
       { "name": "compact-layout", "value": "1100px" },
       { "name": "floating-tools", "value": "850px" },
-      { "name": "narrow", "value": "600px" }
+      { "name": "narrow", "value": "600px" },
+      { "name": "approval-wrap", "value": "700px" }
     ]
   },
   "components": [
@@ -43,7 +45,7 @@
       "name": "文本输入", "kind": "input", "refersTo": "input",
       "description": "表单文字输入，焦点使用强调色边框和轻光环。",
       "html": "<input class=\"ds-input\" aria-label=\"项目名称\" placeholder=\"项目名称\" />",
-      "css": ".ds-input{font:.875rem var(--ui-font-family,sans-serif);height:2.25rem;width:100%;min-width:0;padding:.25rem .75rem;border:1px solid var(--border,#dfe1da);border-radius:.375rem;background:var(--surface,#fdfdfa);color:var(--text,#252728);box-shadow:0 1px 2px #0000000d;transition:border-color .15s}.ds-input::placeholder{color:var(--muted,#737772)}.ds-input:focus-visible{outline:none;border-color:var(--accent,#3979dc);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent,#3979dc) 20%,transparent)}.ds-input:disabled{opacity:.5;cursor:not-allowed}"
+      "css": ".ds-input{font:.875rem var(--ui-font-family,sans-serif);height:2.25rem;width:100%;min-width:0;padding:.25rem .75rem;border:1px solid var(--border,#dfe1da);border-radius:calc(var(--radius,.625rem) - 2px);background:var(--surface,#fdfdfa);color:var(--text,#252728);box-shadow:0 1px 2px #0000000d;transition:border-color .15s}.ds-input::placeholder{color:var(--muted,#737772)}.ds-input:focus-visible{outline:none;border-color:var(--accent,#3979dc);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent,#3979dc) 20%,transparent)}.ds-input:disabled{opacity:.5;cursor:not-allowed}"
     },
     {
       "name": "当前会话", "kind": "nav", "refersTo": "nav-selected",

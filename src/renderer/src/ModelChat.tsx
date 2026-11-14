@@ -221,7 +221,7 @@ function ModelChat({ initialNativeHistory, onHistoryRestored, onRetainChange, no
     return () => clearTimeout(timer)
   }, [requestId, outputSpeed])
   const [agentStatus, setAgentStatus] = useState('')
-  const [execution, setExecution] = useState<{ model: string; provider: ProviderId; startedAt: number; firstMessage: number }>()
+  const [execution, setExecution] = useState<{ model: string; provider: ProviderId; startedAt: number; firstMessage: number; pausedAt?: number }>()
   const activeRequest = useRef<string | null>(null)
   const transcriptRef = useRef(messages)
   const nativeHistory = useRef(initialNativeHistory ?? false)
@@ -256,8 +256,16 @@ function ModelChat({ initialNativeHistory, onHistoryRestored, onRetainChange, no
     if (event.type === 'approval' && event.approval?.tool === 'full-access') { setFullConfirmation({ requestId: event.requestId, approval: event.approval }); return }
     if (event.type === 'approval-end') setFullConfirmation(previous => previous?.approval.id === event.approvalId ? null : previous)
     if (event.requestId !== activeRequest.current) return
-    if (event.type === 'plan-interaction' && event.interaction) { setPlanProgress(''); setInteraction(event.interaction); setInteractionOpen(true) }
-    if (event.type === 'plan-interaction-end') setInteraction(previous => previous?.id === event.interactionId ? null : previous)
+    if (event.type === 'plan-interaction' && event.interaction) {
+      const pausedAt = performance.now()
+      setExecution(previous => previous && previous.pausedAt === undefined ? { ...previous, pausedAt } : previous)
+      setPlanProgress(''); setInteraction(event.interaction); setInteractionOpen(true)
+    }
+    if (event.type === 'plan-interaction-end') {
+      const resumedAt = performance.now()
+      setExecution(previous => previous?.pausedAt !== undefined ? { ...previous, startedAt: previous.startedAt + resumedAt - previous.pausedAt, pausedAt: undefined } : previous)
+      setInteraction(previous => previous?.id === event.interactionId ? null : previous)
+    }
     if (event.type === 'intent-mode' && event.intentMode) { setPlanProgress(''); changeIntent(event.intentMode) }
     if (event.type === 'approval' && event.approval) {
       const approval = event.approval
@@ -472,7 +480,7 @@ function ModelChat({ initialNativeHistory, onHistoryRestored, onRetainChange, no
     } finally { deletionRunning.current = false; setDeletingRound(false); onBusyChange(false, true) }
   }, [messages, conversationId, historyReady, snapshots, onMessagesChange, onCompactionChange, onSnapshotsChange, onBusyChange])
   return <section className="model-chat" aria-label="模型对话">
-    {active && interaction && interactionOpen && <PlanDialog key={interaction.id} interaction={interaction} modelSettingsBusy={thinkingSaving} modelPicker={disabled => <ConversationModelPicker profile={profile} profiles={availableProfiles} providers={providers} disabled={disabled || settingsDisabled || stopping} onSelect={id => { setSelectedModelId(id); onModelChange?.(id) }} onThinkingChange={changeThinking} onOpenSettings={onOpenSettings} />} onDismiss={() => setInteractionOpen(false)} onCancel={() => {
+    {interaction && <PlanDialog key={interaction.id} open={active && interactionOpen} interaction={interaction} modelSettingsBusy={thinkingSaving} modelPicker={disabled => <ConversationModelPicker profile={profile} profiles={availableProfiles} providers={providers} disabled={disabled || settingsDisabled || stopping} onSelect={id => { setSelectedModelId(id); onModelChange?.(id) }} onThinkingChange={changeThinking} onOpenSettings={onOpenSettings} />} onDismiss={() => setInteractionOpen(false)} onCancel={() => {
       void stopRequest().catch(() => setError('取消计划失败，请重试'))
     }} onRespond={async response => {
       if (!requestId || !conversationId) throw new Error('计划交互已失效')
@@ -489,7 +497,7 @@ function ModelChat({ initialNativeHistory, onHistoryRestored, onRetainChange, no
     <ChatTranscript onDeleteRound={deleteRound} deletingRound={deletingRound || !historyReady} notificationNavigationRequest={historyReady ? notificationNavigationRequest : 0} project={project} active={active} scrollToLatestRequest={scrollToLatestRequest} snapshots={snapshots} messages={messages} pendingMessage={pending?.message ?? null} streamedText={streamedText} agentStatus={stopping ? '正在停止任务…' : agentStatus} isBusy={Boolean(requestId)} execution={execution} hasProfile={Boolean(profile)} settingsDisabled={settingsDisabled} onOpenSettings={onOpenSettings} />
     <div className="composer-wrap" hidden={!active}>
       {requestId && !interaction && planProgress && <div className="plan-waiting plan-progress" role="status"><LoaderCircle size={18} className="plan-progress-spinner" aria-hidden="true" /><span>{planProgress}</span></div>}
-      {interaction && <div className="plan-waiting"><span>{interaction.kind === 'questions' ? '计划正在等待你的回答' : '计划已准备好，等待你的批准'}</span><Button variant="outline" onClick={() => setInteractionOpen(true)}>{interaction.kind === 'questions' ? '回答问题' : '审阅计划'}</Button></div>}
+      {interaction && <div className="plan-waiting"><span>{interaction.kind === 'questions' ? '计划正在等待你的答复' : '计划已准备好，等待你的批准'}</span><Button variant="outline" className="plan-review-trigger" onClick={() => setInteractionOpen(true)}>{interaction.kind === 'questions' ? '确认需求' : '审阅计划'}</Button></div>}
       {autoApproval !== null && <div className="plan-waiting"><span>本次对话后续审批将自动{autoApproval ? '批准' : '拒绝'}，不再提醒</span><Button variant="outline" onClick={() => { autoDecision.current = null; setAutoApproval(null); setApprovalRepeat(false) }}>恢复提醒</Button></div>}
       <PagedList items={approvals} pageSize={10} label="待审批请求">{page => page.map(approval => <ToolApprovalCard key={approval.id} approval={approval} repeat={approvalRepeat} onRepeatChange={setApprovalRepeat} onViewDetails={() => { if (isCommandApproval(approval)) setCommandApproval(approval); else setApprovalDetailsOpen(true) }} onRespond={async allow => {
         if (!requestId || !conversationId) return

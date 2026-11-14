@@ -70,6 +70,7 @@ typography:
 rounded:
   icon: "6px"
   control: "8px"
+  input: "calc(0.625rem - 2px)"
   approval: "10px"
   alert: "12px"
   card: "13px"
@@ -109,6 +110,7 @@ components:
   input:
     backgroundColor: "{colors.surface}"
     textColor: "{colors.text}"
+    rounded: "{rounded.input}"
     height: "2.25rem"
   nav-selected:
     backgroundColor: "{colors.selected}"
@@ -140,7 +142,7 @@ components:
 - 紧凑控件、胶囊导航与柔和容器。
 - 主体平面化，弹窗与浮动面板使用阴影。
 
-本文记录现有实现，不代表已完成视觉或无障碍验收。主要依据：`src/renderer/src/styles/base.css`、`application-layout.css`、`responsive.css`、`modal.css`、`settings.css`、`conversation.css`，以及 `components/ui/button.tsx`、`input.tsx`。未运行应用或核验截图；不将局部样式归纳为未经证实的全局规则。
+本文记录现有实现，不代表已完成视觉或无障碍验收。主要依据：`src/renderer/src/styles/base.css`、`application-layout.css`、`responsive.css`、`modal.css`、`settings.css`、`conversation.css`，以及 `components/ui/button.tsx`、`input.tsx`。本次刷新核对了上述基础样式、布局、响应式规则及组件，并补查 `styles.css` 与 `components/ui/tooltip.tsx`。未运行应用或核验截图；不将局部样式归纳为未经证实的全局规则。
 
 ## Colors
 
@@ -186,14 +188,15 @@ components:
 
 - 大于等于 1600px：设置区左右留白提高至 10%。
 - 小于等于 1100px：设置区内边距收为 40px 30px，调整工具列约束。
-- 小于等于 850px：工具面板改为右侧浮层，宽 `min(420px, 100%)`；设置行纵向排列。
-- 小于等于 600px：侧栏收为 `clamp(160px, 28vw, 184px)`，仍保留两栏；设置导航改为顶部可换行布局，表单改单列。
+- 小于等于 850px：工具面板改为右侧浮层，宽 `min(420px, 100%)`；设置行纵向排列，设置区内边距收为 32px 24px。
+- 小于等于 600px：侧栏收为 `clamp(160px, 28vw, 184px)`，仍保留两栏；设置导航改为顶部可换行布局，表单改单列，设置区内边距为 16px、卡片内边距为 14px。用户气泡最大宽度放宽为 92%，输入区模式文字隐藏。
+- 小于等于 700px：工具审批卡允许换行，操作区靠右；这是组件局部断点，不是全局布局断点。
 
 间距索引是复用值摘要，不是强制单一网格；现有容器仍使用 6px、10px、14px 等场景值。
 
 ## Elevation & Depth
 
-主体以底色层次和一像素边框分区，不普遍添加卡片阴影。普通模态框使用 `0 18px 55px #0003`，警示确认框使用 `0 18px 48px #0003`，窄屏工具浮层使用 `-10px 0 35px #0002`。菜单与提示使用较小阴影；输入框保留组件自带的轻阴影。
+主体以底色层次和一像素边框分区，不普遍添加卡片阴影。普通模态框使用 `0 18px 55px #0003`，警示确认框使用 `0 18px 48px #0003`，窄屏工具浮层使用 `-10px 0 35px #0002`。权限菜单使用 `0 2px 8px #0002`；当前 shadcn Tooltip 本身未声明阴影。输入框保留组件自带的轻阴影。
 
 普通遮罩为 `#0007`，叠加 3px 模糊；警示确认遮罩为 `#0008`。两者层级不同，不以增加任意 z-index 解决叠层问题。
 
@@ -203,7 +206,7 @@ components:
 
 控件以柔和圆角为主，图标按钮、审批卡、警示框、设置卡和模态框使用分级圆角，见前置索引。任务行是完全胶囊形，设置导航与任务栏操作也采用较大圆角。不要将全部组件统一成同一圆角。
 
-shadcn Input 保留 `rounded-md` 的 Tailwind 默认语义，基础 CSS 中未带 `data-slot` 的输入框另为 control 圆角；两者不是完全相同的实现。图标通常采用轻描边（1.5px）。
+shadcn Input 的 `rounded-md` 由 `styles.css` 的主题映射决定：`--radius-md: calc(var(--radius) - 2px)`，其中 `--radius: 0.625rem`；不是未覆盖的 Tailwind 默认值。基础 CSS 中未带 `data-slot` 的输入框另为 control 圆角；两者不是完全相同的实现。图标通常采用轻描边（1.5px）。
 
 ## Components
 
@@ -237,7 +240,7 @@ shadcn Input 保留 `rounded-md` 的 Tailwind 默认语义，基础 CSS 中未�
 
 普通 modal 居中，宽 `min(520px, calc(100vw - 40px))`，内部滚动，操作靠右；警示确认框更紧凑，宽 `min(420px, 100vw - 32px)`。代码审查与命令审批保留更大专用容器，不套用普通弹窗固定尺寸。
 
-Tooltip 使用深灰底白字、紧凑留白与轻阴影。浮层具体层级以组件源码为准。
+Tooltip 复用基于 Radix 的本地 shadcn/ui 组件，使用深灰底（`#363a3d`）白字、紧凑留白（0.375rem 0.75rem）、小箭头及淡入缩放反馈，不额外添加阴影；Provider 默认延迟为 0。浮层具体层级以组件源码为准。
 
 ### Conversation
 

@@ -337,6 +337,9 @@ export class PiAgentService {
       }
     }] : []
     const started = performance.now()
+    let planWaitStarted: number | undefined
+    let planWaitMs = 0
+    const executionElapsed = (): number => Math.round((planWaitStarted ?? performance.now()) - started - planWaitMs)
     const project = options?.project ?? undefined
     if (project && !path.isAbsolute(project)) throw new ModelError('项目路径必须是绝对路径')
     const snapshot = project ? await ShadowGitManager.open(project, this.dependencies.dataDirectory) : undefined
@@ -465,6 +468,13 @@ export class PiAgentService {
       status([...actions.map(action => `正在${action}...`), ...waiting].join('；') || modelStatus)
     }
     const waitingFor = (id: string, text: string) => (waiting: boolean): void => {
+      if (id === 'plan-interaction') {
+        if (waiting && planWaitStarted === undefined) planWaitStarted = performance.now()
+        else if (!waiting && planWaitStarted !== undefined) {
+          planWaitMs += performance.now() - planWaitStarted
+          planWaitStarted = undefined
+        }
+      }
       if (waiting) waitingTools.set(id, text)
       else waitingTools.delete(id)
       refreshStatus()
@@ -574,7 +584,7 @@ export class PiAgentService {
       catch { warn(warning) }
     }
     const saveExecution = (roundStatistics?: ChatExecution['roundStatistics']): number => {
-      const elapsedMs = Math.round(performance.now() - started)
+      const elapsedMs = executionElapsed()
       const entryIds = manager.getEntries().filter(entry => !previousEntries.has(entry.id) && entry.type === 'message' && entry.message.role === 'assistant').map(entry => entry.id)
       if (entryIds.length) {
         const existing = manager.getEntries().flatMap(entry => entry.type === 'custom' && entry.customType === 'pi-runner-execution'
@@ -832,7 +842,7 @@ export class PiAgentService {
         text += notice
         publish({ type: 'text', text: notice })
       }
-      let elapsedMs = Math.round(performance.now() - started)
+      let elapsedMs = executionElapsed()
       const totalUsage = { inputTokens: final.usage.input + final.usage.cacheRead + final.usage.cacheWrite, outputTokens: final.usage.output,
         ...(final.usage.cacheRead > 0 || calls.at(-1)?.usageFields?.cacheRead ? { cacheReadTokens: final.usage.cacheRead } : {}), ...(final.usage.cacheWrite > 0 || calls.at(-1)?.usageFields?.cacheWrite ? { cacheWriteTokens: final.usage.cacheWrite } : {}) }
       const aggregateUsage = { ...roundUsage,
